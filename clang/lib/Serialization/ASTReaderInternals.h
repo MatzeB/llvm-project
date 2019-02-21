@@ -252,6 +252,7 @@ public:
   struct internal_key_type {
     off_t Size;
     time_t ModTime;
+    bool IsRelativeModuleDirectory;  // facebook T32246672
     StringRef Filename;
     bool Imported;
   };

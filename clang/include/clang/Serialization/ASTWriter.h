@@ -648,14 +648,15 @@ public:
 
   /// Convert a path from this build process into one that is appropriate
   /// for emission in the module file.
-  bool PreparePathForOutput(SmallVectorImpl<char> &Path);
+  bool PreparePathForOutput(SmallVectorImpl<char> &Path,
+                            bool &IsRelativeModuleDirectory);  // facebook T32246672
 
   /// Add a path to the given record.
   void AddPath(StringRef Path, RecordDataImpl &Record);
 
   /// Emit the current record with the given path as a blob.
-  void EmitRecordWithPath(unsigned Abbrev, RecordDataRef Record,
-                          StringRef Path);
+  void EmitRecordWithPath(unsigned Abbrev, RecordDataImpl &Record,
+                          StringRef Path);  // facebook T32246672
 
   /// Add a version tuple to the given record
   void AddVersionTuple(const VersionTuple &Version, RecordDataImpl &Record);

@@ -3116,6 +3116,9 @@ static bool ParseHeaderSearchArgs(HeaderSearchOptions &Opts, ArgList &Args,
   }
   for (const auto *A : Args.filtered(OPT_fprebuilt_module_path))
     Opts.AddPrebuiltModulePath(A->getValue());
+  // facebook begin T32246672
+  Opts.NoAbsoluteModuleDirectory = Args.hasArg(OPT_fno_absolute_module_directory);
+  // facebook end T32246672
 
   for (const auto *A : Args.filtered(OPT_fmodules_ignore_macro)) {
     StringRef MacroDef = A->getValue();

@@ -1825,6 +1825,7 @@ HeaderFileInfoTrait::internal_key_type
 HeaderFileInfoTrait::GetInternalKey(const FileEntry *FE) {
   internal_key_type ikey = {FE->getSize(),
                             M.HasTimestamps ? FE->getModificationTime() : 0,
+                            /*IsRelativeModuleDirectory*/ false,  // facebook T32246672
                             FE->getName(), /*Imported*/ false};
   return ikey;
 }
@@ -1846,7 +1847,8 @@ bool HeaderFileInfoTrait::EqualKey(internal_key_ref a, internal_key_ref b) {
     }
 
     std::string Resolved = std::string(Key.Filename);
-    Reader.ResolveImportedPath(M, Resolved);
+    if (Key.IsRelativeModuleDirectory)  // facebook T32246672
+      Reader.ResolveImportedPath(M, Resolved);
     if (auto File = FileMgr.getFile(Resolved))
       return *File;
     return nullptr;
@@ -1869,6 +1871,7 @@ HeaderFileInfoTrait::ReadKey(const unsigned char *d, unsigned) {
   internal_key_type ikey;
   ikey.Size = off_t(endian::readNext<uint64_t, little, unaligned>(d));
   ikey.ModTime = time_t(endian::readNext<uint64_t, little, unaligned>(d));
+  ikey.IsRelativeModuleDirectory = bool(endian::readNext<uint8_t, little, unaligned>(d));  // facebook T32246672
   ikey.Filename = (const char *)d;
   ikey.Imported = true;
   return ikey;
@@ -1913,7 +1916,7 @@ HeaderFileInfoTrait::ReadData(internal_key_ref key, const unsigned char *d,
         Reader.getPreprocessor().getHeaderSearchInfo().getModuleMap();
 
     std::string Filename = std::string(key.Filename);
-    if (key.Imported)
+    if (key.Imported && key.IsRelativeModuleDirectory)  // facebook T32246672
       Reader.ResolveImportedPath(M, Filename);
     // FIXME: NameAsWritten
     Module::Header H = {std::string(key.Filename), "",
@@ -2269,8 +2272,10 @@ ASTReader::readInputFileInfo(ModuleFile &F, unsigned ID) {
   R.Overridden = static_cast<bool>(Record[3]);
   R.Transient = static_cast<bool>(Record[4]);
   R.TopLevelModuleMap = static_cast<bool>(Record[5]);
+  bool IsRelativeModuleDirectory = static_cast<bool>(Record[6]);  // facebook T32246672
   R.Filename = std::string(Blob);
-  ResolveImportedPath(F, R.Filename);
+  if (IsRelativeModuleDirectory)  // facebook T32246672
+    ResolveImportedPath(F, R.Filename);
 
   Expected<llvm::BitstreamEntry> MaybeEntry = Cursor.advance();
   if (!MaybeEntry) // FIXME this drops errors on the floor.
@@ -2867,12 +2872,15 @@ ASTReader::ReadControlBlock(ModuleFile &F,
       break;
     }
 
-    case ORIGINAL_FILE:
+    case ORIGINAL_FILE: {
       F.OriginalSourceFileID = FileID::get(Record[0]);
+      bool IsRelativeModuleDirectory = static_cast<bool>(Record[1]);  // facebook T32246672
       F.ActualOriginalSourceFileName = std::string(Blob);
       F.OriginalSourceFileName = F.ActualOriginalSourceFileName;
-      ResolveImportedPath(F, F.OriginalSourceFileName);
+      if (IsRelativeModuleDirectory)  // facebook T32246672
+        ResolveImportedPath(F, F.OriginalSourceFileName);
       break;
+    }
 
     case ORIGINAL_FILE_ID:
       F.OriginalSourceFileID = FileID::get(Record[0]);
@@ -5352,6 +5360,7 @@ bool ASTReader::readASTFileControlBlock(
             ASTFileSignature::size; // Kind, ImportLoc, Size, ModTime, Signature
         std::string ModuleName = ReadString(Record, Idx);
         std::string Filename = ReadString(Record, Idx);
+        Idx += 1; // facebook T32246672, skip IsRelativeModuleDirectory
         ResolveImportedPath(Filename, ModuleDir);
         Listener.visitImport(ModuleName, Filename);
       }
@@ -9021,13 +9030,16 @@ std::string ASTReader::ReadString(const RecordData &Record, unsigned &Idx) {
 std::string ASTReader::ReadPath(ModuleFile &F, const RecordData &Record,
                                 unsigned &Idx) {
   std::string Filename = ReadString(Record, Idx);
-  ResolveImportedPath(F, Filename);
+  bool IsRelativeModuleDirectory = Record[Idx++];  // facebook T32246672
+  if (IsRelativeModuleDirectory)  // facebook T32246672
+    ResolveImportedPath(F, Filename);
   return Filename;
 }
 
 std::string ASTReader::ReadPath(StringRef BaseDirectory,
                                 const RecordData &Record, unsigned &Idx) {
   std::string Filename = ReadString(Record, Idx);
+  Idx++; // facebook T32246672, skip IsRelativeModuleDirectory
   if (!BaseDirectory.empty())
     ResolveImportedPath(Filename, BaseDirectory);
   return Filename;
