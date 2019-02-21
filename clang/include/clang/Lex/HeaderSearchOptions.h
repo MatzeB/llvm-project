@@ -270,6 +270,17 @@ public:
   LLVM_PREFERRED_TYPE(bool)
   unsigned ModulesIncludeVFSUsage : 1;
 
+  /// Whether we should look for a module in module maps only in provided
+  /// header search paths or if we are allowed to look for module maps in
+  /// subdirectories of provided paths too.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned AllowModuleMapSubdirectorySearch : 1;
+
+  // facebook begin T32246672
+  /// Do not absolutify the path to the module directory.
+  unsigned NoAbsoluteModuleDirectory : 1;
+  // facebook end T32246672
+
   HeaderSearchOptions(StringRef _Sysroot = "/")
       : Sysroot(_Sysroot), ModuleFormat("raw"), DisableModuleHash(false),
         ImplicitModuleMaps(false), ModuleMapFileHomeIsCwd(false),
@@ -285,7 +296,12 @@ public:
         ModulesSkipHeaderSearchPaths(false),
         ModulesSkipPragmaDiagnosticMappings(false),
         ModulesPruneNonAffectingModuleMaps(true), ModulesHashContent(false),
-        ModulesStrictContextHash(false), ModulesIncludeVFSUsage(false) {}
+        ModulesStrictContextHash(false), ModulesIncludeVFSUsage(false),
+        AllowModuleMapSubdirectorySearch(true),
+        // facebook begin T32246672
+        NoAbsoluteModuleDirectory(false)
+        // facebook end T32246672
+        {}
 
   /// AddPath - Add the \p Path path to the specified \p Group list.
   void AddPath(StringRef Path, frontend::IncludeDirGroup Group,

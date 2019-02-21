@@ -650,6 +650,7 @@ llvm::Error GlobalModuleIndexBuilder::loadModuleFile(FileEntryRef File) {
         SmallString<128> ImportedFile(Record.begin() + Idx,
                                       Record.begin() + Idx + Length);
         Idx += Length;
+        Idx++;  // Relative facebook T32246672
 
         // Find the imported module file.
         auto DependsOnFile =

@@ -1,0 +1,30 @@
+// facebook T32246672
+// Build two otherwise identical modules in two different directories and
+// verify that using `-fno-absolute-module-directory` makes them identical.
+//
+// RUN: rm -rf %t
+//
+// RUN: mkdir -p %t/p1
+// RUN: cd %t/p1
+// RUN: mkdir -p main other
+// RUN: grep "<AM>" %s > main/a.modulemap
+// RUN: grep "<AH>" %s > main/a.h
+// RUN: grep "<BH>" %s > other/b.h
+// RUN: %clang_cc1 -x c++ -fmodules -emit-module -fno-absolute-module-directory \
+// RUN:   -fmodule-name="a" -Imain -I. -o - main/a.modulemap > a.pcm
+//
+// RUN: mkdir -p %t/p2
+// RUN: cd %t/p2
+// RUN: mkdir -p main other
+// RUN: grep "<AM>" %s > main/a.modulemap
+// RUN: grep "<AH>" %s > main/a.h
+// RUN: grep "<BH>" %s > other/b.h
+// RUN: %clang_cc1 -x c++ -fmodules -emit-module -fno-absolute-module-directory \
+// RUN:   -fmodule-name="a" -Imain -I. -o - main/a.modulemap > a.pcm
+//
+// RUN: diff %t/p1/a.pcm %t/p2/a.pcm
+
+module "a" {                // <AM>
+}                           // <AM>
+
+#include "b.h"              // <AH>

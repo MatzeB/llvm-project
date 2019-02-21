@@ -101,5 +101,6 @@ int success(int x) {
   return foo(FORTYTWO + x + KAP);
 }
 
-// CHECK-IMP-HU2: remark: importing module '.{{/|\\\\?}}hu-02.h' from 'hu-02.pcm'
-// CHECK-IMP-HU2: remark: importing module '.{{/|\\\\?}}hu-01.h' into '.{{/|\\\\?}}hu-02.h' from '[[TDIR]]{{[/\\]}}hu-01.pcm'
+// CHECK-IMP-HU2: remark: importing module './hu-02.h' from 'hu-02.pcm'
+// facebook T32246672
+// CHECK-IMP-HU2: remark: importing module './hu-01.h' into './hu-02.h' from 'hu-01.pcm'

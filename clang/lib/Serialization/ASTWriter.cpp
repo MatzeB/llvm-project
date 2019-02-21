@@ -1118,10 +1118,15 @@ void ASTWriter::WriteBlockInfoBlock() {
 /// to an absolute path and removing nested './'s.
 ///
 /// \return \c true if the path was changed.
-static bool cleanPathForOutput(FileManager &FileMgr,
-                               SmallVectorImpl<char> &Path) {
-  bool Changed = FileMgr.makeAbsolutePath(Path);
-  return Changed | llvm::sys::path::remove_dots(Path);
+static bool
+cleanPathForOutput(FileManager &FileMgr, SmallVectorImpl<char> &Path,
+                   bool MakeAbsolute = true) { // facebook begin T32246672
+  bool Changed = false;
+  if (MakeAbsolute) {
+    Changed |= FileMgr.makeAbsolutePath(Path);
+  }
+  Changed |= llvm::sys::path::remove_dots(Path);
+  return Changed; // facebook end T32246672
 }
 
 /// Adjusts the given filename to only write out the portion of the
@@ -1454,7 +1459,12 @@ void ASTWriter::WriteControlBlock(Preprocessor &PP, ASTContext &Context,
     } else {
       BaseDir.assign(WritingModule->Directory->getName());
     }
-    cleanPathForOutput(Context.getSourceManager().getFileManager(), BaseDir);
+    // facebook begin T32978532
+    cleanPathForOutput(Context.getSourceManager().getFileManager(), BaseDir,
+                       !PP.getHeaderSearchInfo()
+                            .getHeaderSearchOpts()
+                            .NoAbsoluteModuleDirectory);
+    // facebook end T32978532
 
     // If the home of the module is the current working directory, then we
     // want to pick up the cwd of the build process loading the module, not
@@ -1673,6 +1683,8 @@ void ASTWriter::WriteControlBlock(Preprocessor &PP, ASTContext &Context,
     auto FileAbbrev = std::make_shared<BitCodeAbbrev>();
     FileAbbrev->Add(BitCodeAbbrevOp(ORIGINAL_FILE));
     FileAbbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // File ID
+    FileAbbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed,
+                                    1)); // Relative // facebook T32978532
     FileAbbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob)); // File name
     unsigned FileAbbrevCode = Stream.EmitAbbrev(std::move(FileAbbrev));
 
@@ -1737,6 +1749,8 @@ void ASTWriter::WriteInputFiles(SourceManager &SourceMgr,
   IFAbbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // Top-level
   IFAbbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1)); // Module map
   IFAbbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 16)); // Name as req. len
+  IFAbbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed,
+                                1)); // Relative // facebook T32978532
   IFAbbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob)); // Name as req. + name
   unsigned IFAbbrevCode = Stream.EmitAbbrev(std::move(IFAbbrev));
 
@@ -1821,8 +1835,11 @@ void ASTWriter::WriteInputFiles(SourceManager &SourceMgr,
       SmallString<128> NameAsRequested = Entry.File.getNameAsRequested();
       SmallString<128> Name = Entry.File.getName();
 
-      PreparePathForOutput(NameAsRequested);
-      PreparePathForOutput(Name);
+      // facebook begin T32246672
+      bool IsRelativeModuleDirectory = false;
+      PreparePathForOutput(NameAsRequested, IsRelativeModuleDirectory);
+      PreparePathForOutput(Name, IsRelativeModuleDirectory);
+      // facebook end T32246672
 
       if (Name == NameAsRequested)
         Name.clear();
@@ -1836,7 +1853,8 @@ void ASTWriter::WriteInputFiles(SourceManager &SourceMgr,
           Entry.IsTransient,
           Entry.IsTopLevel,
           Entry.IsModuleMap,
-          NameAsRequested.size()};
+          NameAsRequested.size(),
+          IsRelativeModuleDirectory}; // facebook T32246672
 
       Stream.EmitRecordWithBlob(IFAbbrevCode, Record,
                                 (NameAsRequested + Name).str());
@@ -1962,6 +1980,7 @@ namespace {
       StringRef Filename;
       off_t Size;
       time_t ModTime;
+      bool IsRelativeModuleDirectory; // facebook T32246672
     };
     using key_type_ref = const key_type &;
 
@@ -1997,7 +2016,8 @@ namespace {
 
     std::pair<unsigned, unsigned>
     EmitKeyDataLength(raw_ostream& Out, key_type_ref key, data_type_ref Data) {
-      unsigned KeyLen = key.Filename.size() + 1 + 8 + 8;
+      unsigned KeyLen =
+          key.Filename.size() + 1 + 8 + 8 + 1; // facebook T32246672
       unsigned DataLen = 1 + sizeof(IdentifierID) + 4;
       for (auto ModInfo : Data.KnownHeaders)
         if (Writer.getLocalOrImportedSubmoduleID(ModInfo.getModule()))
@@ -2015,6 +2035,10 @@ namespace {
       KeyLen -= 8;
       LE.write<uint64_t>(key.ModTime);
       KeyLen -= 8;
+      // facebook begin T32246672
+      LE.write<uint8_t>(key.IsRelativeModuleDirectory);
+      KeyLen -= 1;
+      // facebook end T32246672
       Out.write(key.Filename.data(), KeyLen);
     }
 
@@ -2121,13 +2145,18 @@ void ASTWriter::WriteHeaderSearch(const HeaderSearch &HS) {
         // Form the effective relative pathname for the file.
         SmallString<128> Filename(M->Directory->getName());
         llvm::sys::path::append(Filename, U.FileName);
-        PreparePathForOutput(Filename);
+        // facebook begin T32246672
+        bool IsRelativeModuleDirectory = false;
+        PreparePathForOutput(Filename, IsRelativeModuleDirectory);
+        // facebook end T32246672
 
         StringRef FilenameDup = strdup(Filename.c_str());
         SavedStrings.push_back(FilenameDup.data());
 
         HeaderFileInfoTrait::key_type Key = {
-            FilenameDup, *U.Size, IncludeTimestamps ? *U.ModTime : 0};
+            FilenameDup, *U.Size, IncludeTimestamps ? *U.ModTime : 0,
+            IsRelativeModuleDirectory, // facebook T32246672
+        };
         HeaderFileInfoTrait::data_type Data = {
             Empty, false, {}, {M, ModuleMap::headerKindToRole(U.Kind)}};
         // FIXME: Deal with cases where there are multiple unresolved header
@@ -2162,7 +2191,10 @@ void ASTWriter::WriteHeaderSearch(const HeaderSearch &HS) {
     // Massage the file path into an appropriate form.
     StringRef Filename = File->getName();
     SmallString<128> FilenameTmp(Filename);
-    if (PreparePathForOutput(FilenameTmp)) {
+    // facebook begin T32246672
+    bool IsRelativeModuleDirectory = false;
+    if (PreparePathForOutput(FilenameTmp, IsRelativeModuleDirectory)) {
+      // facebook end T32246672
       // If we performed any translation on the file name at all, we need to
       // save this string, since the generator will refer to it later.
       Filename = StringRef(strdup(FilenameTmp.c_str()));
@@ -2172,7 +2204,8 @@ void ASTWriter::WriteHeaderSearch(const HeaderSearch &HS) {
     bool Included = PP->alreadyIncluded(*File);
 
     HeaderFileInfoTrait::key_type Key = {
-      Filename, File->getSize(), getTimestampForOutput(*File)
+      Filename, File->getSize(), getTimestampForOutput(*File),
+      IsRelativeModuleDirectory, // facebook T32246672
     };
     HeaderFileInfoTrait::data_type Data = {
       *HFI, Included, HS.getModuleMap().findResolvedModulesForHeader(*File), {}
@@ -3074,7 +3107,13 @@ void ASTWriter::WriteSubmodules(Module *WritingModule) {
       RecordData::value_type Record[] = {SUBMODULE_TOPHEADER};
       for (FileEntryRef H : Mod->getTopHeaders(PP->getFileManager())) {
         SmallString<128> HeaderName(H.getName());
-        PreparePathForOutput(HeaderName);
+        // facebook begin T32978532
+        bool IsRelativeModuleDirectory = false;
+        PreparePathForOutput(HeaderName, IsRelativeModuleDirectory);
+        // TODO(matthiasb): Did a naive autorebase / merge here;
+        // Result in `IsRelativeModuleDirectory` is ignored, do we have
+        // to do something with it in this context?
+        // facebook end T32978532
         Stream.EmitRecordWithBlob(TopHeaderAbbrev, Record, HeaderName);
       }
     }
@@ -4754,7 +4793,9 @@ void ASTWriter::AddString(StringRef Str, RecordDataImpl &Record) {
   Record.insert(Record.end(), Str.begin(), Str.end());
 }
 
-bool ASTWriter::PreparePathForOutput(SmallVectorImpl<char> &Path) {
+bool ASTWriter::PreparePathForOutput(
+    SmallVectorImpl<char> &Path,
+    bool &IsRelativeModuleDirectory) { // facebook T32246672
   assert(Context && "should have context when outputting path");
 
   // Leave special file names as they are.
@@ -4762,8 +4803,9 @@ bool ASTWriter::PreparePathForOutput(SmallVectorImpl<char> &Path) {
   if (PathStr == "<built-in>" || PathStr == "<command line>")
     return false;
 
-  bool Changed =
-      cleanPathForOutput(Context->getSourceManager().getFileManager(), Path);
+  bool Changed = cleanPathForOutput(
+      Context->getSourceManager().getFileManager(), Path,
+      llvm::sys::path::is_absolute(BaseDirectory)); // facebook T32246672
 
   // Remove a prefix to make the path relative, if relevant.
   const char *PathBegin = Path.data();
@@ -4772,21 +4814,34 @@ bool ASTWriter::PreparePathForOutput(SmallVectorImpl<char> &Path) {
   if (PathPtr != PathBegin) {
     Path.erase(Path.begin(), Path.begin() + (PathPtr - PathBegin));
     Changed = true;
+    // facebook begin T32246672
+    IsRelativeModuleDirectory = true;
+  } else {
+    IsRelativeModuleDirectory = false;
   }
+  // facebook end T32246672
 
   return Changed;
 }
 
 void ASTWriter::AddPath(StringRef Path, RecordDataImpl &Record) {
   SmallString<128> FilePath(Path);
-  PreparePathForOutput(FilePath);
+  // facebook begin T32246672
+  bool IsRelativeModuleDirectory = false;
+  PreparePathForOutput(FilePath, IsRelativeModuleDirectory);
   AddString(FilePath, Record);
+  Record.push_back(IsRelativeModuleDirectory);
+  // facebook end T32246672
 }
 
-void ASTWriter::EmitRecordWithPath(unsigned Abbrev, RecordDataRef Record,
+void ASTWriter::EmitRecordWithPath(unsigned Abbrev, RecordDataImpl &Record,
                                    StringRef Path) {
   SmallString<128> FilePath(Path);
-  PreparePathForOutput(FilePath);
+  // facebook begin T32246672
+  bool IsRelativeModuleDirectory = false;
+  PreparePathForOutput(FilePath, IsRelativeModuleDirectory);
+  Record.push_back(IsRelativeModuleDirectory);
+  // facebook end T32246672
   Stream.EmitRecordWithBlob(Abbrev, Record, FilePath);
 }
 
