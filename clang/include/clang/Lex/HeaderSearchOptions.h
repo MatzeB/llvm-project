@@ -225,6 +225,11 @@ public:
   /// diagnostics.
   unsigned ModulesStrictContextHash : 1;
 
+  // facebook begin T32246672
+  /// Do not absolutify the path to the module directory.
+  unsigned NoAbsoluteModuleDirectory : 1;
+  // facebook end T32246672
+
   HeaderSearchOptions(StringRef _Sysroot = "/")
       : Sysroot(_Sysroot), ModuleFormat("raw"), DisableModuleHash(false),
         ImplicitModuleMaps(false), ModuleMapFileHomeIsCwd(false),
@@ -235,7 +240,11 @@ public:
         ModulesValidateSystemHeaders(false),
         ValidateASTInputFilesContent(false), UseDebugInfo(false),
         ModulesValidateDiagnosticOptions(true), ModulesHashContent(false),
-        ModulesStrictContextHash(false) {}
+        ModulesStrictContextHash(false),
+        // facebook begin T32246672
+        NoAbsoluteModuleDirectory(false)
+        // facebook end T32246672
+        {}
 
   /// AddPath - Add the \p Path path to the specified \p Group list.
   void AddPath(StringRef Path, frontend::IncludeDirGroup Group,
