@@ -2200,6 +2200,9 @@ public:
   // Skip a path
   static void SkipPath(const RecordData &Record, unsigned &Idx) {
     SkipString(Record, Idx);
+    // facebook begin T32246672
+    Idx++;  // Relative
+    // facebook end T32246672
   }
 
   /// Read a version tuple.

@@ -5742,6 +5742,12 @@ def fmodules_strict_context_hash : Flag<["-"], "fmodules-strict-context-hash">,
   HelpText<"Enable hashing of all compiler options that could impact the "
            "semantics of a module in an implicit build">,
   MarshallingInfoFlag<HeaderSearchOpts<"ModulesStrictContextHash">>;
+// facebook begin T32246672
+def fno_absolute_module_directory
+    : Flag<["-"], "fno-absolute-module-directory">,
+      HelpText<"Do not force module home directory path to be absolute.">,
+      MarshallingInfoFlag<HeaderSearchOpts<"NoAbsoluteModuleDirectory">>;
+// facebook end T32246672
 def c_isystem : JoinedOrSeparate<["-"], "c-isystem">, MetaVarName<"<directory>">,
   HelpText<"Add directory to the C SYSTEM include search path">;
 def objc_isystem : JoinedOrSeparate<["-"], "objc-isystem">,
