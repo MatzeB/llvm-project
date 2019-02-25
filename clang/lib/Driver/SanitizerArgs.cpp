@@ -71,8 +71,12 @@ static const SanitizerMask CFIClasses =
     SanitizerKind::CFIMFCall | SanitizerKind::CFIDerivedCast |
     SanitizerKind::CFIUnrelatedCast;
 static const SanitizerMask CompatibleWithMinimalRuntime =
-    TrappingSupported | SanitizerKind::Scudo | SanitizerKind::ShadowCallStack |
-    SanitizerKind::MemTag;
+    // facebook begin T35873419
+    // TrappingSupported | SanitizerKind::Scudo |
+    // SanitizerKind::ShadowCallStack | SanitizerKind::MemTag;
+    SanitizerKind::Address | TrappingSupported | SanitizerKind::Scudo |
+    SanitizerKind::ShadowCallStack | SanitizerKind::MemTag;
+    // facebook end
 
 enum CoverageFeature {
   CoverageFunc = 1 << 0,
