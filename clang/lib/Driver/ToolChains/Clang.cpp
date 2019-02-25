@@ -5337,6 +5337,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasFlag(options::OPT_funique_basic_block_section_names,
                    options::OPT_fno_unique_basic_block_section_names, false))
     CmdArgs.push_back("-funique-basic-block-section-names");
+  // facebook begin t19574305
+  if (!Args.hasFlag(options::OPT_freorder_functions,
+                    options::OPT_fno_reorder_functions, true))
+    CmdArgs.push_back("-fno-reorder-functions");
+  // facebook end
 
   if (Arg *A = Args.getLastArg(options::OPT_fsplit_machine_functions,
                                options::OPT_fno_split_machine_functions)) {

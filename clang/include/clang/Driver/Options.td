@@ -2493,6 +2493,17 @@ defm rtti_data : BoolFOption<"rtti-data",
   LangOpts<"RTTIData">, Default<frtti.KeyPath>,
   NegFlag<SetFalse, [CC1Option], "Disable generation of RTTI data">,
   PosFlag<SetTrue>>, ShouldParseIf<frtti.KeyPath>;
+// facebook begin t19574305
+def freorder_functions : Flag <["-"], "freorder-functions">,
+  Group<f_Group>, Flags<[CC1Option]>,
+  HelpText<"Using special subsections for hot/cold functions to improve code "
+           "locality">;
+def fno_reorder_functions
+    : Flag<["-"], "fno-reorder-functions">,
+      Group<f_Group>,
+      Flags<[CC1Option]>,
+      MarshallingInfoNegativeFlag<CodeGenOpts<"ReorderFunctions">>;
+// facebook end
 def : Flag<["-"], "fsched-interblock">, Group<clang_ignored_f_Group>;
 defm short_enums : BoolFOption<"short-enums",
   LangOpts<"ShortEnums">, DefaultFalse,

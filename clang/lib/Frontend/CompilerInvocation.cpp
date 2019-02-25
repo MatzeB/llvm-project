@@ -1708,6 +1708,12 @@ bool CompilerInvocation::ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args,
 
   Opts.PrepareForLTO = Args.hasArg(OPT_flto, OPT_flto_EQ);
   Opts.PrepareForThinLTO = false;
+
+  // facebook begin T19574305
+  Opts.ReorderFunctions =
+      Args.hasFlag(OPT_freorder_functions, OPT_fno_reorder_functions, true);
+  // facebook end
+
   if (Arg *A = Args.getLastArg(OPT_flto_EQ)) {
     StringRef S = A->getValue();
     if (S == "thin")
