@@ -13077,7 +13077,9 @@ TreeTransform<Derived>::TransformCXXUnresolvedConstructExpr(
 
   // FIXME: we're faking the locations of the commas
   return getDerived().RebuildCXXUnresolvedConstructExpr(
-      T, E->getLParenLoc(), Args, E->getRParenLoc(), E->isListInitialization());
+      // facebook begin T29959776
+      T, E->getBeginLoc(), Args, E->getEndLoc(), E->isListInitialization());
+  // facebook end
 }
 
 template<typename Derived>

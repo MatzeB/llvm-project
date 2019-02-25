@@ -688,6 +688,10 @@ struct CounterCoverageMappingBuilder
                           bool VisitChildren = true) {
     SourceLocation StartLoc = getStart(S);
     SourceLocation EndLoc = getEnd(S);
+    // facebook begin T29959776
+    assert(StartLoc.isValid());
+    assert(EndLoc.isValid());
+    // facebook end T29959776
     size_t Index = pushRegion(TopCount, StartLoc, EndLoc);
     if (VisitChildren)
       Visit(S);
