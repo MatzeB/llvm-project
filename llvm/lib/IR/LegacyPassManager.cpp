@@ -396,7 +396,7 @@ public:
   /// createPrinterPass - Get a module printer pass.
   Pass *createPrinterPass(raw_ostream &O,
                           const std::string &Banner) const override {
-    return createPrintModulePass(O, Banner);
+    return createPrintModulePass(O, Banner, false);
   }
 
   /// run - Execute all of the passes scheduled for execution.  Keep track of
@@ -484,7 +484,7 @@ public:
   /// createPrinterPass - Get a module printer pass.
   Pass *createPrinterPass(raw_ostream &O,
                           const std::string &Banner) const override {
-    return createPrintModulePass(O, Banner);
+    return createPrintModulePass(O, Banner, false);
   }
 
   /// run - Execute all of the passes scheduled for execution.  Keep track of
@@ -750,6 +750,15 @@ void PMTopLevelManager::schedulePass(Pass *P) {
 
   // Add the requested pass to the best available pass manager.
   P->assignPassManager(activeStack, getTopLevelPassManagerType());
+
+  // facebook begin t13480588
+  // Add change monitor to function pass.
+  if (P->getPotentialPassManagerType() == PMT_FunctionPassManager &&
+      !P->getAsImmutablePass() && !findAnalysisUsage(P)->getPreservesAll())
+    if (auto *PP =
+            createGraphChangeLogLegacyPass(dbgs(), P->getPassName().data()))
+      PP->assignPassManager(activeStack, getTopLevelPassManagerType());
+  // facebook end
 
   if (PI && !PI->isAnalysis() && shouldPrintAfterPass(PI->getPassArgument())) {
     Pass *PP =
