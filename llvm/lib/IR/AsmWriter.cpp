@@ -67,6 +67,7 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/AtomicOrdering.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h" // facebook T29824973/T44360418
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -86,6 +87,24 @@
 #include <vector>
 
 using namespace llvm;
+
+// facebook begin T29824973
+enum PrintProfOpts { none, all, names };
+static cl::opt<PrintProfOpts>
+    PrintProf("print-prof",
+              llvm::cl::desc("Print IR after each pass with branch profile "
+                             "information at the end of every basic block"),
+              cl::values(clEnumVal(none, "Nothing is printed"),
+                         clEnumVal(all, "The entire IR (with branch prof info) "
+                                        "are printed"),
+                         clEnumVal(names, "Only basic block names (with branch "
+                                          " prof info) are printed")),
+              cl::init(none), cl::Hidden);
+
+bool PrintProfAny() { return PrintProf != PrintProfOpts::none; }
+
+bool PrintProfNamesOnly() { return PrintProf == PrintProfOpts::names; }
+// facebook end
 
 // Make virtual table appear in this compilation unit.
 AssemblyAnnotationWriter::~AssemblyAnnotationWriter() = default;
@@ -2581,6 +2600,10 @@ class AssemblyWriter {
   SetVector<const Comdat *> Comdats;
   bool IsForDebug;
   bool ShouldPreserveUseListOrder;
+  // facebook begin T29824973
+  bool PrintProf;
+  bool PrintNamesOnly;
+  // facebook end
   UseListOrderMap UseListOrders;
   SmallVector<StringRef, 8> MDNames;
   /// Synchronization scope names registered with LLVMContext.
@@ -2591,10 +2614,14 @@ public:
   /// Construct an AssemblyWriter with an external SlotTracker
   AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac, const Module *M,
                  AssemblyAnnotationWriter *AAW, bool IsForDebug,
-                 bool ShouldPreserveUseListOrder = false);
+                 bool ShouldPreserveUseListOrder = false,
+                 bool PrintProf = false,
+                 bool PrintNamesOnly = false); // facebook T29824973
 
   AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
-                 const ModuleSummaryIndex *Index, bool IsForDebug);
+                 const ModuleSummaryIndex *Index, bool IsForDebug,
+                 bool PrintProf = false,
+                 bool PrintNamesOnly = false); // facebook T29824973
 
   void printMDNodeBody(const MDNode *MD);
   void printNamedMDNode(const NamedMDNode *NMD);
@@ -2653,6 +2680,10 @@ public:
   printConstVCalls(const std::vector<FunctionSummary::ConstVCall> &VCallList,
                    const char *Tag);
 
+  // facebook begin T44538829
+  void printNeighborBlocksWithWeights(const BasicBlock *BB);
+  // facebook end
+
 private:
   /// Print out metadata attachments.
   void printMetadataAttachments(
@@ -2672,10 +2703,15 @@ private:
 
 AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
                                const Module *M, AssemblyAnnotationWriter *AAW,
-                               bool IsForDebug, bool ShouldPreserveUseListOrder)
+                               bool IsForDebug, bool ShouldPreserveUseListOrder,
+                               bool PrintProf,
+                               bool PrintNamesOnly) // facebook T29824973
     : Out(o), TheModule(M), Machine(Mac), TypePrinter(M), AnnotationWriter(AAW),
       IsForDebug(IsForDebug),
-      ShouldPreserveUseListOrder(ShouldPreserveUseListOrder) {
+      ShouldPreserveUseListOrder(ShouldPreserveUseListOrder),
+      PrintProf(PrintProf),
+      PrintNamesOnly(PrintNamesOnly), // facebook T29824973
+{
   if (!TheModule)
     return;
   for (const GlobalObject &GO : TheModule->global_objects())
@@ -2684,9 +2720,13 @@ AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
 }
 
 AssemblyWriter::AssemblyWriter(formatted_raw_ostream &o, SlotTracker &Mac,
-                               const ModuleSummaryIndex *Index, bool IsForDebug)
+                               const ModuleSummaryIndex *Index, bool IsForDebug,
+                               bool PrintProf,
+                               bool PrintNamesOnly) // facebook T29824973
     : Out(o), TheIndex(Index), Machine(Mac), TypePrinter(/*Module=*/nullptr),
-      IsForDebug(IsForDebug), ShouldPreserveUseListOrder(false) {}
+      IsForDebug(IsForDebug), ShouldPreserveUseListOrder(false),
+      PrintProf(PrintProf),
+      PrintNamesOnly(PrintNamesOnly), // facebook T29824973
 
 void AssemblyWriter::writeOperand(const Value *Operand, bool PrintType) {
   if (!Operand) {
@@ -2873,22 +2913,24 @@ void AssemblyWriter::printModule(const Module *M) {
   // Output global use-lists.
   printUseLists(nullptr);
 
-  // Output all attribute groups.
-  if (!Machine.as_empty()) {
-    Out << '\n';
-    writeAllAttributeGroups();
-  }
+  if (!PrintNamesOnly) { // facebook T29824973
+    // Output all attribute groups.
+    if (!Machine.as_empty()) {
+      Out << '\n';
+      writeAllAttributeGroups();
+    }
 
-  // Output named metadata.
-  if (!M->named_metadata_empty()) Out << '\n';
+    // Output named metadata.
+    if (!M->named_metadata_empty()) Out << '\n';
 
-  for (const NamedMDNode &Node : M->named_metadata())
-    printNamedMDNode(&Node);
+    for (const NamedMDNode &Node : M->named_metadata())
+      printNamedMDNode(&Node);
 
-  // Output metadata.
-  if (!Machine.mdn_empty()) {
-    Out << '\n';
-    writeAllMDNodes();
+    // Output metadata.
+    if (!Machine.mdn_empty()) {
+      Out << '\n';
+      writeAllMDNodes();
+    }
   }
 }
 
@@ -3848,6 +3890,52 @@ void AssemblyWriter::printArgument(const Argument *Arg, AttributeSet Attrs) {
   }
 }
 
+// facebook begin T44538829
+void AssemblyWriter::printNeighborBlocksWithWeights(const BasicBlock *BB) {
+  const_pred_iterator PI = pred_begin(BB), PE = pred_end(BB);
+  bool FirstPred = true;
+  while (PI != PE) {
+    if (FirstPred) {
+      Out << "\n; predecessors: ";
+      FirstPred = false;
+    } else
+      Out << ", ";
+    writeOperand(*PI, false);
+    ++PI;
+  }
+
+  const Instruction *TI = BB->getTerminator();
+  bool HasWeight = false;
+  MDNode *WeightsNode = nullptr;
+
+  // Ensure there are weights for all of the successors.
+  // The first operand to the metadata node is a name, not a weight
+  if ((isa<BranchInst>(TI) || isa<SwitchInst>(TI) || isa<IndirectBrInst>(TI)) &&
+      (WeightsNode = TI->getMetadata(LLVMContext::MD_prof)) &&
+      WeightsNode->getNumOperands() == TI->getNumSuccessors() + 1)
+    HasWeight = true;
+
+  const_succ_iterator SI = succ_begin(BB), SE = succ_end(BB);
+  unsigned int succIndex = 1;
+  while (SI != SE) {
+    if (succIndex == 1)
+      Out << "\n  successors: ";
+    else
+      Out << ", ";
+    writeOperand(*SI, false);
+    ++SI;
+
+    if (HasWeight) {
+      ConstantInt *Weight =
+          mdconst::dyn_extract<ConstantInt>(WeightsNode->getOperand(succIndex));
+      if (Weight)
+        Out << '(' << format("0x%08" PRIx32, Weight->getZExtValue()) << ')';
+    }
+    ++succIndex;
+  }
+}
+// facebook end
+
 /// printBasicBlock - This member is called for each basic block in a method.
 void AssemblyWriter::printBasicBlock(const BasicBlock *BB) {
   bool IsEntryBlock = BB->getParent() && BB->isEntryBlock();
@@ -3864,7 +3952,9 @@ void AssemblyWriter::printBasicBlock(const BasicBlock *BB) {
       Out << "<badref>:";
   }
 
-  if (!IsEntryBlock) {
+  if (IsForDev || PrintProf) { // facebook T44538829
+    printNeighborBlocksWithWeights(BB);
+  } else if (!IsEntryBlock) {
     // Output predecessors for the block.
     Out.PadToColumn(50);
     Out << ";";
@@ -3888,7 +3978,8 @@ void AssemblyWriter::printBasicBlock(const BasicBlock *BB) {
 
   // Output all of the instructions in the basic block...
   for (const Instruction &I : *BB) {
-    printInstructionLine(I);
+    if (!PrintNamesOnly) // facebook T29824973
+      printInstructionLine(I);
   }
 
   if (AnnotationWriter) AnnotationWriter->emitBasicBlockEndAnnot(BB, Out);
@@ -4494,9 +4585,9 @@ void Function::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,
                      bool IsForDebug) const {
   SlotTracker SlotTable(this->getParent());
   formatted_raw_ostream OS(ROS);
-  AssemblyWriter W(OS, SlotTable, this->getParent(), AAW,
-                   IsForDebug,
-                   ShouldPreserveUseListOrder);
+  AssemblyWriter W(OS, SlotTable, this->getParent(), AAW, IsForDebug,
+                   ShouldPreserveUseListOrder, PrintProfAny(),
+                   PrintProfNamesOnly()); // facebook T29824973
   W.printFunction(this);
 }
 
@@ -4516,7 +4607,8 @@ void Module::print(raw_ostream &ROS, AssemblyAnnotationWriter *AAW,
   SlotTracker SlotTable(this);
   formatted_raw_ostream OS(ROS);
   AssemblyWriter W(OS, SlotTable, this, AAW, IsForDebug,
-                   ShouldPreserveUseListOrder);
+                   ShouldPreserveUseListOrder, PrintProfAny(),
+                   PrintProfNamesOnly()); // facebook T29824973
   W.printModule(this);
 }
 
@@ -4618,14 +4710,17 @@ void Value::print(raw_ostream &ROS, ModuleSlotTracker &MST,
 
   if (const Instruction *I = dyn_cast<Instruction>(this)) {
     incorporateFunction(I->getParent() ? I->getParent()->getParent() : nullptr);
-    AssemblyWriter W(OS, SlotTable, getModuleFromVal(I), nullptr, IsForDebug);
+    AssemblyWriter W(OS, SlotTable, getModuleFromVal(I), nullptr, IsForDebug,
+                     false, PrintProfAny(), PrintProfNamesOnly());
     W.printInstruction(*I);
   } else if (const BasicBlock *BB = dyn_cast<BasicBlock>(this)) {
     incorporateFunction(BB->getParent());
-    AssemblyWriter W(OS, SlotTable, getModuleFromVal(BB), nullptr, IsForDebug);
+    AssemblyWriter W(OS, SlotTable, getModuleFromVal(BB), nullptr, IsForDebug,
+                     false, PrintProfAny(), PrintProfNamesOnly());
     W.printBasicBlock(BB);
   } else if (const GlobalValue *GV = dyn_cast<GlobalValue>(this)) {
-    AssemblyWriter W(OS, SlotTable, GV->getParent(), nullptr, IsForDebug);
+    AssemblyWriter W(OS, SlotTable, GV->getParent(), nullptr, IsForDebug, false,
+                     PrintProfAny(), PrintProfNamesOnly());
     if (const GlobalVariable *V = dyn_cast<GlobalVariable>(GV))
       W.printGlobal(V);
     else if (const Function *F = dyn_cast<Function>(GV))
