@@ -40,7 +40,7 @@ void DWARFDebugAranges::extract(
       uint64_t HighPC = Desc.getEndAddress();
       appendRange(CUOffset, LowPC, HighPC);
     }
-    ParsedCUOffsets.insert(CUOffset);
+    // facebook D6624075
   }
 }
 
@@ -58,16 +58,15 @@ void DWARFDebugAranges::generate(DWARFContext *CTX) {
   // Generate aranges from DIEs: even if .debug_aranges section is present,
   // it may describe only a small subset of compilation units, so we need to
   // manually build aranges for the rest of them.
+  // facebook D6624075
   for (const auto &CU : CTX->compile_units()) {
     uint64_t CUOffset = CU->getOffset();
-    if (ParsedCUOffsets.insert(CUOffset).second) {
-      Expected<DWARFAddressRangesVector> CURanges = CU->collectAddressRanges();
-      if (!CURanges)
-        CTX->getRecoverableErrorHandler()(CURanges.takeError());
-      else
-        for (const auto &R : *CURanges)
-          appendRange(CUOffset, R.LowPC, R.HighPC);
-    }
+    Expected<DWARFAddressRangesVector> CURanges = CU->collectAddressRanges();
+    if (!CURanges)
+      CTX->getRecoverableErrorHandler()(CURanges.takeError());
+    else
+      for (const auto &R : *CURanges)
+        appendRange(CUOffset, R.LowPC, R.HighPC);
   }
 
   construct();
@@ -76,7 +75,7 @@ void DWARFDebugAranges::generate(DWARFContext *CTX) {
 void DWARFDebugAranges::clear() {
   Endpoints.clear();
   Aranges.clear();
-  ParsedCUOffsets.clear();
+  // facebook D6624075
 }
 
 void DWARFDebugAranges::appendRange(uint64_t CUOffset, uint64_t LowPC,
