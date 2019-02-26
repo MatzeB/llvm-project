@@ -325,7 +325,8 @@ void INTERFACE_ATTRIBUTE WTFAnnotateBenignRaceSized(
   BenignRaceImpl(f, l, mem, sz, desc);
 }
 
-int INTERFACE_ATTRIBUTE RunningOnValgrind() {
+// Facebook only: renamed `RunningOnValgrind` to `__tsan_RunningOnValgrind`
+int INTERFACE_ATTRIBUTE __tsan_RunningOnValgrind() {
   return flags()->running_on_valgrind;
 }
 

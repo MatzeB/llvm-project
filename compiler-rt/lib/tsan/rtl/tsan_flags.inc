@@ -56,8 +56,9 @@ TSAN_FLAG(
     "If the process consumes more memory, then TSan will flush shadow memory.")
 TSAN_FLAG(bool, stop_on_start, false,
           "Stops on start until __tsan_resume() is called (for debugging).")
+// Facebook only: renamed `RunningOnValgrind` to `__tsan_RunningOnValgrind`
 TSAN_FLAG(bool, running_on_valgrind, false,
-          "Controls whether RunningOnValgrind() returns true or false.")
+          "Controls whether __tsan_RunningOnValgrind() returns true or false.")
 TSAN_FLAG(
     uptr, history_size, 0,
     "Per-thread history size,"
