@@ -396,7 +396,7 @@ public:
   /// createPrinterPass - Get a module printer pass.
   Pass *createPrinterPass(raw_ostream &O,
                           const std::string &Banner) const override {
-    return createPrintModulePass(O, Banner);
+    return createPrintModulePass(O, Banner, false);
   }
 
   /// run - Execute all of the passes scheduled for execution.  Keep track of
@@ -484,7 +484,7 @@ public:
   /// createPrinterPass - Get a module printer pass.
   Pass *createPrinterPass(raw_ostream &O,
                           const std::string &Banner) const override {
-    return createPrintModulePass(O, Banner);
+    return createPrintModulePass(O, Banner, false);
   }
 
   /// run - Execute all of the passes scheduled for execution.  Keep track of
