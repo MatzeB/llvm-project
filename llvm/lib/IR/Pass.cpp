@@ -49,7 +49,7 @@ ModulePass::~ModulePass() = default;
 
 Pass *ModulePass::createPrinterPass(raw_ostream &OS,
                                     const std::string &Banner) const {
-  return createPrintModulePass(OS, Banner);
+  return createPrintModulePass(OS, Banner, false);
 }
 
 PassManagerType ModulePass::getPotentialPassManagerType() const {

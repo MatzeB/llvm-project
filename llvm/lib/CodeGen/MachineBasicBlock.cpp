@@ -45,6 +45,8 @@ static cl::opt<bool> PrintSlotIndexes(
              "SlotIndexes when available"),
     cl::init(true), cl::Hidden);
 
+extern bool PrintProfNamesOnly(); // facebook T29824973
+
 MachineBasicBlock::MachineBasicBlock(MachineFunction &MF, const BasicBlock *B)
     : BB(B), Number(-1), xParent(&MF) {
   Insts.Parent = this;
@@ -406,53 +408,55 @@ void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
     HasLineAttributes = true;
   }
 
-  if (!livein_empty() && MRI.tracksLiveness()) {
-    if (Indexes) OS << '\t';
-    OS.indent(2) << "liveins: ";
+  if (!PrintProfNamesOnly()) { // facebook T29824973
+    if (!livein_empty() && MRI.tracksLiveness()) {
+      if (Indexes) OS << '\t';
+      OS.indent(2) << "liveins: ";
 
-    ListSeparator LS;
-    for (const auto &LI : liveins()) {
-      OS << LS << printReg(LI.PhysReg, TRI);
-      if (!LI.LaneMask.all())
-        OS << ":0x" << PrintLaneMask(LI.LaneMask);
-    }
-    HasLineAttributes = true;
-  }
-
-  if (HasLineAttributes)
-    OS << '\n';
-
-  bool IsInBundle = false;
-  for (const MachineInstr &MI : instrs()) {
-    if (Indexes && PrintSlotIndexes) {
-      if (Indexes->hasIndex(MI))
-        OS << Indexes->getInstructionIndex(MI);
-      OS << '\t';
+      ListSeparator LS;
+      for (const auto &LI : liveins()) {
+        OS << LS << printReg(LI.PhysReg, TRI);
+        if (!LI.LaneMask.all())
+          OS << ":0x" << PrintLaneMask(LI.LaneMask);
+      }
+      HasLineAttributes = true;
     }
 
-    if (IsInBundle && !MI.isInsideBundle()) {
+    if (HasLineAttributes)
+      OS << '\n';
+
+    bool IsInBundle = false;
+    for (const MachineInstr &MI : instrs()) {
+      if (Indexes && PrintSlotIndexes) {
+        if (Indexes->hasIndex(MI))
+          OS << Indexes->getInstructionIndex(MI);
+        OS << '\t';
+      }
+
+      if (IsInBundle && !MI.isInsideBundle()) {
+        OS.indent(2) << "}\n";
+        IsInBundle = false;
+      }
+
+      OS.indent(IsInBundle ? 4 : 2);
+      MI.print(OS, MST, IsStandalone, /*SkipOpers=*/false, /*SkipDebugLoc=*/false,
+               /*AddNewLine=*/false, &TII);
+
+      if (!IsInBundle && MI.getFlag(MachineInstr::BundledSucc)) {
+        OS << " {";
+        IsInBundle = true;
+      }
+      OS << '\n';
+    }
+
+    if (IsInBundle)
       OS.indent(2) << "}\n";
-      IsInBundle = false;
+
+    if (IrrLoopHeaderWeight && IsStandalone) {
+      if (Indexes) OS << '\t';
+      OS.indent(2) << "; Irreducible loop header weight: "
+                   << IrrLoopHeaderWeight.getValue() << '\n';
     }
-
-    OS.indent(IsInBundle ? 4 : 2);
-    MI.print(OS, MST, IsStandalone, /*SkipOpers=*/false, /*SkipDebugLoc=*/false,
-             /*AddNewLine=*/false, &TII);
-
-    if (!IsInBundle && MI.getFlag(MachineInstr::BundledSucc)) {
-      OS << " {";
-      IsInBundle = true;
-    }
-    OS << '\n';
-  }
-
-  if (IsInBundle)
-    OS.indent(2) << "}\n";
-
-  if (IrrLoopHeaderWeight && IsStandalone) {
-    if (Indexes) OS << '\t';
-    OS.indent(2) << "; Irreducible loop header weight: "
-                 << IrrLoopHeaderWeight.value() << '\n';
   }
 }
 

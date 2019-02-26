@@ -272,7 +272,7 @@ void RegionPass::assignPassManager(PMStack &PMS,
 
 /// Get the printer pass
 Pass *RegionPass::createPrinterPass(raw_ostream &O,
-                                  const std::string &Banner) const {
+                                    const std::string &Banner) const {
   return new PrintRegionPass(Banner, O);
 }
 

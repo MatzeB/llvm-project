@@ -807,6 +807,15 @@ public:
              bool ShouldPreserveUseListOrder = false,
              bool IsForDebug = false) const;
 
+  // facebook begin T29824973
+
+  /// Print the module with inlined prof info to an output stream with an
+  /// optional  AssemblyAnnotationWriter.  If \c ShouldPreserveUseListOrder,
+  /// then include uselistorder directives so that use-lists can be
+  /// recreated when reading the assembly.
+  void printInlinedProf(raw_ostream &OS, bool PrintNamesOnly = false) const;
+  // facebook end
+
   /// Dump the module to stderr (for debugging).
   void dump() const;
 

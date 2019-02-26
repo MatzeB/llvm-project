@@ -671,12 +671,12 @@ namespace {
   class PrintCallGraphPass : public CallGraphSCCPass {
     std::string Banner;
     raw_ostream &OS;       // raw_ostream to print on.
-
+    
   public:
     static char ID;
 
     PrintCallGraphPass(const std::string &B, raw_ostream &OS)
-      : CallGraphSCCPass(ID), Banner(B), OS(OS) {}
+        : CallGraphSCCPass(ID), Banner(B), OS(OS) {}
 
     void getAnalysisUsage(AnalysisUsage &AU) const override {
       AU.setPreservesAll();
