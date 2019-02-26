@@ -703,12 +703,16 @@ static StripPolicy getStrip(opt::InputArgList &args) {
   if (args.hasArg(OPT_relocatable))
     return StripPolicy::None;
 
-  auto *arg = args.getLastArg(OPT_strip_all, OPT_strip_debug);
+  // facebook begin T37438891
+  auto *arg = args.getLastArg(OPT_strip_all, OPT_strip_debug, OPT_strip_debug_non_line);
   if (!arg)
     return StripPolicy::None;
   if (arg->getOption().getID() == OPT_strip_all)
     return StripPolicy::All;
-  return StripPolicy::Debug;
+  if (arg->getOption().getID() == OPT_strip_debug)
+    return StripPolicy::Debug;
+  return StripPolicy::DebugNonLine;
+  // facebook end T37438891
 }
 
 static uint64_t parseSectionAddress(StringRef s, opt::InputArgList &args,
@@ -2354,10 +2358,25 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
     // Now that we have a complete list of input files.
     // Beyond this point, no new files are added.
     // Aggregate all input sections into one place.
-    for (InputFile *f : objectFiles)
+    // facebook begin T37438891
+    InputSectionBase *lastDebugAbbrevSection = nullptr;
+    for (InputFile *f : objectFiles) {
       for (InputSectionBase *s : f->getSections())
-        if (s && s != &InputSection::discarded)
+        if (s && s != &InputSection::discarded) {
+          if (config->strip == StripPolicy::DebugNonLine &&
+              s->name.equals(".debug_abbrev")) {
+            lastDebugAbbrevSection = s;
+            if (!s->reduceDebugAbbrevSection()) {
+              warn("Failed to reduce .debug_abbrev section.");
+            }
+          }
           inputSections.push_back(s);
+        }
+    }
+    if (lastDebugAbbrevSection) {
+      lastDebugAbbrevSection->nullTerminateReducedDebugAbbrev();
+    }
+    // facebook end T37438891
     for (BinaryFile *f : binaryFiles)
       for (InputSectionBase *s : f->getSections())
         inputSections.push_back(cast<InputSection>(s));
@@ -2371,6 +2390,28 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
         return true;
       }
 
+      // facebook begin T37438891
+      // If --strip-debug-non-line is specified, emit only the sections used for
+      // line info.
+      if (config->strip == StripPolicy::DebugNonLine) {
+        // Keep debug_abbrev, debug_info, debug_line, and debug_str.  Discard
+        // all other debug sections.  This is the minimal set of required
+        // sections for folly::symbolizer (see https://fburl.com/pihaosby) Note
+        // that .debug_arranges is optional but provides significant speed up to
+        // folly::symbolizer,  especially important when binary is compiled
+        // under debug mode with sanitizers
+        return StringSwitch<bool>(s->name)
+            .EndsWith("debug_abbrev", false)
+            .EndsWith("debug_info", false)
+            .EndsWith("debug_line", false)
+            .EndsWith("debug_str", false)
+            .EndsWith("debug_aranges", false)
+            .EndsWith("debug_gdb_scripts", false)
+            .StartsWith(".debug", true)
+            .StartsWith(".zdebug", true)
+            .Default(false);
+      }
+      // facebook end T37438891
       // We do not want to emit debug sections if --strip-all
       // or -strip-debug are given.
       if (config->strip == StripPolicy::None)

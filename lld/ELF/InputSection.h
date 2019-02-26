@@ -237,12 +237,24 @@ public:
     return llvm::makeArrayRef<T>((const T *)data().data(), s / sizeof(T));
   }
 
+  // facebook begin T37438891
+  bool reduceDebugAbbrevSection();
+
+  void nullTerminateReducedDebugAbbrev();
+  // facebook end T37438891
+
 protected:
   template <typename ELFT>
   void parseCompressedHeader();
   void uncompress() const;
 
   mutable ArrayRef<uint8_t> rawData;
+
+  // facebook begin T37438891
+  // Backing storage for rawData in case we need to reduce the section and
+  // don't just point to the original data
+  mutable std::vector<uint8_t> reducedDebugBuffer;
+  // facebook end T37438891
 
   // This field stores the uncompressed size of the compressed data in rawData,
   // or -1 if rawData is not compressed (either because the section wasn't
@@ -394,7 +406,8 @@ private:
 #ifdef _WIN32
 static_assert(sizeof(InputSection) <= 192, "InputSection is too big");
 #else
-static_assert(sizeof(InputSection) <= 184, "InputSection is too big");
+static_assert(sizeof(InputSection) <= 184 + sizeof(std::vector<uint8_t>),
+              "InputSection is too big"); // facebook T37438891
 #endif
 
 inline bool isDebugSection(const InputSectionBase &sec) {
