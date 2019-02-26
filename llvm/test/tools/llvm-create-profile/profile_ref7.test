@@ -1,0 +1,10 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples7.txt --profiler text --format text --binary %S/Inputs/find --out %t2 > %t3 2>&1
+; RUN: FileCheck %s --input-file %t2
+
+;CHECK: parse_group:203:0
+;CHECK: 27: 0 quotearg:9
+;CHECK: 56: 4
+;CHECK: 57: 4
+;CHECK:  57.2: 15
+;CHECK:  58.2: 15
+;CHECK: 61: 15

@@ -1,0 +1,13 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples1.txt --profiler text --format text --binary %S/Inputs/find --out %t2 > %t3 2>&1
+; RUN: FileCheck %s --input-file %t2
+
+
+; CHECK:parse_user:776:0
+; CHECK: 1: 22
+; CHECK: 8: 22
+; CHECK: 43: 3
+; CHECK: 44: 3
+; CHECK: 4: collect_arg:577
+; CHECK:  3: collect_arg_nonconst:577
+; CHECK:   2: 22
+; CHECK:   10: 22

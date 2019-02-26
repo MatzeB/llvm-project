@@ -1,0 +1,6 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples2.txt --profiler text --format text --binary %S/Inputs/find --out %t2 > %t3 2>&1
+; RUN: FileCheck %s --input-file %t2
+
+; CHECK: insert_regex:105:0
+; CHECK:  24: 5
+; CHECK:  25: 5

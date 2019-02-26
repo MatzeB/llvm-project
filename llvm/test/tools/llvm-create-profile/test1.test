@@ -1,0 +1,11 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/test1.txt --profiler text --format text --binary %S/Inputs/find --out %t2 > %t3 2>&1
+; RUN: FileCheck %s --input-file %t2
+
+; CHECK: last_component:272:1
+; CHECK:  9: 2
+; CHECK:  9.1: 12
+; CHECK:  11: 12
+; CHECK:  12: 2
+; CHECK:  13: 9
+; CHECK:  16: 4
+

@@ -1,0 +1,17 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples4.txt --profiler text --format text --binary %S/Inputs/find --out %t2 > %t3 2>&1
+; RUN: FileCheck %s --input-file %t2
+
+; CHECK: xstrtoumax:1033:0
+; CHECK: 8: 12
+; CHECK: 10: 12
+; CHECK: 12: 12
+; CHECK: 17: 12
+; CHECK: 18: 7
+; CHECK: 19: 7
+; CHECK: 20: 7
+; CHECK: 21: 7
+; CHECK: 63: 13
+; CHECK: 72: 13
+; CHECK: 87: 0 get_num:12
+; CHECK: 98: 0 pred_links:14
+; CHECK: 154: 7

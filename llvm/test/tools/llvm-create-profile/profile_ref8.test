@@ -1,0 +1,18 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples8.txt --profiler text --format text --binary %S/Inputs/find --out %t2 > %t3 2>&1
+; RUN: FileCheck %s --input-file %t2
+
+; CHECK:hash_insert_if_absent:793:0
+; CHECK: 10: 16
+; CHECK: 13: 7 rpl_fcntl:14
+; CHECK: 15: 7
+; CHECK: 38: 8
+; CHECK: 38.1: 8
+; CHECK: 41: 8
+; CHECK: 42: 14
+; CHECK: 45: 8 pred_ctime:15
+; CHECK: 49: 16
+; CHECK: 60: 0 pred_or:9
+; CHECK: 79: 14
+; CHECK:hash_insert:322:0
+; CHECK: 1: 14
+; CHECK: 3: 14

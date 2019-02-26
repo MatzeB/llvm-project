@@ -1,0 +1,20 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples3.txt --profiler text --format text --binary %S/Inputs/find --out %t2 > %t3 2>&1
+; RUN: FileCheck %s --input-file %t2
+
+; CHECK:find_parser:382:0
+; CHECK: 9: 1 process_leading_options:3
+; CHECK: 13: 11
+; CHECK: 15.1: 11
+; CHECK: 19: 6
+; CHECK: 22: 1
+; CHECK: 23: 1
+; CHECK: 9: found_parser:10
+; CHECK:  45: 1
+; CHECK: 19: found_parser:242
+; CHECK:  15: 6
+; CHECK:  21: 6
+; CHECK:  24: 5
+; CHECK:  27: 0 get_expr:1
+; CHECK:  28: 5
+; CHECK:  45: 6
+; CHECK:  47: 1

@@ -137,6 +137,10 @@ if(TARGET llvm-lto)
   set(LLVM_TEST_DEPENDS ${LLVM_TEST_DEPENDS} llvm-lto)
 endif()
 
+# facebook begin T26943842
+set(LLVM_TEST_DEPENDS ${LLVM_TEST_DEPENDS} llvm-create-profile)
+# facebook end T26943842
+
 # If Intel JIT events are supported, depend on a tool that tests the listener.
 if( LLVM_USE_INTEL_JITEVENTS )
   set(LLVM_TEST_DEPENDS ${LLVM_TEST_DEPENDS} llvm-jitlistener)
