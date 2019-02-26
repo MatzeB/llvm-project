@@ -162,3 +162,43 @@ module opencl_c {
   header "opencl-c.h"
   header "opencl-c-base.h"
 }
+
+// facebook begin T24847594
+
+module _Builtin_limits [system] [extern_c] {
+  header "limits.h"
+  export *
+}
+
+module _Builtin_inttypes [system] [extern_c] {
+  header "inttypes.h"
+  export *
+}
+
+module _Builtin_stdint [system] [extern_c] {
+  header "stdint.h"
+  export *
+}
+
+module _Builtin_stddef [system] [extern_c] {
+  header "stddef.h"
+  export _Builtin_stddef_max_align_t
+  export *
+}
+
+module _Builtin_stdarg [system] [extern_c] {
+  header "stdarg.h"
+  export *
+}
+
+module _Builtin_stdbool [system] [extern_c] {
+  header "stdbool.h"
+  export *
+}
+
+module _Builtin_unwind [system] [extern_c] {
+  header "unwind.h"
+  export *
+}
+
+// facebook end
