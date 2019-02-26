@@ -1,4 +1,6 @@
-# REQUIRES: x86
+# facebook begin T92808916
+# REQUIRES: x86, platform009-bug-fix
+# facebook end T92808916
 ## COMDAT groups are deduplicated by the name of the signature symbol.
 ## The local/global status is not part of the equation.
 
