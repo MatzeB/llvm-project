@@ -24,6 +24,20 @@
 #include "sanitizer_common/sanitizer_symbolizer.h"
 #include <stdio.h>
 
+
+// facebook begin
+// t9848999
+extern "C" {
+#if SANITIZER_SUPPORTS_WEAK_HOOKS
+SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE
+const char *__ubsan_default_suppressions();
+#else
+// No week hooks, provide empty implementation.
+const char *__ubsan_default_suppressions() { return ""; }
+#endif  // SANITIZER_SUPPORTS_WEAK_HOOKS
+}  // extern "C"
+// facebook end
+
 using namespace __ubsan;
 
 // UBSan is combined with runtimes that already provide this functionality
@@ -409,6 +423,11 @@ void __ubsan::InitializeSuppressions() {
   suppression_ctx = new (suppression_placeholder)
       SuppressionContext(kSuppressionTypes, ARRAY_SIZE(kSuppressionTypes));
   suppression_ctx->ParseFromFile(flags()->suppressions);
+  // facebook begin
+  // t9848999
+  if (&__ubsan_default_suppressions)
+    suppression_ctx->Parse(__ubsan_default_suppressions());
+  // facebook end
 }
 
 bool __ubsan::IsVptrCheckSuppressed(const char *TypeName) {
