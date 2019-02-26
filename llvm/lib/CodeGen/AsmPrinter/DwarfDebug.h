@@ -754,6 +754,10 @@ public:
 
   bool shareAcrossDWOCUs() const;
 
+  // facebook begin D8230079
+  bool shareAcrossCUs() const;
+  // facebook end D8230079
+
   /// Returns the Dwarf Version.
   uint16_t getDwarfVersion() const;
 

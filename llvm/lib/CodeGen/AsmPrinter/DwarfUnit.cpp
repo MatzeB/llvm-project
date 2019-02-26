@@ -186,7 +186,10 @@ bool DwarfUnit::isShareableAcrossCUs(const DINode *D) const {
   // level already) but may be implementable for some value in projects
   // building multiple independent libraries with LTO and then linking those
   // together.
-  if (isDwoUnit() && !DD->shareAcrossDWOCUs())
+  if ((isDwoUnit() && !DD->shareAcrossDWOCUs())
+      // facebook begin D8230079
+      || !DD->shareAcrossCUs())
+    // facebook end D8230079
     return false;
   return (isa<DIType>(D) ||
           (isa<DISubprogram>(D) && !cast<DISubprogram>(D)->isDefinition())) &&

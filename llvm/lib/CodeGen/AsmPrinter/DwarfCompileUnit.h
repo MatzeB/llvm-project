@@ -95,13 +95,19 @@ class DwarfCompileUnit final : public DwarfUnit {
   bool isDwoUnit() const override;
 
   DenseMap<const MDNode *, DIE *> &getAbstractSPDies() {
-    if (isDwoUnit() && !DD->shareAcrossDWOCUs())
+    if ((isDwoUnit() && !DD->shareAcrossDWOCUs())
+        // facebook begin D8230079
+        || !DD->shareAcrossCUs())
+      // facebook end D8230079
       return AbstractSPDies;
     return DU->getAbstractSPDies();
   }
 
   DenseMap<const DINode *, std::unique_ptr<DbgEntity>> &getAbstractEntities() {
-    if (isDwoUnit() && !DD->shareAcrossDWOCUs())
+    if ((isDwoUnit() && !DD->shareAcrossDWOCUs())
+        // facebook begin D8230079
+        || !DD->shareAcrossCUs())
+      // facebook end D8230079
       return AbstractEntities;
     return DU->getAbstractEntities();
   }

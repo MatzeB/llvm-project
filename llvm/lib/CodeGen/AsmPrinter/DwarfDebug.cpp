@@ -91,6 +91,14 @@ static cl::opt<DefaultOnOff> UnknownLocations(
                clEnumVal(Enable, "In all cases"), clEnumVal(Disable, "Never")),
     cl::init(Default));
 
+// facebook begin D8230079
+static cl::opt<bool> NoCrossCuReferences(
+    "no-cross-cu-references", cl::Hidden, cl::ZeroOrMore,
+    cl::desc("Disable reference sharing accros references (Note that abstract "
+             "references can still be shared"),
+    cl::init(false));
+// facebook end D8230079
+
 static cl::opt<AccelTableKind> AccelTables(
     "accel-tables", cl::Hidden, cl::desc("Output dwarf accelerator tables."),
     cl::values(clEnumValN(AccelTableKind::Default, "Default",
@@ -555,6 +563,10 @@ template <typename Func> static void forBothCUs(DwarfCompileUnit &CU, Func F) {
       F(*SkelCU);
 }
 
+// faceboook begin D8230079
+bool DwarfDebug::shareAcrossCUs() const { return not NoCrossCuReferences; }
+// facebook end D8230079
+
 bool DwarfDebug::shareAcrossDWOCUs() const {
   return SplitDwarfCrossCuReferences;
 }
@@ -569,7 +581,11 @@ void DwarfDebug::constructAbstractSubprogramScopeDIE(DwarfCompileUnit &SrcCU,
 
   // Find the subprogram's DwarfCompileUnit in the SPMap in case the subprogram
   // was inlined from another compile unit.
-  if (useSplitDwarf() && !shareAcrossDWOCUs() && !SP->getUnit()->getSplitDebugInlining())
+  if ((useSplitDwarf() && !shareAcrossDWOCUs() &&
+       !SP->getUnit()->getSplitDebugInlining())
+      // facebook begin D8230079
+      || !shareAcrossCUs())
+    // facebok end D8230079
     // Avoid building the original CU if it won't be used
     SrcCU.constructAbstractSubprogramScopeDIE(Scope);
   else {
