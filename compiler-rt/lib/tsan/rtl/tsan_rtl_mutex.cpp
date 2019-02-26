@@ -33,6 +33,12 @@ struct Callback final : public DDCallback {
   Callback(ThreadState *thr, uptr pc)
       : thr(thr)
       , pc(pc) {
+    // facebook begin
+    // sugak t13406821
+    if (thr->proc() == nullptr) {
+      ProcWire(ProcCreate(), thr);
+    }
+    // facebook end
     DDCallback::pt = thr->proc()->dd_pt;
     DDCallback::lt = thr->dd_lt;
   }
