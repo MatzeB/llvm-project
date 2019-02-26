@@ -30,5 +30,6 @@ __tsan_set_fiber_name
 __ubsan_*
 Annotate*
 WTFAnnotate*
-RunningOnValgrind
+# Facebook only: renamed `RunningOnValgrind` to `__tsan_RunningOnValgrind`
+__tsan_RunningOnValgrind
 ValgrindSlowdown
