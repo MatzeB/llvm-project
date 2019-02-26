@@ -207,11 +207,27 @@ inline AsanThread::StackBounds AsanThread::GetStackBounds() const {
   return {stack_bottom_, stack_top_};
 }
 
-uptr AsanThread::stack_top() { return GetStackBounds().top; }
+uptr AsanThread::stack_top() {
+  // facebook begin t10286520
+  if (fiber_stack_top_ != 0)
+    return fiber_stack_top_;
+  // facebook end
+  return GetStackBounds().top;
+}
 
-uptr AsanThread::stack_bottom() { return GetStackBounds().bottom; }
+uptr AsanThread::stack_bottom() {
+  // facebook begin t10286520
+  if (fiber_stack_bottom_ != 0)
+    return fiber_stack_bottom_;
+  // facebook end
+  return GetStackBounds().bottom;
+}
 
 uptr AsanThread::stack_size() {
+  // facebook begin t10286520
+  if (fiber_stack_size_ != 0)
+    return fiber_stack_size_;
+  // facebook end
   const auto bounds = GetStackBounds();
   return bounds.top - bounds.bottom;
 }
@@ -308,6 +324,9 @@ void AsanThread::SetThreadStackAndTls(const InitOptions *options) {
                        &tls_begin_, &tls_size);
   stack_top_ = RoundDownTo(stack_bottom_ + stack_size, ASAN_SHADOW_GRANULARITY);
   stack_bottom_ = RoundDownTo(stack_bottom_, ASAN_SHADOW_GRANULARITY);
+  // facebook begin t10286520
+  fiber_stack_size_ = fiber_stack_top_ = fiber_stack_bottom_ = 0;
+  // facebook end
   tls_end_ = tls_begin_ + tls_size;
   dtls_ = DTLS_Get();
 
