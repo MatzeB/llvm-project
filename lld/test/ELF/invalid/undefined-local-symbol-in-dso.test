@@ -8,6 +8,10 @@
 # STB_LOCAL is a nonsensical combination. Nevertheless, we should error on such
 # input files instead of crashing.
 
+# facebook begin T34843296
+# XFAIL: *
+# facebook end T34843296
+
 # RUN: yaml2obj %s -o %t.so
 # RUN: not ld.lld %t.so -o /dev/null 2>&1 | FileCheck %s
 # CHECK: error: {{.*}}.so: invalid local symbol 'foo' in global part of symbol table
