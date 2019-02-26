@@ -2389,7 +2389,12 @@ Preprocessor::ImportAction Preprocessor::HandleHeaderIncludeOrImport(
   // Issue a diagnostic if the name of the file on disk has a different case
   // than the one we're about to open.
   const bool CheckIncludePathPortability =
-      !IsMapped && !File->getFileEntry().tryGetRealPathName().empty();
+      // facebook begin: T30493122
+      // Enable -Wnonportable-include-path for header map
+      // https://fburl.com/uimjayeu
+      //    !IsMapped && !File->getFileEntry().tryGetRealPathName().empty();
+      !File->getFileEntry().tryGetRealPathName().empty();
+  // facebook end
 
   if (CheckIncludePathPortability) {
     StringRef Name = LookupFilename;

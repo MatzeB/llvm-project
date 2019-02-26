@@ -1,6 +1,10 @@
 // REQUIRES: shell
 // REQUIRES: case-insensitive-filesystem
-
+// facebook begin: T30493122
+// Enable -Wnonportable-include-path for header map
+// https://fburl.com/uimjayeu
+// UNSUPPORTED: true
+// facebook end
 // RUN: rm -f %t.hmap
 // RUN: sed -e "s:INPUTS_DIR:%S/Inputs:g" \
 // RUN:   %S/Inputs/nonportable-hmaps/foo.hmap.json > %t.hmap.json
