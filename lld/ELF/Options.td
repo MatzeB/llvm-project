@@ -719,6 +719,10 @@ def: F<"warn-once">;
 def: F<"warn-shared-textrel">;
 def: JoinedOrSeparate<["-"], "G">;
 
+// facebook begin D7044702
+defm: Eq<"thread-count", "Ignored for compatibility with GNU linkers">;
+// facebook end D7044702
+
 // Hidden option used for testing MIPS multi-GOT implementation.
 defm mips_got_size:
   Eq<"mips-got-size", "Max size of a single MIPS GOT. 0x10000 by default.">,
