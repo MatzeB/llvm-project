@@ -598,6 +598,19 @@ void __asan_handle_vfork(void *sp) {
   PoisonShadow(bottom, (uptr)sp - bottom, 0);
 }
 
+// facebook begin t10286520
+void NOINLINE __asan_enter_fiber(void const *fiber_stack_base,
+                                 uptr fiber_stack_extent) {
+  AsanThread *curr_thread = GetCurrentThread();
+  curr_thread->enter_fiber(fiber_stack_base, fiber_stack_extent);
+}
+
+void NOINLINE __asan_exit_fiber() {
+  AsanThread *curr_thread = GetCurrentThread();
+  curr_thread->exit_fiber();
+}
+// facebook end
+
 void NOINLINE __asan_set_death_callback(void (*callback)(void)) {
   SetUserDieCallback(callback);
 }
