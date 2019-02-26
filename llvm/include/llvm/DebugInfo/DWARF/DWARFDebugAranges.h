@@ -76,7 +76,6 @@ private:
 
   std::vector<RangeEndpoint> Endpoints;
   RangeColl Aranges;
-  DenseSet<uint64_t> ParsedCUOffsets;
 };
 
 } // end namespace llvm

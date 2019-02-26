@@ -8,6 +8,7 @@
 
 #include "llvm-dwarfdump.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h" // facebook D6624075
 #include "llvm/ADT/StringSet.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugLoc.h"
