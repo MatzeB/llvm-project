@@ -1543,8 +1543,13 @@ template <class ELFT> void SharedFile::parse() {
     // symbol, that's a violation of the spec.
     StringRef name = CHECK(sym.getName(this->stringTable), this);
     if (sym.getBinding() == STB_LOCAL) {
+      // facebook begin T34843296
+      // Commenting out warning instead of removing to avoid merge conflicts
+      /*
       warn("found local symbol '" + name +
            "' in global part of symbol table in file " + toString(this));
+      */
+      // facebook end T34843296
       continue;
     }
 
