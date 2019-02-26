@@ -28,6 +28,7 @@
 #include "llvm/CodeGen/MachinePassRegistry.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
+#include "llvm/IR/GraphChangeLog.h" // facebook t13480588
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/PassInstrumentation.h"
@@ -1014,6 +1015,11 @@ void TargetPassConfig::addISelPrepare() {
   if (PrintISelInput)
     addPass(createPrintFunctionPass(
         dbgs(), "\n\n*** Final LLVM Code input to ISel ***\n"));
+
+  // facebook begin t13480588
+  if (auto *Pass = createGraphChangeLogFinalLegacyPass(dbgs()))
+    addPass(Pass);
+  // facebook end
 
   // All passes which modify the LLVM IR are now complete; run the verifier
   // to ensure that the IR is valid.

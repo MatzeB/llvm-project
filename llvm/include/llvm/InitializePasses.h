@@ -173,6 +173,10 @@ void initializeGlobalMergePass(PassRegistry&);
 void initializeGlobalOptLegacyPassPass(PassRegistry&);
 void initializeGlobalSplitPass(PassRegistry&);
 void initializeGlobalsAAWrapperPassPass(PassRegistry&);
+// facebook begin t13480588
+void initializeGraphChangeLogFinalLegacyPassPass(PassRegistry &);
+void initializeGraphChangeLogLegacyPassPass(PassRegistry &);
+// facebook end
 void initializeGuardWideningLegacyPassPass(PassRegistry&);
 void initializeHardwareLoopsPass(PassRegistry&);
 void initializeMIRProfileLoaderPassPass(PassRegistry &);

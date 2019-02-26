@@ -25,6 +25,7 @@ add_llvm_component_library(LLVMCore
   GCStrategy.cpp
   GVMaterializer.cpp
   Globals.cpp
+  GraphChangeLog.cpp # facebook t13480588
   IRBuilder.cpp
   IRPrintingPasses.cpp
   SSAContext.cpp
