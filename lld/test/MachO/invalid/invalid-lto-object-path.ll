@@ -1,7 +1,9 @@
 ; REQUIRES: x86
 
 ;; Creating read-only directories with `chmod 400` isn't supported on Windows
-; UNSUPPORTED: system-windows
+;; facebook begin T68143747
+; UNSUPPORTED: true
+;; facebook end T68143747
 
 ;; -object_path_lto specifies a directory that cannot be created
 ; RUN: rm -rf %t && mkdir %t && mkdir %t/dir

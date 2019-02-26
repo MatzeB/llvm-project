@@ -1,3 +1,6 @@
+# facebook begin T92809436
+# REQUIRES: platform009-bug-fix
+# facebook end T92809436
 # RUN: rm -f %t1.txt %t2.txt %t3.txt
 # RUN: llvm-mc %S/brief.s -filetype obj -triple x86_64-apple-darwin -o %t.o
 

@@ -1,3 +1,6 @@
+; facebook begin T63412804
+; UNSUPPORTED: true
+; facebook end T63412804
 ; UNSUPPORTED: system-windows
 ; REQUIRES: shell
 ; RUN: llvm-as %s -o %t.bc

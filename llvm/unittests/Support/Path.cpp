@@ -816,6 +816,8 @@ TEST_F(FileSystemTest, RealPathNoReadPerm) {
 
   ASSERT_NO_ERROR(fs::remove_directories(Twine(TestDirectory) + "/noreadperm"));
 }
+// facebook begin T68143747
+#if 0
 TEST_F(FileSystemTest, RemoveDirectoriesNoExePerm) {
   SmallString<64> Expanded;
 
@@ -837,6 +839,8 @@ TEST_F(FileSystemTest, RemoveDirectoriesNoExePerm) {
                                            /*IgnoreErrors=*/false));
   }
 }
+#endif
+// facebook end T68143747
 #endif
 
 

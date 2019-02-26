@@ -1,6 +1,8 @@
 ## Unsupported on windows as marking files "unreadable"
 ## is non-trivial on windows.
-# UNSUPPORTED: system-windows
+## facebook begin T68143747
+# UNSUPPORTED: true
+## facebook end T68143747
 
 # RUN: rm -rf %t && mkdir -p %t
 # RUN: echo file1 > %t/1.txt
