@@ -1,5 +1,7 @@
 // RUN: rm -rf %t
-// RUN: %clang_cc1 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -I%S/Inputs/StdDef %s -verify -fno-modules-error-recovery
+// facebook begin T24847594
+// RUN: %clang_cc1 -fmodules -fmodule-map-file=%S/Inputs/StdDef/module.map -fmodules-cache-path=%t -I%S/Inputs/StdDef %s -verify -fno-modules-error-recovery
+// facebook end
 
 #include "ptrdiff_t.h"
 
