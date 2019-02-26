@@ -45,6 +45,10 @@ using namespace llvm;
 
 void llvm::initializeCore(PassRegistry &Registry) {
   initializeDominatorTreeWrapperPassPass(Registry);
+  // facebook begin t13480588
+  initializeGraphChangeLogFinalLegacyPassPass(Registry);
+  initializeGraphChangeLogLegacyPassPass(Registry);
+  // facebook end
   initializePrintModulePassWrapperPass(Registry);
   initializePrintFunctionPassWrapperPass(Registry);
   initializeSafepointIRVerifierPass(Registry);

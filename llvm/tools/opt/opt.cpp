@@ -27,6 +27,7 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/GraphChangeLog.h" // facebook t13480588
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -415,6 +416,10 @@ static void AddOptimizationPasses(legacy::PassManagerBase &MPM,
   }
 
   Builder.populateFunctionPassManager(FPM);
+  // facebook begin t13480588
+  if (auto *P = createGraphChangeLogFinalLegacyPass(dbgs()))
+    FPM.add(P);
+  // facebook end
   Builder.populateModulePassManager(MPM);
 }
 
