@@ -231,10 +231,22 @@ public:
     return llvm::makeArrayRef<T>((const T *)rawData.data(), s / sizeof(T));
   }
 
+  // facebook begin T37438891
+  bool reduceDebugAbbrevSection();
+
+  void nullTerminateReducedDebugAbbrev();
+  // facebook end T37438891
+
 protected:
   template <typename ELFT>
   void parseCompressedHeader();
   void decompress() const;
+
+  // facebook begin T37438891
+  // Backing storage for rawData in case we need to reduce the section and
+  // don't just point to the original data
+  mutable std::vector<uint8_t> reducedDebugBuffer;
+  // facebook end T37438891
 
   // This field stores the uncompressed size of the compressed data in rawData,
   // or -1 if rawData is not compressed (either because the section wasn't
@@ -394,7 +406,8 @@ private:
   template <class ELFT> void copyShtGroup(uint8_t *buf);
 };
 
-static_assert(sizeof(InputSection) <= 160, "InputSection is too big");
+static_assert(sizeof(InputSection) <= 160 + sizeof(std::vector<uint8_t>),
+              "InputSection is too big"); // facebook T37438891
 
 class SyntheticSection : public InputSection {
 public:

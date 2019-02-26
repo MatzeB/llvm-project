@@ -744,12 +744,16 @@ static StripPolicy getStrip(opt::InputArgList &args) {
   if (args.hasArg(OPT_relocatable))
     return StripPolicy::None;
 
-  auto *arg = args.getLastArg(OPT_strip_all, OPT_strip_debug);
+  // facebook begin T37438891
+  auto *arg = args.getLastArg(OPT_strip_all, OPT_strip_debug, OPT_strip_debug_non_line);
   if (!arg)
     return StripPolicy::None;
   if (arg->getOption().getID() == OPT_strip_all)
     return StripPolicy::All;
-  return StripPolicy::Debug;
+  if (arg->getOption().getID() == OPT_strip_debug)
+    return StripPolicy::Debug;
+  return StripPolicy::DebugNonLine;
+  // facebook end T37438891
 }
 
 static uint64_t parseSectionAddress(StringRef s, opt::InputArgList &args,
@@ -2678,16 +2682,30 @@ void LinkerDriver::link(opt::InputArgList &args) {
     // Now that we have a complete list of input files.
     // Beyond this point, no new files are added.
     // Aggregate all input sections into one place.
+    // facebook begin T37438891
+    InputSectionBase *lastDebugAbbrevSection = nullptr;
     for (InputFile *f : ctx->objectFiles) {
       for (InputSectionBase *s : f->getSections()) {
         if (!s || s == &InputSection::discarded)
           continue;
         if (LLVM_UNLIKELY(isa<EhInputSection>(s)))
           ehInputSections.push_back(cast<EhInputSection>(s));
-        else
+        else {
+          if (config->strip == StripPolicy::DebugNonLine &&
+              s->name.equals(".debug_abbrev")) {
+            lastDebugAbbrevSection = s;
+            if (!s->reduceDebugAbbrevSection()) {
+              warn("Failed to reduce .debug_abbrev section.");
+            }
+          }
           inputSections.push_back(s);
+        }
       }
     }
+    if (lastDebugAbbrevSection) {
+      lastDebugAbbrevSection->nullTerminateReducedDebugAbbrev();
+    }
+    // facebook end T37438891
     for (BinaryFile *f : ctx->binaryFiles)
       for (InputSectionBase *s : f->getSections())
         inputSections.push_back(cast<InputSection>(s));
@@ -2709,6 +2727,30 @@ void LinkerDriver::link(opt::InputArgList &args) {
       llvm::erase_if(inputSections, [](InputSectionBase *s) {
         if (isDebugSection(*s))
           return true;
+
+        // facebook begin T37438891
+        // If --strip-debug-non-line is specified, emit only the sections used for
+        // line info.
+        if (config->strip == StripPolicy::DebugNonLine) {
+          // Keep debug_abbrev, debug_info, debug_line, and debug_str.  Discard
+          // all other debug sections.  This is the minimal set of required
+          // sections for folly::symbolizer (see https://fburl.com/pihaosby) Note
+          // that .debug_arranges is optional but provides significant speed up to
+          // folly::symbolizer,  especially important when binary is compiled
+          // under debug mode with sanitizers
+          return StringSwitch<bool>(s->name)
+              .EndsWith("debug_abbrev", false)
+              .EndsWith("debug_info", false)
+              .EndsWith("debug_line", false)
+              .EndsWith("debug_str", false)
+              .EndsWith("debug_aranges", false)
+              .EndsWith("debug_gdb_scripts", false)
+              .StartsWith(".debug", true)
+              .StartsWith(".zdebug", true)
+              .Default(false);
+        }
+        // facebook end T37438891
+
         if (auto *isec = dyn_cast<InputSection>(s))
           if (InputSectionBase *rel = isec->getRelocatedSection())
             if (isDebugSection(*rel))

@@ -390,6 +390,11 @@ def strip_all: F<"strip-all">, HelpText<"Strip all symbols. Implies --strip-debu
 
 def strip_debug: F<"strip-debug">, HelpText<"Strip debugging information">;
 
+// facebook begins T37438891
+def strip_debug_non_line: F<"strip-debug-non-line">,
+  HelpText<"Emit only debug line number information">;
+// facebook ends T37438891
+
 defm symbol_ordering_file:
   EEq<"symbol-ordering-file", "Layout sections to place symbols in the order specified by symbol ordering file">;
 

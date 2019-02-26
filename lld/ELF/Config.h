@@ -58,8 +58,10 @@ enum class DiscardPolicy { Default, All, Locals, None };
 // For --icf={none,safe,all}.
 enum class ICFLevel { None, Safe, All };
 
-// For --strip-{all,debug}.
-enum class StripPolicy { None, All, Debug };
+// facebook begin T37438891
+// For --strip-{all,debug,debug-non-line}.
+enum class StripPolicy { None, All, Debug, DebugNonLine};
+// facebook end T37438891
 
 // For --unresolved-symbols.
 enum class UnresolvedPolicy { ReportError, Warn, Ignore };
