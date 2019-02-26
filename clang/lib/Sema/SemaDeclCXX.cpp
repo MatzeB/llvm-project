@@ -3704,6 +3704,13 @@ namespace {
       if (!Decls.count(FoundVD))
         return;
 
+      // facebook begin D8040619
+      // FoundVD may have been initialized in the previous expression.
+      if (std::find(DeclsToRemove.begin(), DeclsToRemove.end(), FoundVD) !=
+          DeclsToRemove.end())
+        return;
+      // facebook end D8040619
+
       const bool IsReference = FoundVD->getType()->isReferenceType();
 
       if (InitList && !AddressOf && FoundVD == InitListFieldDecl) {
@@ -3739,8 +3746,32 @@ namespace {
 
       if (ConditionalOperator *CO = dyn_cast<ConditionalOperator>(E)) {
         Visit(CO->getCond());
+
+        // facebook begin D8040619
+        // The standard says that only one of the second and third expressions
+        // of ternary operator is evaluated. Therefore, for precision, we
+        // shouldn't assume that decls initialized from the second expression
+        // as initialized when evaluating the third expression.
+        llvm::SmallVector<ValueDecl *, 4> DTRAfterCond(DeclsToRemove);
         HandleValue(CO->getTrueExpr(), AddressOf);
+
+        llvm::SmallVector<ValueDecl *, 4> DTRFromTrue;
+        for (ValueDecl *VD : DeclsToRemove)
+          if (std::find(DTRAfterCond.begin(), DTRAfterCond.end(), VD) ==
+              DTRAfterCond.end())
+            // VD is initialized from true expr.
+            DTRFromTrue.push_back(VD);
+
+        // Rolls back DeclsToRemove before evaluating false expr.
+        DeclsToRemove = DTRAfterCond;
         HandleValue(CO->getFalseExpr(), AddressOf);
+
+        // Add initialized decls from true expr to DeclsToRemove.
+        // FIXME: Use the CFG-based analysis to add decls from either true or
+        // false expression to DeclsToRemove.
+        DeclsToRemove.insert(DeclsToRemove.end(), DTRFromTrue.begin(),
+                             DTRFromTrue.end());
+        // facebook end D8040619
         return;
       }
 
@@ -3909,6 +3940,12 @@ namespace {
 
       Inherited::VisitUnaryOperator(E);
     }
+
+    // facebook begin D8040619
+    void VisitConditionalOperator(ConditionalOperator *E) {
+      HandleValue(E, false /*AddressOf*/);
+    }
+    // facebook end D8040619
   };
 
   // Diagnose value-uses of fields to initialize themselves, e.g.
