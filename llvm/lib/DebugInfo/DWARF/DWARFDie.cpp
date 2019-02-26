@@ -706,6 +706,16 @@ DWARFDie::attribute_iterator &DWARFDie::attribute_iterator::operator++() {
   return *this;
 }
 
+// facebook begin D13311561
+std::string DWARFDie::getFile(uint32_t FileIdx) const {
+  std::string File;
+  DWARFUnit *U = getDwarfUnit();
+  if (const auto *LT = U->getContext().getLineTableForUnit(U))
+    LT->getFileNameByIndex(FileIdx, U->getCompilationDir(), DILineInfoSpecifier::FileLineInfoKind::AbsoluteFilePath, File);
+  return File;
+}
+// facebook end
+
 bool DWARFAttribute::mayHaveLocationList(dwarf::Attribute Attr) {
   switch(Attr) {
   case DW_AT_location:

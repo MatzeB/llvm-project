@@ -1,0 +1,275 @@
+# facebook begin D13311561
+# RUN: yaml2obj %s > %t.o
+# RUN: llvm-dwarfdump --analyze %t.o 2>&1 | FileCheck %s
+
+# This test verifies that two Point structures with the same name, decl
+# context, decl file, decl line, and byte size but differing declaration
+# contexts (one in global namespace and one in "shapes" namespace) byte sizes
+# will be not be reported as duplicated types.
+
+# CHECK: Type duplication:
+# CHECK: ======= ======= ======= ====== ====================================
+# CHECK:       0   0.00%   0.00%        Total duplicated types
+
+
+--- !mach-o
+FileHeader:
+  magic:           0xFEEDFACE
+  cputype:         0x00000007
+  cpusubtype:      0x00000003
+  filetype:        0x00000001
+  ncmds:           2
+  sizeofcmds:      412
+  flags:           0x00000000
+LoadCommands:
+  - cmd:             LC_SEGMENT
+    cmdsize:         396
+    segname:         ''
+    vmaddr:          0
+    vmsize:          254
+    fileoff:         440
+    filesize:        254
+    maxprot:         7
+    initprot:        7
+    nsects:          5
+    flags:           0
+    Sections:
+      - sectname:        __debug_abbrev
+        segname:         __DWARF
+        addr:            0x0000000000000000
+        size:            56
+        offset:          0x000001B8
+        align:           0
+        reloff:          0x00000000
+        nreloc:          0
+        flags:           0x02000000
+        reserved1:       0x00000000
+        reserved2:       0x00000000
+        reserved3:       0x00000000
+      - sectname:        __debug_str
+        segname:         __DWARF
+        addr:            0x0000000000000038
+        size:            32
+        offset:          0x000001F0
+        align:           0
+        reloff:          0x00000000
+        nreloc:          0
+        flags:           0x02000000
+        reserved1:       0x00000000
+        reserved2:       0x00000000
+        reserved3:       0x00000000
+      - sectname:        __debug_str_offs
+        segname:         __DWARF
+        addr:            0x0000000000000058
+        size:            0
+        offset:          0x00000210
+        align:           0
+        reloff:          0x00000000
+        nreloc:          0
+        flags:           0x02000000
+        reserved1:       0x00000000
+        reserved2:       0x00000000
+        reserved3:       0x00000000
+      - sectname:        __debug_info
+        segname:         __DWARF
+        addr:            0x0000000000000058
+        size:            121
+        offset:          0x00000210
+        align:           0
+        reloff:          0x00000000
+        nreloc:          0
+        flags:           0x02000000
+        reserved1:       0x00000000
+        reserved2:       0x00000000
+        reserved3:       0x00000000
+      - sectname:        __debug_line
+        segname:         __DWARF
+        addr:            0x00000000000000D1
+        size:            45
+        offset:          0x00000289
+        align:           0
+        reloff:          0x00000000
+        nreloc:          0
+        flags:           0x02000000
+        reserved1:       0x00000000
+        reserved2:       0x00000000
+        reserved3:       0x00000000
+  - cmd:             LC_VERSION_MIN_MACOSX
+    cmdsize:         16
+    version:         658688
+    sdk:             0
+DWARF:
+  debug_str:
+    - '/tmp/main.c'
+    - int
+    - Point
+    - x
+    - y
+    - shape
+  debug_abbrev:
+    - Table:
+      - Code:            0x00000001
+        Tag:             DW_TAG_compile_unit
+        Children:        DW_CHILDREN_yes
+        Attributes:
+          - Attribute:       DW_AT_name
+            Form:            DW_FORM_strp
+          - Attribute:       DW_AT_language
+            Form:            DW_FORM_data2
+          - Attribute:       DW_AT_stmt_list
+            Form:            DW_FORM_sec_offset
+      - Code:            0x00000002
+        Tag:             DW_TAG_base_type
+        Children:        DW_CHILDREN_no
+        Attributes:
+          - Attribute:       DW_AT_name
+            Form:            DW_FORM_strp
+          - Attribute:       DW_AT_encoding
+            Form:            DW_FORM_data1
+          - Attribute:       DW_AT_byte_size
+            Form:            DW_FORM_data1
+      - Code:            0x00000003
+        Tag:             DW_TAG_class_type
+        Children:        DW_CHILDREN_yes
+        Attributes:
+          - Attribute:       DW_AT_name
+            Form:            DW_FORM_strp
+          - Attribute:       DW_AT_byte_size
+            Form:            DW_FORM_data1
+          - Attribute:       DW_AT_decl_file
+            Form:            DW_FORM_data1
+          - Attribute:       DW_AT_decl_line
+            Form:            DW_FORM_data1
+      - Code:            0x00000004
+        Tag:             DW_TAG_member
+        Children:        DW_CHILDREN_no
+        Attributes:
+          - Attribute:       DW_AT_name
+            Form:            DW_FORM_strp
+          - Attribute:       DW_AT_type
+            Form:            DW_FORM_ref_addr
+          - Attribute:       DW_AT_decl_file
+            Form:            DW_FORM_data1
+          - Attribute:       DW_AT_decl_line
+            Form:            DW_FORM_data1
+      - Code:            0x00000005
+        Tag:             DW_TAG_namespace
+        Children:        DW_CHILDREN_yes
+        Attributes:
+          - Attribute:       DW_AT_name
+            Form:            DW_FORM_strp
+  debug_info:
+    - Length:          57
+      Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0
+      AddrSize:        4
+      Entries:
+        - AbbrCode:        0x00000001
+          Values:
+            - Value:           0x0000000000000000
+            - Value:           0x0000000000000002
+            - Value:           0x0000000000000000
+        - AbbrCode:        0x00000002
+          Values:
+            - Value:           0x000000000000000C
+            - Value:           0x0000000000000005
+            - Value:           0x0000000000000004
+        - AbbrCode:        0x00000003
+          Values:
+            - Value:           0x0000000000000010
+            - Value:           0x0000000000000008
+            - Value:           0x0000000000000001
+            - Value:           0x0000000000000004
+        - AbbrCode:        0x00000004
+          Values:
+            - Value:           0x0000000000000016
+            - Value:           0x0000000000000016
+            - Value:           0x0000000000000001
+            - Value:           0x0000000000000005
+        - AbbrCode:        0x00000004
+          Values:
+            - Value:           0x0000000000000018
+            - Value:           0x0000000000000016
+            - Value:           0x0000000000000001
+            - Value:           0x0000000000000006
+        - AbbrCode:        0x00000000
+          Values:
+        - AbbrCode:        0x00000000
+          Values:
+    - Length:          56
+      Version:         4
+      AbbrevTableID:   0
+      AbbrOffset:      0
+      AddrSize:        4
+      Entries:
+        - AbbrCode:        0x00000001
+          Values:
+            - Value:           0x0000000000000000
+            - Value:           0x0000000000000002
+            - Value:           0x0000000000000000
+        - AbbrCode:        0x00000005
+          Values:
+            - Value:           0x000000000000001A
+        - AbbrCode:        0x00000003
+          Values:
+            - Value:           0x0000000000000010
+            - Value:           0x0000000000000008
+            - Value:           0x0000000000000001
+            - Value:           0x0000000000000004
+        - AbbrCode:        0x00000004
+          Values:
+            - Value:           0x0000000000000016
+            - Value:           0x0000000000000016
+            - Value:           0x0000000000000001
+            - Value:           0x0000000000000005
+        - AbbrCode:        0x00000004
+          Values:
+            - Value:           0x0000000000000018
+            - Value:           0x0000000000000016
+            - Value:           0x0000000000000001
+            - Value:           0x0000000000000006
+        - AbbrCode:        0x00000000
+          Values:
+        - AbbrCode:        0x00000000
+          Values:
+        - AbbrCode:        0x00000000
+          Values:
+  debug_line:
+    - Length:          41
+      Version:         4
+      PrologueLength:  35
+      MinInstLength:   1
+      MaxOpsPerInst:   1
+      DefaultIsStmt:   1
+      LineBase:        251
+      LineRange:       14
+      OpcodeBase:      13
+      StandardOpcodeLengths: [ 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 ]
+      IncludeDirs:
+        - '/tmp'
+      Files:
+        - Name:            main.c
+          DirIdx:          1
+          ModTime:         0
+          Length:          0
+      Opcodes:
+    - Length:          41
+      Version:         4
+      PrologueLength:  35
+      MinInstLength:   1
+      MaxOpsPerInst:   1
+      DefaultIsStmt:   1
+      LineBase:        251
+      LineRange:       14
+      OpcodeBase:      13
+      StandardOpcodeLengths: [ 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 ]
+      IncludeDirs:
+        - '/tmp'
+      Files:
+        - Name:            main.c
+          DirIdx:          1
+          ModTime:         0
+          Length:          0
+      Opcodes:
+...

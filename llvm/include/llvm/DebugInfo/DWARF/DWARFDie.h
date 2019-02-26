@@ -205,6 +205,10 @@ public:
   /// \returns an optional address value for the attribute.
   Optional<uint64_t> getHighPC(uint64_t LowPC) const;
 
+  // facebook begin D13311561
+  std::string getFile(uint32_t FileIdx) const;
+  // facebook end
+
   /// Retrieves DW_AT_low_pc and DW_AT_high_pc from CU.
   /// Returns true if both attributes are present.
   bool getLowAndHighPC(uint64_t &LowPC, uint64_t &HighPC,

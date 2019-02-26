@@ -9,6 +9,7 @@ set(LLVM_LINK_COMPONENTS
 
 add_llvm_tool(llvm-dwarfdump
   SectionSizes.cpp
+  Analyze.cpp # facebook D13311561
   Statistics.cpp
   llvm-dwarfdump.cpp
   )
