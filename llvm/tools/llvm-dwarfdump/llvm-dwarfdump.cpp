@@ -118,9 +118,12 @@ namespace {
 using namespace cl;
 
 OptionCategory DwarfDumpCategory("Specific Options");
+OptionCategory AnalyzeCategory("Analyze Options"); // facebook D13311561
 static list<std::string>
     InputFilenames(Positional, desc("<input object files or .dSYM bundles>"),
-                   ZeroOrMore, cat(DwarfDumpCategory));
+                                                     // facebook begin D13311561
+                   ZeroOrMore, cat(DwarfDumpCategory), cat(AnalyzeCategory));
+// facebook end
 
 cl::OptionCategory SectionCategory("Section-specific Dump Options",
                                    "These control which sections are dumped. "
@@ -245,6 +248,12 @@ static cl::opt<bool>
                      cl::desc("Show the sizes of all debug sections, "
                               "expressed in bytes."),
                      cat(DwarfDumpCategory));
+// facebook begin D13311561
+static cl::opt<bool>
+    Analyze("analyze",
+            cl::desc("Analyze the DWARF and report detailed information."),
+            cl::cat(AnalyzeCategory));
+// facebook end
 static opt<bool> Verify("verify", desc("Verify the DWARF debug info."),
                         cat(DwarfDumpCategory));
 static opt<bool> Quiet("quiet", desc("Use with -verify to not emit to STDOUT."),
@@ -253,14 +262,38 @@ static opt<bool> DumpUUID("uuid", desc("Show the UUID for each architecture."),
                           cat(DwarfDumpCategory));
 static alias DumpUUIDAlias("u", desc("Alias for --uuid."), aliasopt(DumpUUID),
                            cl::NotHidden);
-static opt<bool> Verbose("verbose",
-                         desc("Print more low-level encoding details."),
-                         cat(DwarfDumpCategory));
-static alias VerboseAlias("v", desc("Alias for --verbose."), aliasopt(Verbose),
-                          cat(DwarfDumpCategory), cl::NotHidden);
 static cl::extrahelp
     HelpResponse("\nPass @FILE as argument to read options from FILE.\n");
 } // namespace
+
+// facebook begin D13311561
+// Any options that need to be accessed from other source files in
+// llvm-dwarfdump should not be static and must be moved out of the above
+// anonymous namespace.
+opt<uint32_t> MaxDirectoryDepth("dir-depth", init(UINT32_MAX),
+    desc("Limit maximum recursion depth when showing debug info sizes in "
+         "directories"), cat(AnalyzeCategory));
+
+opt<uint32_t> MaxInlineDepth("max-inline-depth", init(UINT32_MAX),
+    desc("Limit maximum inline code depth when showing inline info counts and "
+         " sizes"), cat(AnalyzeCategory));
+
+opt<uint32_t> MinTypeDuplicationSize("min-type-size",
+    init(0), desc("Don't display type duplication info "
+    "if the number of duplicated bytes is less than this byte size value."),
+    cat(AnalyzeCategory));
+
+opt<float> MinPercentage("min-percent", init(0.01),
+                         desc("Minimum percentage required for display."),
+                         cat(AnalyzeCategory));
+
+opt<bool> Verbose("verbose",
+                  desc("Print more low-level encoding details."),
+                  cat(DwarfDumpCategory));
+
+static alias VerboseAlias("v", desc("Alias for --verbose."), aliasopt(Verbose),
+                          cat(DwarfDumpCategory), cl::NotHidden);
+// facebook end
 /// @}
 //===----------------------------------------------------------------------===//
 
@@ -625,8 +658,9 @@ int main(int argc, char **argv) {
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargetMCs();
 
-  HideUnrelatedOptions(
-      {&DwarfDumpCategory, &SectionCategory, &getColorCategory()});
+  // facebook begin D13311561
+  HideUnrelatedOptions({&DwarfDumpCategory, &AnalyzeCategory, &SectionCategory, &getColorCategory()});
+  // facebook end
   cl::ParseCommandLineOptions(
       argc, argv,
       "pretty-print DWARF debug information in object files"
@@ -697,6 +731,11 @@ int main(int argc, char **argv) {
   } else if (ShowSectionSizes) {
     for (auto Object : Objects)
       Success &= handleFile(Object, collectObjectSectionSizes, OutputFile.os());
+    // facebook begin D13311561
+  } else if (Analyze) {
+    for (auto Object : Objects)
+       Success &= handleFile(Object, analyzeObjectFile, OutputFile.os());
+      // facebook end D13311561
   } else {
     for (auto Object : Objects)
       Success &= handleFile(Object, dumpObjectFile, OutputFile.os());

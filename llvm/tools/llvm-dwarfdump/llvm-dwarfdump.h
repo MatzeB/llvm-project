@@ -38,6 +38,10 @@ bool collectStatsForObjectFile(object::ObjectFile &Obj, DWARFContext &DICtx,
                                const Twine &Filename, raw_ostream &OS);
 bool collectObjectSectionSizes(object::ObjectFile &Obj, DWARFContext &DICtx,
                                const Twine &Filename, raw_ostream &OS);
+// facebook begin D13311561
+bool analyzeObjectFile(object::ObjectFile &Obj, DWARFContext &DICtx,
+                       const Twine Filename, raw_ostream &OS);
+// facebook end
 
 } // namespace dwarfdump
 } // namespace llvm
