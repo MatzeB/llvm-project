@@ -78,6 +78,19 @@ class AsanThread {
   AsanThreadContext *context() { return context_; }
   void set_context(AsanThreadContext *context) { context_ = context; }
 
+  // facebook begin t10286520
+  void enter_fiber(void const *fiber_stack_base, uptr fiber_stack_extent) {
+    fiber_stack_bottom_ = reinterpret_cast<uptr>(fiber_stack_base);
+    fiber_stack_top_ =
+      reinterpret_cast<uptr>(fiber_stack_base) + fiber_stack_extent;
+    fiber_stack_size_ = reinterpret_cast<uptr>(fiber_stack_extent);
+  }
+
+  void exit_fiber() {
+    fiber_stack_size_ = fiber_stack_top_ = fiber_stack_bottom_ = 0;
+  }
+  // facebook end
+
   struct StackFrameAccess {
     uptr offset;
     uptr frame_pc;
@@ -157,6 +170,12 @@ class AsanThread {
   uptr next_stack_bottom_;
   // true if switching is in progress
   atomic_uint8_t stack_switching_;
+
+  // facebook begin t10286520
+  uptr fiber_stack_top_;
+  uptr fiber_stack_bottom_;
+  uptr fiber_stack_size_;
+  // facebook end
 
   uptr tls_begin_;
   uptr tls_end_;

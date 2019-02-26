@@ -308,6 +308,14 @@ void *__asan_get_current_fake_stack(void);
 void *__asan_addr_is_in_fake_stack(void *fake_stack, void *addr, void **beg,
                                    void **end);
 
+// facebook begin t10286520
+// Let fibers (aka usermode threads) tell ASAN where the stack is when
+// entering a fiber, or leaving the fiber (returning to the OS thread).
+void __asan_enter_fiber(void const *fiber_stack_base,
+                        size_t fiber_stack_extent);
+void __asan_exit_fiber();
+// facebook end
+
 /// Performs shadow memory cleanup of the current thread's stack before a
 /// function marked with the <c>[[noreturn]]</c> attribute is called.
 ///
