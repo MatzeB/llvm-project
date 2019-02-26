@@ -39,7 +39,13 @@ config.substitutions.append(('%env_tsan_opts=',
 
 # GCC driver doesn't add necessary compile/link flags with -fsanitize=thread.
 if config.compiler_id == 'GNU':
-  extra_cflags = ["-fPIE", "-pthread", "-ldl", "-lrt", "-pie"]
+  # FB_ONLY: Use -fPIC because TSAN is loaded as a shared library for python
+  # binaries, and shared libraries require -fPIC. The additional -pie flag
+  # at the end here is OK to mix with -fPIC because -pie is needed when
+  # statically linking TSAN libraries into an executable. When building
+  # shared libraries for dynamic linking, we expect the `-shared` flag, which
+  # is not being tested here.
+  extra_cflags = ["-fPIC", "-pthread", "-ldl", "-lrt", "-pie"]
 else:
   extra_cflags = []
 
