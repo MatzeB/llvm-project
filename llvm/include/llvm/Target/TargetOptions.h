@@ -123,6 +123,7 @@ namespace llvm {
           FunctionSections(false), DataSections(false),
           IgnoreXCOFFVisibility(false), XCOFFTracebackTable(true),
           UniqueSectionNames(true), UniqueBasicBlockSectionNames(false),
+          ReorderFunctions(true), // facebook t19574305
           TrapUnreachable(false), NoTrapAfterNoreturn(false), TLSSize(0),
           EmulatedTLS(false), ExplicitEmulatedTLS(false), EnableIPRA(false),
           EmitStackSizeSection(false), EnableMachineOutliner(false),
@@ -247,6 +248,11 @@ namespace llvm {
 
     /// Use unique names for basic block sections.
     unsigned UniqueBasicBlockSectionNames : 1;
+
+    // facebook begin t19574305
+    /// Add section prefix for hot/cold functions.
+    unsigned ReorderFunctions : 1;
+    // facebook end
 
     /// Emit target-specific trap instruction for 'unreachable' IR instructions.
     unsigned TrapUnreachable : 1;

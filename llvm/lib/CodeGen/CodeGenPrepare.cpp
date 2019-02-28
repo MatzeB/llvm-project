@@ -474,7 +474,13 @@ bool CodeGenPrepare::runOnFunction(Function &F) {
   BFI.reset(new BlockFrequencyInfo(F, *BPI, *LI));
   PSI = &getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
   OptSize = F.hasOptSize();
-  if (ProfileGuidedSectionPrefix) {
+
+  // facebook begin T19574305
+  bool AddProfileGuidedSectionPrefix =
+      (!TM || ProfileGuidedSectionPrefix.getNumOccurrences())
+          ? ProfileGuidedSectionPrefix
+          : TM->getReorderFunctions();
+  if (AddProfileGuidedSectionPrefix) {
     // The hot attribute overwrites profile count based hotness while profile
     // counts based hotness overwrite the cold attribute.
     // This is a conservative behabvior.
@@ -491,6 +497,7 @@ bool CodeGenPrepare::runOnFunction(Function &F) {
              PSI->isFunctionHotnessUnknown(F))
       F.setSectionPrefix("unknown");
   }
+  // facebook end T19574305
 
   /// This optimization identifies DIV instructions that can be
   /// profitably bypassed and carried out with a shorter, faster divide.
