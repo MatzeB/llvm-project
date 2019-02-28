@@ -116,6 +116,21 @@ STATISTIC(
     NumCSInlinedHitGrowthLimit,
     "Number of functions with FDO inline stopped due to growth size limit");
 
+// facebook begin D5612198
+static cl::opt<bool> adaptativeOptLevel("variable-opt-level", cl::init(false),
+                                        cl::value_desc("N"), cl::desc("None"));
+static cl::opt<double>
+    OptForMinSizeThreshold("sample-profile-opt-for-min-size-threshold",
+                           cl::init(0.0), cl::value_desc("N"),
+                           cl::desc("Function with  0 <= sample count <= "
+                                    "threshold will be optimize for minsize"));
+
+static cl::opt<double> OptForSizeThreshold(
+    "sample-profile-opt-for-size-threshold", cl::init(0.0), cl::value_desc("N"),
+    cl::desc("Function with OptForMinSizeThreshold  <= sample count <= "
+             "OptForSizeThreshold will be optimize for size"));
+
+//  facebook end
 // Command line option to specify the file to read samples from. This is
 // mainly used for debugging.
 static cl::opt<std::string> SampleProfileFile(
@@ -439,7 +454,10 @@ public:
   bool doInitialization(Module &M, FunctionAnalysisManager *FAM = nullptr);
   bool runOnModule(Module &M, ModuleAnalysisManager *AM,
                    ProfileSummaryInfo *_PSI, CallGraph *CG);
-
+  // facebook begin D5612198
+  // adjust the optimization level with regards to the  "hotness"
+  bool adjustOptLevel(Function &F, uint64_t sampleCount);
+  // facebook end
 protected:
   bool runOnFunction(Function &F, ModuleAnalysisManager *AM);
   bool emitAnnotations(Function &F);
@@ -514,6 +532,11 @@ protected:
   /// at runtime.
   uint64_t TotalCollectedSamples = 0;
 
+  // facebook begin D5612198
+  // For each function, collects the sum total of the sample from the inlined
+  // instances
+  StringMap<uint64_t> sumSampleFromInlineInstance;
+  // facebook end
   // Information recorded when we declined to inline a call site
   // because we have determined it is too cold is accumulated for
   // each callee function. Initially this is just the entry count.
@@ -756,6 +779,28 @@ SampleProfileLoader::findFunctionSamples(const Instruction &Inst) const {
   }
   return it.first->second;
 }
+// facebook begin D5612198
+
+bool SampleProfileLoader::adjustOptLevel(Function &F,
+                                         uint64_t functionSampleCount) {
+  double samplePercent =
+      (double)functionSampleCount / ((double)this->TotalCollectedSamples);
+  if (samplePercent <= OptForMinSizeThreshold) {
+    LLVM_DEBUG(dbgs() << "Function : " << F.getName()
+                      << " optimized for Minsize\n");
+    F.addFnAttr(Attribute::MinSize);
+    return true;
+  } else if (samplePercent <= OptForSizeThreshold) {
+    LLVM_DEBUG(dbgs() << "Function : " << F.getName()
+                      << " optimized for size\n");
+    F.addFnAttr(Attribute::OptimizeForSize);
+    return true;
+  }
+  return false;
+
+}
+
+// facebook end
 
 /// Check whether the indirect call promotion history of \p Inst allows
 /// the promotion for \p Candidate.
@@ -2023,9 +2068,19 @@ bool SampleProfileLoader::runOnModule(Module &M, ModuleAnalysisManager *AM,
                         ProfileSummary::PSK_Sample);
     PSI->refresh();
   }
+
+  // facebook begin D5612198
   // Compute the total number of samples collected in this profile.
-  for (const auto &I : Reader->getProfiles())
+  for (const auto &I : Reader->getProfiles()) {
     TotalCollectedSamples += I.second.getTotalSamples();
+    for (auto &callSite : I.second.getCallsiteSamples()) {
+      for (auto &func_sample : callSite.second) {
+        sumSampleFromInlineInstance[func_sample.first] +=
+            func_sample.second.getTotalSamples();
+      }
+    }
+  }
+  // facebook end
 
   auto Remapper = Reader->getRemapper();
   // Populate the symbol map.
@@ -2137,6 +2192,16 @@ bool SampleProfileLoader::runOnFunction(Function &F, ModuleAnalysisManager *AM) 
   else
     Samples = Reader->getSamplesFor(F);
 
+  // facebook begin D5612198
+  if (adaptativeOptLevel) {
+    uint64_t functionSampleCount =
+        (Samples != nullptr) ? Samples->getTotalSamples() : 0;
+    functionSampleCount += sumSampleFromInlineInstance[F.getName()];
+    if (adjustOptLevel(F, functionSampleCount))
+      return true; // If the function optimization level was adjusted, skip the
+                   // annotation
+  }
+  // facebook end
   if (Samples && !Samples->empty())
     return emitAnnotations(F);
   return false;
