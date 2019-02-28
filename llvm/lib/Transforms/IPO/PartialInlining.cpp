@@ -144,6 +144,13 @@ static cl::opt<unsigned> ExtraOutliningPenalty(
     "partial-inlining-extra-penalty", cl::init(0), cl::Hidden,
     cl::desc("A debug option to add additional penalty to the computed one."));
 
+// facebook begin T28868139
+static cl::opt<bool>
+    AllowSampleProfiles("partial-inline-with-sample-profile", cl::init(false),
+                        cl::ZeroOrMore, cl::ReallyHidden,
+                        cl::desc("Use sample profiles for partial inlining"));
+// facebook end
+
 namespace {
 
 struct FunctionOutliningInfo {
@@ -408,7 +415,9 @@ PartialInlinerImpl::computeOutliningColdRegionsInfo(
     BFI = &(GetBFI(F));
 
   // Return if we don't have profiling information.
-  if (!PSI.hasInstrumentationProfile())
+  // facebook T28868139
+  if (!PSI.hasInstrumentationProfile() &&
+      !(AllowSampleProfiles && PSI.hasSampleProfile()))
     return std::unique_ptr<FunctionOutliningMultiRegionInfo>();
 
   std::unique_ptr<FunctionOutliningMultiRegionInfo> OutliningInfo =
