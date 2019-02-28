@@ -210,6 +210,10 @@ namespace options {
   static std::string stats_file;
   // Asserts that LTO link has whole program visibility
   static bool whole_program_visibility = false;
+  // facebook begin T30875122
+  // Codegen only. Do not perform optimization.
+  static bool codegen_only = false;
+  // facebook end
 
   // Optimization remarks filename, accepted passes and hotness options
   static std::string RemarksFilename;
@@ -312,6 +316,10 @@ namespace options {
       RemarksFormat = std::string(opt);
     } else if (opt.consume_front("stats-file=")) {
       stats_file = std::string(opt);
+      // facebook begin T30875122
+    } else if (opt == "codegen-only") {
+      codegen_only = true;
+      // facebook end
     } else {
       // Save this option to pass to the code generator.
       // ParseCommandLineOptions() expects argv[0] to be program name. Lazily
@@ -964,6 +972,9 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
   Conf.HasWholeProgramVisibility = options::whole_program_visibility;
 
   Conf.StatsFile = options::stats_file;
+  // facebook begin T30875122
+  Conf.CodeGenOnly = options::codegen_only;
+  // facebook end
   return std::make_unique<LTO>(std::move(Conf), Backend,
                                 options::ParallelCodeGenParallelismLevel);
 }
