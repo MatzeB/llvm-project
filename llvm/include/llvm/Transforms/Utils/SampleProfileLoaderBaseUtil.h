@@ -85,6 +85,18 @@ private:
   bool ProfAccForSymsInList = false;
 };
 
+// facebook begin T42096488
+bool callsiteIsHotLocal(const FunctionSamples *CallerFS,
+                        const FunctionSamples *CallsiteFS);
+
+bool callsiteIsHot(const FunctionSamples *CallerFS,
+                   const FunctionSamples *CallsiteFS, ProfileSummaryInfo *PSI,
+                   bool ProfAccForSymsInList);
+
+uint64_t getHotnessThreshold(const FunctionSamples *CallerFS,
+                             ProfileSummaryInfo *PSI);
+// facebook end T42096488
+
 /// Return true if the given callsite is hot wrt to hot cutoff threshold.
 bool callsiteIsHot(const FunctionSamples *CallsiteFS, ProfileSummaryInfo *PSI,
                    bool ProfAccForSymsInList);

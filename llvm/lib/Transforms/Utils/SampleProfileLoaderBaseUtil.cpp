@@ -33,6 +33,18 @@ cl::opt<unsigned> SampleProfileSampleCoverage(
     cl::desc("Emit a warning if less than N% of samples in the input profile "
              "are matched to the IR."));
 
+// facebook begin T42096488
+static cl::opt<bool> SampleProfileUseLocalHotness(
+    "sample-profile-use-local-hotness-metric", cl::init(false), cl::Hidden,
+    cl::desc("Use previous local only notion of hotness in "
+             "SampleProfileLoader.cpp"));
+
+static cl::opt<double> SampleProfileHotThreshold(
+    "sample-profile-inline-hot-threshold", cl::init(0.1), cl::value_desc("N"),
+    cl::desc("Inlined functions that account for more than N% of all samples "
+             "collected in the parent function, will be inlined again."));
+// facebook end
+
 cl::opt<bool> NoWarnSampleUnused(
     "no-warn-sample-unused", cl::init(false), cl::Hidden,
     cl::desc("Use this option to turn off/on warnings about function with "
@@ -78,6 +90,41 @@ bool callsiteIsHot(const FunctionSamples *CallsiteFS, ProfileSummaryInfo *PSI,
     return PSI->isHotCount(CallsiteTotalSamples);
 }
 
+// facebook begin T42096488
+bool callsiteIsHotLocal(const FunctionSamples *CallerFS,
+                        const FunctionSamples *CallsiteFS) {
+  if (!CallsiteFS)
+    return false; // The callsite was not inlined in the original binary.
+
+  uint64_t ParentTotalSamples = CallerFS->getTotalSamples();
+  if (ParentTotalSamples == 0)
+    return false; // Avoid division by zero.
+
+  uint64_t CallsiteTotalSamples = CallsiteFS->getTotalSamples();
+  if (CallsiteTotalSamples == 0)
+    return false; // Callsite is trivially cold.
+
+  double PercentSamples =
+      (double)CallsiteTotalSamples / (double)ParentTotalSamples * 100.0;
+  return PercentSamples >= SampleProfileHotThreshold;
+}
+
+bool callsiteIsHot(const FunctionSamples *CallerFS,
+                   const FunctionSamples *CallsiteFS, ProfileSummaryInfo *PSI,
+                   bool ProfAccForSymsInList) {
+  if (SampleProfileUseLocalHotness)
+    return callsiteIsHotLocal(CallerFS, CallsiteFS);
+  return callsiteIsHot(CallsiteFS, PSI, ProfAccForSymsInList);
+}
+
+uint64_t getHotnessThreshold(const FunctionSamples *CallerFS,
+                             ProfileSummaryInfo *PSI) {
+  if (SampleProfileUseLocalHotness)
+    return CallerFS->getTotalSamples() * SampleProfileHotThreshold / 100;
+  return PSI->getOrCompHotCountThreshold();
+}
+// facebook end T42096488
+
 /// Mark as used the sample record for the given function samples at
 /// (LineOffset, Discriminator).
 ///
@@ -112,7 +159,8 @@ SampleCoverageTracker::countUsedRecords(const FunctionSamples *FS,
   for (const auto &I : FS->getCallsiteSamples())
     for (const auto &J : I.second) {
       const FunctionSamples *CalleeSamples = &J.second;
-      if (callsiteIsHot(CalleeSamples, PSI, ProfAccForSymsInList))
+      if (callsiteIsHot(FS, CalleeSamples, PSI,
+                        ProfAccForSymsInList)) // facebook T42096488
         Count += countUsedRecords(CalleeSamples, PSI);
     }
 
@@ -131,7 +179,8 @@ SampleCoverageTracker::countBodyRecords(const FunctionSamples *FS,
   for (const auto &I : FS->getCallsiteSamples())
     for (const auto &J : I.second) {
       const FunctionSamples *CalleeSamples = &J.second;
-      if (callsiteIsHot(CalleeSamples, PSI, ProfAccForSymsInList))
+      if (callsiteIsHot(FS, CalleeSamples, PSI,
+                        ProfAccForSymsInList)) // facebook T42096488
         Count += countBodyRecords(CalleeSamples, PSI);
     }
 

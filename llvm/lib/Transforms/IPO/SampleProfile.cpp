@@ -1205,8 +1205,9 @@ bool SampleProfileLoader::inlineHotFunctions(
         for (const auto *FS : findIndirectCallFunctionSamples(*I, Sum)) {
           uint64_t SumOrigin = Sum;
           if (LTOPhase == ThinOrFullLTOPhase::ThinLTOPreLink) {
-            findExternalInlineCandidate(I, FS, InlinedGUIDs, SymbolMap,
-                                        PSI->getOrCompHotCountThreshold());
+            findExternalInlineCandidate(
+                I, FS, InlinedGUIDs, SymbolMap,
+                getHotnessThreshold(Samples, PSI)); // facebook T42096488
             continue;
           }
           if (!callsiteIsHot(FS, PSI, ProfAccForSymsInList))
@@ -1225,9 +1226,11 @@ bool SampleProfileLoader::inlineHotFunctions(
           LocalChanged = true;
         }
       } else if (LTOPhase == ThinOrFullLTOPhase::ThinLTOPreLink) {
+        // facebook begin T42096488
         findExternalInlineCandidate(I, findCalleeFunctionSamples(*I),
                                     InlinedGUIDs, SymbolMap,
-                                    PSI->getOrCompHotCountThreshold());
+                                    getHotnessThreshold(Samples, PSI));
+        // facebook end
       }
     }
     Changed |= LocalChanged;
