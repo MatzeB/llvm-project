@@ -1107,7 +1107,8 @@ bool SampleProfileLoader::inlineHotFunctions(
             AllCandidates.push_back(CB);
             if (FS->getEntrySamples() > 0 || ProfileIsCS)
               LocalNotInlinedCallSites.try_emplace(CB, FS);
-            if (callsiteIsHot(FS, PSI, ProfAccForSymsInList))
+            if (callsiteIsHot(Samples, FS, PSI,
+                              ProfAccForSymsInList)) // facebook T42096488
               Hot = true;
             else if (shouldInlineColdCallee(*CB))
               ColdCandidates.push_back(CB);
@@ -1137,8 +1138,9 @@ bool SampleProfileLoader::inlineHotFunctions(
         for (const auto *FS : findIndirectCallFunctionSamples(*I, Sum)) {
           uint64_t SumOrigin = Sum;
           if (LTOPhase == ThinOrFullLTOPhase::ThinLTOPreLink) {
-            findExternalInlineCandidate(FS, InlinedGUIDs, SymbolMap,
-                                        PSI->getOrCompHotCountThreshold());
+            findExternalInlineCandidate(
+                FS, InlinedGUIDs, SymbolMap,
+                getHotnessThreshold(Samples, PSI)); // facebook T42096488
             continue;
           }
           if (!callsiteIsHot(FS, PSI, ProfAccForSymsInList))
@@ -1157,9 +1159,11 @@ bool SampleProfileLoader::inlineHotFunctions(
           LocalChanged = true;
         }
       } else if (LTOPhase == ThinOrFullLTOPhase::ThinLTOPreLink) {
-        findExternalInlineCandidate(findCalleeFunctionSamples(*I), InlinedGUIDs,
-                                    SymbolMap,
-                                    PSI->getOrCompHotCountThreshold());
+        // facebook begin T42096488
+        findExternalInlineCandidate(findCalleeFunctionSamples(*I),
+            InlinedGUIDs, SymbolMap,
+            getHotnessThreshold(Samples, PSI));
+        // facebook end
       }
     }
     Changed |= LocalChanged;
