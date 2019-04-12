@@ -1215,6 +1215,14 @@ void PassManagerBuilder::populateLTOPassManager(legacy::PassManagerBase &PM) {
   if (OptLevel != 0)
     addLTOOptimizationPasses(PM);
   else {
+    // facebook begin T43045911
+    // Load sample profile before running the LTO optimization pipeline.
+    // If the users specifies both -O0 and sample profiles, trust them.
+    if (!PGOSampleUse.empty()) {
+      PM.add(createPruneEHPass());
+      PM.add(createSampleProfileLoaderPass(PGOSampleUse));
+    }
+    // facebook end
     // The whole-program-devirt pass needs to run at -O0 because only it knows
     // about the llvm.type.checked.load intrinsic: it needs to both lower the
     // intrinsic itself and handle it in the summary.
