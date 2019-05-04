@@ -65,6 +65,10 @@ using namespace object;
 
 #define DEBUG_TYPE "lto"
 
+/// facebook begin T43956030
+extern cl::opt<bool> EnableIRVerification;
+/// facebook end T43956030
+
 static cl::opt<bool>
     DumpThinCGSCCs("dump-thin-cg-sccs", cl::init(false), cl::Hidden,
                    cl::desc("Dump the SCCs in the ThinLTO index's callgraph"));
@@ -724,7 +728,10 @@ LTO::addRegularLTO(BitcodeModule BM, ArrayRef<InputFile::Symbol> Syms,
 
   if (Error Err = M.materializeMetadata())
     return std::move(Err);
-  UpgradeDebugInfo(M);
+
+  /// facebook begin T43956030
+  UpgradeDebugInfo(M, EnableIRVerification);
+  /// facebook end
 
   ModuleSymbolTable SymTab;
   SymTab.addModule(&M);

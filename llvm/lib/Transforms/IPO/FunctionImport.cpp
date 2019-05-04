@@ -73,6 +73,10 @@ STATISTIC(NumImportedModules, "Number of modules imported from");
 STATISTIC(NumDeadSymbols, "Number of dead stripped symbols in index");
 STATISTIC(NumLiveSymbols, "Number of live symbols in index");
 
+/// facebook begin T43956030
+extern cl::opt<bool> EnableIRVerification;
+/// facebook end T43956030
+
 /// Limit on instruction count of imported functions.
 static cl::opt<unsigned> ImportInstrLimit(
     "import-instr-limit", cl::init(100), cl::Hidden, cl::value_desc("N"),
@@ -1317,7 +1321,9 @@ Expected<bool> FunctionImporter::importFunctions(
 
     // Upgrade debug info after we're done materializing all the globals and we
     // have loaded all the required metadata!
-    UpgradeDebugInfo(*SrcModule);
+    /// facebook begin T43956030
+    UpgradeDebugInfo(*SrcModule, EnableIRVerification);
+    /// facebook end T43956030
 
     // Set the partial sample profile ratio in the profile summary module flag
     // of the imported source module, if applicable, so that the profile summary

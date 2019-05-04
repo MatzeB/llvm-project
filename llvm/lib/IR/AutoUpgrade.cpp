@@ -30,10 +30,18 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/CommandLine.h" // facebook T43956030
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Regex.h"
 #include <cstring>
 using namespace llvm;
+
+/// facebook begin T43956030
+cl::opt<bool>
+    EnableIRVerification("enable-lto-ir-verification", cl::init(true),
+                         cl::Hidden,
+                         cl::desc("Enable IR verification when loading"));
+/// facebook end T43956030
 
 static void rename(GlobalValue *GV) { GV->setName(GV->getName() + ".old"); }
 
@@ -4317,12 +4325,14 @@ Constant *llvm::UpgradeBitCastExpr(unsigned Opc, Constant *C, Type *DestTy) {
 
 /// Check the debug info version number, if it is out-dated, drop the debug
 /// info. Return true if module is modified.
-bool llvm::UpgradeDebugInfo(Module &M) {
+/// facebook begin T43956030
+bool llvm::UpgradeDebugInfo(Module &M, bool DoVerify) {
   unsigned Version = getDebugMetadataVersionFromModule(M);
   if (Version == DEBUG_METADATA_VERSION) {
     bool BrokenDebugInfo = false;
-    if (verifyModule(M, &llvm::errs(), &BrokenDebugInfo))
+    if (DoVerify && verifyModule(M, &llvm::errs(), &BrokenDebugInfo))
       report_fatal_error("Broken module found, compilation aborted!");
+    /// facebook end T43956030
     if (!BrokenDebugInfo)
       // Everything is ok.
       return false;
