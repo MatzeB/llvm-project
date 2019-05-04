@@ -86,7 +86,9 @@ namespace llvm {
 
   /// Check the debug info version number, if it is out-dated, drop the debug
   /// info. Return true if module is modified.
-  bool UpgradeDebugInfo(Module &M);
+/// facebook begin T43956030
+bool UpgradeDebugInfo(Module &M, bool DoVerify = true);
+/// facebook end T43956030
 
   /// Check whether a string looks like an old loop attachment tag.
   inline bool mayBeOldLoopAttachmentTag(StringRef Name) {
