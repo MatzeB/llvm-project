@@ -1604,9 +1604,18 @@ void MachineInstr::print(raw_ostream &OS, bool IsStandalone, bool SkipOpers,
   print(OS, MST, IsStandalone, SkipOpers, SkipDebugLoc, AddNewLine, TII);
 }
 
-void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
+// facebook begin T44360418
+const int LHSEndColumn = 15;
+const int RHSStartColumn = 17;
+const int LocationColumn = 80;
+// facebook end
+
+void MachineInstr::print(raw_ostream &ROS, ModuleSlotTracker &MST,
                          bool IsStandalone, bool SkipOpers, bool SkipDebugLoc,
-                         bool AddNewLine, const TargetInstrInfo *TII) const {
+                         bool AddNewLine, const TargetInstrInfo *TII,
+                         bool IsForDev) const { // facebook T44360418
+  formatted_raw_ostream OS(ROS);                // facebook T44360418
+
   // We can be a bit tidier if we know the MachineFunction.
   const TargetRegisterInfo *TRI = nullptr;
   const MachineRegisterInfo *MRI = nullptr;
@@ -1645,8 +1654,14 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     ++StartOp;
   }
 
-  if (StartOp != 0)
+  // facebook begin T44360418
+  if (IsForDev) {
+    OS.PadToColumn((StartOp != 0) ? LHSEndColumn : RHSStartColumn);
+    if (StartOp != 0)
+      OS << "= ";
+  } else if (StartOp != 0)
     OS << " = ";
+  // facebook end
 
   if (getFlag(MachineInstr::FrameSetup))
     OS << "frame-setup ";
@@ -1836,7 +1851,7 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
     OS << " debug-instr-number " << DebugInstrNum;
   }
 
-  if (!SkipDebugLoc) {
+  if (!SkipDebugLoc && !IsForDev) { // facebook T44360418
     if (const DebugLoc &DL = getDebugLoc()) {
       if (!FirstOp)
         OS << ',';
@@ -1867,6 +1882,16 @@ void MachineInstr::print(raw_ostream &OS, ModuleSlotTracker &MST,
       NeedComma = true;
     }
   }
+
+  // facebook begin T44360418
+  if (IsForDev) {
+    if (const DebugLoc &DL = getDebugLoc()) {
+      OS.PadToColumn(LocationColumn);
+      DL.printConcise(OS);
+    }
+    return;
+  }
+  // facebook end
 
   if (SkipDebugLoc)
     return;
