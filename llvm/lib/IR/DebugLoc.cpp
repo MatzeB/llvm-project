@@ -9,6 +9,7 @@
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/Support/Path.h"
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -99,6 +100,29 @@ DebugLoc DebugLoc::appendInlinedAt(const DebugLoc &DL, DILocation *InlinedAt,
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 LLVM_DUMP_METHOD void DebugLoc::dump() const { print(dbgs()); }
 #endif
+
+// facebook begin T44360418
+void DebugLoc::printConcise(raw_ostream &OS, bool TopLevel) const {
+  if (!Loc)
+    return;
+
+  // Print short line info.
+  if (TopLevel)
+    OS << "[ ";
+
+  auto *Scope = cast<DIScope>(getScope());
+  OS << sys::path::filename(Scope->getFilename()) << ":";
+  OS << getLine();
+  OS << ":" << getCol();
+  if (DebugLoc InlinedAtDL = getInlinedAt()) {
+    OS << " @ ";
+    InlinedAtDL.printConcise(OS, false);
+  }
+
+  if (TopLevel)
+    OS << " ] ";
+}
+// facebook end
 
 void DebugLoc::print(raw_ostream &OS) const {
   if (!Loc)

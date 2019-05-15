@@ -46,6 +46,7 @@ static cl::opt<bool> PrintSlotIndexes(
     cl::init(true), cl::Hidden);
 
 extern bool PrintProfNamesOnly(); // facebook T29824973
+extern cl::opt<bool> PrintForDev; // facebook T44360418
 
 MachineBasicBlock::MachineBasicBlock(MachineFunction &MF, const BasicBlock *B)
     : BB(B), Number(-1), xParent(&MF) {
@@ -427,6 +428,11 @@ void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
 
     bool IsInBundle = false;
     for (const MachineInstr &MI : instrs()) {
+      // facebook begin T44360418
+      if (PrintForDev && MI.isDebugInstr())
+        continue;
+      // facebook end
+
       if (Indexes && PrintSlotIndexes) {
         if (Indexes->hasIndex(MI))
           OS << Indexes->getInstructionIndex(MI);
@@ -440,7 +446,8 @@ void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
 
       OS.indent(IsInBundle ? 4 : 2);
       MI.print(OS, MST, IsStandalone, /*SkipOpers=*/false, /*SkipDebugLoc=*/false,
-               /*AddNewLine=*/false, &TII);
+               /*AddNewLine=*/false, &TII,
+               PrintForDev); // facebook T44360418
 
       if (!IsInBundle && MI.getFlag(MachineInstr::BundledSucc)) {
         OS << " {";

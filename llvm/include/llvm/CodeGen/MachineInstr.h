@@ -1727,8 +1727,8 @@ public:
              const TargetInstrInfo *TII = nullptr) const;
   void print(raw_ostream &OS, ModuleSlotTracker &MST, bool IsStandalone = true,
              bool SkipOpers = false, bool SkipDebugLoc = false,
-             bool AddNewLine = true,
-             const TargetInstrInfo *TII = nullptr) const;
+             bool AddNewLine = true, const TargetInstrInfo *TII = nullptr,
+             bool IsForDev = false) const; // facebook T44360418
   void dump() const;
   /// Print on dbgs() the current instruction and the instructions defining its
   /// operands and so on until we reach \p MaxDepth.
