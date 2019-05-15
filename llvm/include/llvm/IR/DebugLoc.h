@@ -107,6 +107,11 @@ namespace llvm {
 
     void dump() const;
 
+    // facebook begin T44360418
+    /// prints source location [ file1.c:line1:col1 @ file2.c:line2:col2 @ ... ]
+    void printConcise(raw_ostream &OS, bool TopLevel = true) const;
+    // facebook end
+
     /// prints source location /path/to/file.exe:line:col @[inlined at]
     void print(raw_ostream &OS) const;
   };
