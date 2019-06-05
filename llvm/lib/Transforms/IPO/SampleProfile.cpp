@@ -754,25 +754,39 @@ SampleProfileLoader::findFunctionSamples(const Instruction &Inst) const {
   }
   return it.first->second;
 }
-// facebook begin D5612198
 
+// facebook begin D5612198
 bool SampleProfileLoader::adjustOptLevel(Function &F,
                                          uint64_t functionSampleCount) {
+  // optnone is incompatible with size or minsize
+  if (F.hasOptNone()) {
+    return false;
+  }
+
   double samplePercent =
       (double)functionSampleCount / ((double)this->TotalCollectedSamples);
-  if (samplePercent <= OptForMinSizeThreshold) {
-    LLVM_DEBUG(dbgs() << "Function : " << F.getName()
-                      << " optimized for Minsize\n");
-    F.addFnAttr(Attribute::MinSize);
-    return true;
-  } else if (samplePercent <= OptForSizeThreshold) {
-    LLVM_DEBUG(dbgs() << "Function : " << F.getName()
-                      << " optimized for size\n");
-    F.addFnAttr(Attribute::OptimizeForSize);
-    return true;
-  }
-  return false;
 
+  if (samplePercent <= OptForMinSizeThreshold) {
+    if (!F.hasMinSize()) {
+      LLVM_DEBUG(dbgs() << "Function : " << F.getName()
+                        << " optimized for Minsize\n");
+      F.addFnAttr(Attribute::MinSize);
+      ORE->emit(OptimizationRemark(DEBUG_TYPE, "AdjustOptLevel", &F)
+                << "Function : " << F.getName() << " optimized for Minsize\n");
+      return true;
+    }
+  } else if (samplePercent <= OptForSizeThreshold) {
+    if (!F.hasOptSize()) {
+      LLVM_DEBUG(dbgs() << "Function : " << F.getName()
+                        << " optimized for size\n");
+      F.addFnAttr(Attribute::OptimizeForSize);
+      ORE->emit(OptimizationRemark(DEBUG_TYPE, "AdjustOptLevel", &F)
+                << "Function : " << F.getName() << " optimized for size\n");
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // facebook end
@@ -1107,8 +1121,8 @@ bool SampleProfileLoader::inlineHotFunctions(
             AllCandidates.push_back(CB);
             if (FS->getEntrySamples() > 0 || ProfileIsCS)
               LocalNotInlinedCallSites.try_emplace(CB, FS);
-            if (callsiteIsHot(Samples, FS, PSI,
-                              ProfAccForSymsInList)) // facebook T42096488
+            if (callsiteIsHot(Samples, FS, PSI, ProfAccForSymsInList) &&
+                !F.hasOptSize()) // facebook T42096488
               Hot = true;
             else if (shouldInlineColdCallee(*CB))
               ColdCandidates.push_back(CB);
@@ -2081,9 +2095,10 @@ bool SampleProfileLoader::runOnFunction(Function &F, ModuleAnalysisManager *AM) 
     uint64_t functionSampleCount =
         (Samples != nullptr) ? Samples->getTotalSamples() : 0;
     functionSampleCount += sumSampleFromInlineInstance[F.getName()];
-    if (adjustOptLevel(F, functionSampleCount))
-      return true; // If the function optimization level was adjusted, skip the
-                   // annotation
+    // If the function optimization level was adjusted, we still need
+    // to do annotation so inlinee's count will be merged back to its
+    // outlined version. But we won't do profile guided inlining here.
+    adjustOptLevel(F, functionSampleCount);
   }
   // facebook end
   if (Samples && !Samples->empty())
