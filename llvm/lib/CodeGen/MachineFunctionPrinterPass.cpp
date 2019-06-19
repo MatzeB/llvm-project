@@ -10,16 +10,24 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/CodeGen/LazyMachineBlockFrequencyInfo.h" // facebook T46037538
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/IR/PrintPasses.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/Support/CommandLine.h" // facebook T46037538
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
+
+// facebook begin T46037538
+// Command line option to control printing of the block profile count
+extern bool PrintProfAny();
+extern cl::opt<bool> PrintForDev;
+// facebook end
 
 namespace {
 /// MachineFunctionPrinterPass - This is a pass to dump the IR of a
@@ -40,6 +48,7 @@ struct MachineFunctionPrinterPass : public MachineFunctionPass {
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesAll();
     AU.addUsedIfAvailable<SlotIndexes>();
+    AU.addRequired<LazyMachineBlockFrequencyInfoPass>(); // facebook T46037538
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 
@@ -47,7 +56,13 @@ struct MachineFunctionPrinterPass : public MachineFunctionPass {
     if (!isFunctionInPrintList(MF.getName()))
       return false;
     OS << "# " << Banner << ":\n";
-    MF.print(OS, getAnalysisIfAvailable<SlotIndexes>());
+    // facebook begin T46037538
+    MachineBlockFrequencyInfo *MBFI =
+        PrintProfAny() || PrintForDev
+            ? &(getAnalysis<LazyMachineBlockFrequencyInfoPass>().getBFI())
+            : nullptr;
+    MF.print(OS, getAnalysisIfAvailable<SlotIndexes>(), MBFI);
+    // facebook end
     return false;
   }
 };
@@ -56,8 +71,13 @@ char MachineFunctionPrinterPass::ID = 0;
 }
 
 char &llvm::MachineFunctionPrinterPassID = MachineFunctionPrinterPass::ID;
-INITIALIZE_PASS(MachineFunctionPrinterPass, "machineinstr-printer",
-                "Machine Function Printer", false, false)
+// facebook begin T46037538
+INITIALIZE_PASS_BEGIN(MachineFunctionPrinterPass, "machineinstr-printer",
+                      "Machine Function Printer", false, false)
+INITIALIZE_PASS_DEPENDENCY(LazyMachineBlockFrequencyInfoPass)
+INITIALIZE_PASS_END(MachineFunctionPrinterPass, "machineinstr-printer",
+                    "Machine Function Printer", false, false)
+// facebook end
 
 namespace llvm {
 /// Returns a newly-created MachineFunction Printer pass. The

@@ -31,6 +31,7 @@
 namespace llvm {
 
 class BasicBlock;
+class MachineBlockFrequencyInfo; // facebook T46037538
 class MachineFunction;
 class MCSymbol;
 class ModuleSlotTracker;
@@ -1095,9 +1096,15 @@ public:
   // Debugging methods.
   void dump() const;
   void print(raw_ostream &OS, const SlotIndexes * = nullptr,
-             bool IsStandalone = true) const;
+             // facebook begin T46037538
+             bool IsStandalone = true,
+             const MachineBlockFrequencyInfo * = nullptr) const;
+  // facebook end
   void print(raw_ostream &OS, ModuleSlotTracker &MST,
-             const SlotIndexes * = nullptr, bool IsStandalone = true) const;
+             // facebook begin T46037538
+             const SlotIndexes * = nullptr, bool IsStandalone = true,
+             const MachineBlockFrequencyInfo * = nullptr) const;
+  // facebook end
 
   enum PrintNameFlag {
     PrintNameIr = (1 << 0), ///< Add IR name where available
@@ -1105,7 +1112,10 @@ public:
   };
 
   void printName(raw_ostream &os, unsigned printNameFlags = PrintNameIr,
-                 ModuleSlotTracker *moduleSlotTracker = nullptr) const;
+                 ModuleSlotTracker *moduleSlotTracker = nullptr,
+                 // facebook begin T46037538
+                 const MachineBlockFrequencyInfo *MBFI = nullptr) const;
+  // facebook end T46037538
 
   // Printing method used by LoopInfo.
   void printAsOperand(raw_ostream &OS, bool PrintType = true) const;

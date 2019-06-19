@@ -568,7 +568,10 @@ StringRef MachineFunction::getName() const {
   return getFunction().getName();
 }
 
-void MachineFunction::print(raw_ostream &OS, const SlotIndexes *Indexes) const {
+// facebook begin T46037538
+void MachineFunction::print(raw_ostream &OS, const SlotIndexes *Indexes,
+                            const MachineBlockFrequencyInfo *MBFI) const {
+  // facebook end
   OS << "# Machine code for function " << getName() << ": ";
   getProperties().print(OS);
   OS << '\n';
@@ -603,7 +606,9 @@ void MachineFunction::print(raw_ostream &OS, const SlotIndexes *Indexes) const {
   for (const auto &BB : *this) {
     OS << '\n';
     // If we print the whole function, print it at its most verbose level.
-    BB.print(OS, MST, Indexes, /*IsStandalone=*/true);
+    // facebook begin T46037538
+    BB.print(OS, MST, Indexes, /*IsStandalone=*/true, MBFI);
+    // facebook end
   }
 
   OS << "\n# End machine code for function " << getName() << ".\n\n";
