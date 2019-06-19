@@ -173,7 +173,11 @@ public:
   /// Schedule pass P for execution. Make sure that passes required by
   /// P are run before P is run. Update analysis info maintained by
   /// the manager. Remove dead passes. This is a recursive function.
-  void schedulePass(Pass *P);
+  /// facebook begin T46037538
+  /// SchedulingPrintingPass == true means that P is a printing pass.
+  /// If so, we should avoid the recursive addition of the printing pass.
+  void schedulePass(Pass *P, bool SchedulingPrintingPass = false);
+  /// facebook end
 
   /// Set pass P as the last user of the given analysis passes.
   void setLastUser(ArrayRef<Pass*> AnalysisPasses, Pass *P);
