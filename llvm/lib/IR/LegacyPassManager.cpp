@@ -655,7 +655,9 @@ AnalysisUsage *PMTopLevelManager::findAnalysisUsage(Pass *P) {
 /// Schedule pass P for execution. Make sure that passes required by
 /// P are run before P is run. Update analysis info maintained by
 /// the manager. Remove dead passes. This is a recursive function.
-void PMTopLevelManager::schedulePass(Pass *P) {
+/// facebook begin T46037538
+void PMTopLevelManager::schedulePass(Pass *P, bool SchedulingPrintingPass) {
+  /// facebook end
 
   // TODO : Allocate function manager for this pass, other wise required set
   // may be inserted into previous function manager
@@ -740,13 +742,16 @@ void PMTopLevelManager::schedulePass(Pass *P) {
     return;
   }
 
-  if (PI && !PI->isAnalysis() && shouldPrintBeforePass(PI->getPassArgument())) {
+  // facebook begin T46037538
+  if (!SchedulingPrintingPass && PI && !PI->isAnalysis() &&
+      shouldPrintBeforePass(PI->getPassArgument())) {
     Pass *PP =
         P->createPrinterPass(dbgs(), ("*** IR Dump Before " + P->getPassName() +
                                       " (" + PI->getPassArgument() + ") ***")
                                          .str());
-    PP->assignPassManager(activeStack, getTopLevelPassManagerType());
+    schedulePass(PP, true);
   }
+  // facebook end
 
   // Add the requested pass to the best available pass manager.
   P->assignPassManager(activeStack, getTopLevelPassManagerType());
@@ -760,13 +765,16 @@ void PMTopLevelManager::schedulePass(Pass *P) {
       PP->assignPassManager(activeStack, getTopLevelPassManagerType());
   // facebook end
 
-  if (PI && !PI->isAnalysis() && shouldPrintAfterPass(PI->getPassArgument())) {
+  // facebook begin T46037538
+  if (!SchedulingPrintingPass && PI && !PI->isAnalysis() &&
+      shouldPrintAfterPass(PI->getPassArgument())) {
     Pass *PP =
         P->createPrinterPass(dbgs(), ("*** IR Dump After " + P->getPassName() +
                                       " (" + PI->getPassArgument() + ") ***")
                                          .str());
-    PP->assignPassManager(activeStack, getTopLevelPassManagerType());
+    schedulePass(PP, true);
   }
+  // facebook end
 }
 
 /// Find the pass that implements Analysis AID. Search immutable

@@ -55,6 +55,7 @@ class Function;
 class GISelChangeObserver;
 class GlobalValue;
 class LLVMTargetMachine;
+class MachineBlockFrequencyInfo; // facebook T46037538
 class MachineConstantPool;
 class MachineFrameInfo;
 class MachineFunction;
@@ -859,7 +860,10 @@ public:
 
   /// print - Print out the MachineFunction in a format suitable for debugging
   /// to the specified stream.
-  void print(raw_ostream &OS, const SlotIndexes* = nullptr) const;
+  // facebook begin T46037538
+  void print(raw_ostream &OS, const SlotIndexes * = nullptr,
+             const MachineBlockFrequencyInfo * = nullptr) const;
+  // facebook end
 
   /// viewCFG - This function is meant for use from the debugger.  You can just
   /// say 'call F->viewCFG()' and a ghostview window should pop up from the
