@@ -115,11 +115,13 @@ public:
 }
 
 char PrintModulePassWrapper::ID = 0;
+// facebook begin T46037538
 INITIALIZE_PASS(PrintModulePassWrapper, "print-module",
-                "Print module to stderr", false, true)
+                "Print module to stderr", false, false)
 char PrintFunctionPassWrapper::ID = 0;
 INITIALIZE_PASS(PrintFunctionPassWrapper, "print-function",
-                "Print function to stderr", false, true)
+                "Print function to stderr", false, false)
+// facebook end
 
 ModulePass *llvm::createPrintModulePass(llvm::raw_ostream &OS,
                                         const std::string &Banner,

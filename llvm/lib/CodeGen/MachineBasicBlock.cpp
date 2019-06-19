@@ -14,6 +14,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/LiveVariables.h"
+#include "llvm/CodeGen/MachineBlockFrequencyInfo.h" // facebook T46037538
 #include "llvm/CodeGen/MachineDominators.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -334,7 +335,10 @@ std::string MachineBasicBlock::getFullName() const {
 }
 
 void MachineBasicBlock::print(raw_ostream &OS, const SlotIndexes *Indexes,
-                              bool IsStandalone) const {
+                              // facebook begin T46037538
+                              bool IsStandalone,
+                              const MachineBlockFrequencyInfo *MBFI) const {
+  // facebook end
   const MachineFunction *MF = getParent();
   if (!MF) {
     OS << "Can't print out MachineBasicBlock because parent MachineFunction"
@@ -345,12 +349,17 @@ void MachineBasicBlock::print(raw_ostream &OS, const SlotIndexes *Indexes,
   const Module *M = F.getParent();
   ModuleSlotTracker MST(M);
   MST.incorporateFunction(F);
-  print(OS, MST, Indexes, IsStandalone);
+  // facebook begin T46037538
+  print(OS, MST, Indexes, IsStandalone, MBFI);
+  // facebook end
 }
 
 void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
                               const SlotIndexes *Indexes,
-                              bool IsStandalone) const {
+                              // facebook begin T46037538
+                              bool IsStandalone,
+                              const MachineBlockFrequencyInfo *MBFI) const {
+  // facebook end
   const MachineFunction *MF = getParent();
   if (!MF) {
     OS << "Can't print out MachineBasicBlock because parent MachineFunction"
@@ -361,7 +370,9 @@ void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
   if (Indexes && PrintSlotIndexes)
     OS << Indexes->getMBBStartIdx(this) << '\t';
 
-  printName(OS, PrintNameIr | PrintNameAttributes, &MST);
+  // facebook begin T46037538
+  printName(OS, PrintNameIr | PrintNameAttributes, &MST, MBFI);
+  // facebook begin T46037538
   OS << ":\n";
 
   const TargetRegisterInfo *TRI = MF->getSubtarget().getRegisterInfo();
@@ -487,7 +498,10 @@ void MachineBasicBlock::print(raw_ostream &OS, ModuleSlotTracker &MST,
 ///                          incorporate its own tracker when necessary to
 ///                          determine the block's IR name.
 void MachineBasicBlock::printName(raw_ostream &os, unsigned printNameFlags,
-                                  ModuleSlotTracker *moduleSlotTracker) const {
+                                  ModuleSlotTracker *moduleSlotTracker,
+                                  // facebook begin T46037538
+                                  const MachineBlockFrequencyInfo *MBFI) const {
+  // facebook end T46037538
   os << "bb." << getNumber();
   bool hasAttributes = false;
 
@@ -518,6 +532,15 @@ void MachineBasicBlock::printName(raw_ostream &os, unsigned printNameFlags,
   }
 
   if (printNameFlags & PrintNameAttributes) {
+    // facebook begin T46037538
+    if (MBFI) {
+      if (Optional<uint64_t> ProfileCount = MBFI->getBlockProfileCount(this)) {
+        os << (hasAttributes ? ", " : " (");
+        os << ProfileCount.getValue();
+        hasAttributes = true;
+      }
+    }
+    // facebook end T46037538
     if (hasAddressTaken()) {
       os << (hasAttributes ? ", " : " (");
       os << "address-taken";
