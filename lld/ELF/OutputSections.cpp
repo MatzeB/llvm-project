@@ -336,7 +336,7 @@ template <class ELFT> void OutputSection::maybeCompress() {
   compressed.uncompressedSize = size;
   auto buf = std::make_unique<uint8_t[]>(size);
   // Write uncompressed data to a temporary zero-initialized buffer.
-  {
+  if (reducedDebugData.empty()){ // facebook T37438891
     parallel::TaskGroup tg;
     writeTo<ELFT>(buf.get(), tg);
   }
@@ -397,7 +397,13 @@ template <class ELFT> void OutputSection::maybeCompress() {
 
   // Split input into 1-MiB shards.
   constexpr size_t shardSize = 1 << 20;
-  auto shardsIn = split(makeArrayRef<uint8_t>(buf.get(), size), shardSize);
+  // facebook begin T37438891
+  uint8_t *pdata = reducedDebugData.empty()
+                       ? buf.get()
+                       : reinterpret_cast<uint8_t *>(reducedDebugData.data());
+  uint64_t psize =
+      reducedDebugData.empty() ? size : reducedDebugData.size();
+  auto shardsIn = split(makeArrayRef<uint8_t>(pdata, psize), shardSize);
   const size_t numShards = shardsIn.size();
 
   // Compress shards and compute Alder-32 checksums. Use Z_SYNC_FLUSH for all
@@ -423,6 +429,15 @@ template <class ELFT> void OutputSection::maybeCompress() {
   compressed.shards = std::move(shardsOut);
   compressed.numShards = numShards;
   compressed.checksum = checksum;
+
+  {
+    // Free memory.
+    using std::swap;
+    decltype(reducedDebugData) tmp;
+    swap(reducedDebugData, tmp);
+  }
+  // facebook end T37438891
+
   flags |= SHF_COMPRESSED;
 #endif
 }
@@ -477,6 +492,16 @@ void OutputSection::writeTo(uint8_t *buf, parallel::TaskGroup &tg) {
     write32be(buf + (size - sizeof(*chdr) - 4), compressed.checksum);
     return;
   }
+
+  // facebook begin T37438891
+  // If --strip-debug-non-line is specified and if this is a debug section,
+  // we've already reduced section contents. If that's the case,
+  // just write it down.
+  if (!reducedDebugData.empty()) {
+    memcpy(buf, reducedDebugData.data(), reducedDebugData.size());
+    return;
+  }
+  // facebook end T37438891
 
   // Write leading padding.
   ArrayRef<InputSection *> sections = getInputSections(*this, storage);

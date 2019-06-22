@@ -109,6 +109,13 @@ public:
   void writeTo(uint8_t *buf, llvm::parallel::TaskGroup &tg);
   // Check that the addends for dynamic relocations were written correctly.
   void checkDynRelAddends(const uint8_t *bufStart);
+  // facebook begin T37438891
+  void setReducedDebugData(SmallString<0> data) {
+    reducedDebugData = std::move(data);
+    size = reducedDebugData.size();
+  }
+  // facebook end T37438891
+
   template <class ELFT> void maybeCompress();
 
   void sort(llvm::function_ref<int(InputSectionBase *s)> order);
@@ -117,6 +124,10 @@ public:
 
 private:
   SmallVector<InputSection *, 0> storage;
+  // facebook begin T37438891
+  // Reduced .debug_info/.debug_abbrev/.debug_aranges for --strip-debug-non-line
+  SmallString<0> reducedDebugData;
+  // facebook end T37438891
 
   // Used for implementation of --compress-debug-sections option.
   CompressedData compressed;

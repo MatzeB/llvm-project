@@ -1508,6 +1508,20 @@ static void setConfigs(opt::InputArgList &args) {
   uint16_t m = config->emachine;
 
   config->copyRelocs = (config->relocatable || config->emitRelocs);
+  // facebook begin D16076751, D25918906
+  if (config->copyRelocs && config->strip == StripPolicy::DebugNonLine) {
+    config->strip = StripPolicy::None;
+    warn("--strip-debug-non-line is ignored because --emit-relocs or "
+         "--relocatable was set");
+  }
+  // facebook end D16076751, D25918906
+  // facebook begins T46459577
+  if (config->copyRelocs && config->discardSections.size() != 0) {
+    config->discardSections.clear();
+    warn("-r or -q may not be used with --discard-sections, "
+         "ignoring --discard-sections");
+  }
+  // facebook ends T46459577
   config->is64 = (k == ELF64LEKind || k == ELF64BEKind);
   config->isLE = (k == ELF32LEKind || k == ELF64LEKind);
   config->endianness = config->isLE ? endianness::little : endianness::big;
@@ -2682,37 +2696,72 @@ void LinkerDriver::link(opt::InputArgList &args) {
     // Now that we have a complete list of input files.
     // Beyond this point, no new files are added.
     // Aggregate all input sections into one place.
-    // facebook begin T37438891
-    InputSectionBase *lastDebugAbbrevSection = nullptr;
     for (InputFile *f : ctx->objectFiles) {
       for (InputSectionBase *s : f->getSections()) {
         if (!s || s == &InputSection::discarded)
           continue;
         if (LLVM_UNLIKELY(isa<EhInputSection>(s)))
           ehInputSections.push_back(cast<EhInputSection>(s));
-        else {
-          if (config->strip == StripPolicy::DebugNonLine &&
-              s->name.equals(".debug_abbrev")) {
-            lastDebugAbbrevSection = s;
-            if (!s->reduceDebugAbbrevSection()) {
-              warn("Failed to reduce .debug_abbrev section.");
-            }
-          }
+        else
           inputSections.push_back(s);
-        }
       }
     }
-    if (lastDebugAbbrevSection) {
-      lastDebugAbbrevSection->nullTerminateReducedDebugAbbrev();
-    }
-    // facebook end T37438891
     for (BinaryFile *f : ctx->binaryFiles)
       for (InputSectionBase *s : f->getSections())
         inputSections.push_back(cast<InputSection>(s));
-  }
+    }
 
   {
     llvm::TimeTraceScope timeScope("Strip sections");
+    // facebook begin T46459577 T37438891 T71488990
+    auto isDebugNonLineSection = [](const InputSectionBase &s) {
+      return StringSwitch<bool>(s.name)
+          .EndsWith("debug_abbrev", false)
+          .EndsWith("debug_addr", false)
+          .EndsWith("debug_aranges", false)
+          .EndsWith("debug_info", false)
+          .EndsWith("debug_line_str", false)
+          .EndsWith("debug_line", false)
+          // gdb uses .debug_ranges and .debug_rnglists but folly::symbolizer
+          // doesn't need them, keeping them to keep the behavior consistent
+          // with gold. Remove them with --discard-section (D16009512).
+          .EndsWith("debug_ranges", false)
+          .EndsWith("debug_rnglists", false)
+          .EndsWith("debug_str_offsets", false)
+          .EndsWith("debug_str", false)
+          .StartsWith(".debug", true)
+          .StartsWith(".zdebug", true)
+          .Default(false);
+    };
+
+    auto shouldDiscard = [&](InputSectionBase *s) {
+      // facebook T46459577
+      if (config->discardSections.find(s->name) !=
+          config->discardSections.end()) {
+        return true;
+      }
+
+      // facebook T37438891
+      // We do not want to emit debug sections if --strip-all
+      // or -strip-debug are given.  If --strip-debug-non-line is specified,
+      // emit only the sections used for line info.
+      // For copyRelocs==true the strip-debug-non-line is disabled. See
+      // setConfigs and checkOptions.
+      if (config->strip == StripPolicy::None)
+        return false;
+
+      bool isDebugNonLine = config->strip == StripPolicy::DebugNonLine;
+
+      if (isDebugSection(*s) && (!isDebugNonLine || isDebugNonLineSection(*s)))
+        return true;
+
+      if (auto *isec = dyn_cast<InputSection>(s))
+        if (InputSectionBase *rel = isec->getRelocatedSection())
+          return isDebugSection(*rel);
+
+      return false;
+    };
+
     if (ctx->hasSympart.load(std::memory_order_relaxed)) {
       llvm::erase_if(inputSections, [](InputSectionBase *s) {
         if (s->type != SHT_LLVM_SYMPART)
@@ -2721,44 +2770,19 @@ void LinkerDriver::link(opt::InputArgList &args) {
         return true;
       });
     }
-    // We do not want to emit debug sections if --strip-all
-    // or --strip-debug are given.
-    if (config->strip != StripPolicy::None) {
-      llvm::erase_if(inputSections, [](InputSectionBase *s) {
-        if (isDebugSection(*s))
-          return true;
 
-        // facebook begin T37438891
-        // If --strip-debug-non-line is specified, emit only the sections used for
-        // line info.
-        if (config->strip == StripPolicy::DebugNonLine) {
-          // Keep debug_abbrev, debug_info, debug_line, and debug_str.  Discard
-          // all other debug sections.  This is the minimal set of required
-          // sections for folly::symbolizer (see https://fburl.com/pihaosby) Note
-          // that .debug_arranges is optional but provides significant speed up to
-          // folly::symbolizer,  especially important when binary is compiled
-          // under debug mode with sanitizers
-          return StringSwitch<bool>(s->name)
-              .EndsWith("debug_abbrev", false)
-              .EndsWith("debug_info", false)
-              .EndsWith("debug_line", false)
-              .EndsWith("debug_str", false)
-              .EndsWith("debug_aranges", false)
-              .EndsWith("debug_gdb_scripts", false)
-              .StartsWith(".debug", true)
-              .StartsWith(".zdebug", true)
-              .Default(false);
-        }
-        // facebook end T37438891
+    llvm::erase_if(inputSections, [shouldDiscard](InputSectionBase *s) {
+      if (shouldDiscard(s))
+        return true;
 
-        if (auto *isec = dyn_cast<InputSection>(s))
-          if (InputSectionBase *rel = isec->getRelocatedSection())
-            if (isDebugSection(*rel))
-              return true;
+      if (auto *isec = dyn_cast<InputSection>(s))
+        if (InputSectionBase *rel = isec->getRelocatedSection())
+          if (shouldDiscard(rel))
+            return true;
 
-        return false;
-      });
-    }
+      return false;
+    });
+    // facebook end T46459577 T37438891 T71488990
   }
 
   // Since we now have a complete set of input files, we can create

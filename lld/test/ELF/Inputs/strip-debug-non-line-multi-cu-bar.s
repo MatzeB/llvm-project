@@ -1,41 +1,16 @@
 # facebook begin T37438891
-# REQUIRES: x86
-# RUN: llvm-mc -g -filetype=obj -triple=x86_64-unknown-linux %s -o %t.o
-# RUN: ld.lld %t.o -o %t --strip-debug-non-line
-# RUN: llvm-readobj --sections --symbols %t | FileCheck %s --check-prefix=CHECK-READOBJ
-# RUN: llvm-dwarfdump --verify %t
-# RUN: llvm-dwarfdump --debug-info %t | FileCheck %s --check-prefix=CHECK-DWARFDUMP-INFO
-# RUN: llvm-dwarfdump --debug-abbrev %t | FileCheck %s --check-prefix=CHECK-DWARFDUMP-ABBREV
-# RUN: llvm-dwarfdump --debug-aranges %t | FileCheck %s --check-prefix=CHECK-DWARFDUMP-ARANGES
-
-# CHECK-READOBJ: Name: .{{z?}}debug_str
-# CHECK-READOBJ: Name: .{{z?}}debug_abbrev
-# CHECK-READOBJ: Name: .{{z?}}debug_info
-# CHECK-READOBJ: Name: .{{z?}}debug_aranges
-# CHECK-READOBJ: Name: .{{z?}}debug_line
-
-# CHECK-DWARFDUMP-INFO: .debug_info contents:
-# CHECK-DWARFDUMP-INFO: 0x0000000b: DW_TAG_compile_unit
-
-# CHECK-DWARFDUMP-ABBREV: [1] DW_TAG_compile_unit  DW_CHILDREN_no
-
-# CHECK-DWARFDUMP-ARANGES: Address Range Header: {{.*}} cu_offset = 0x00000000,
-
-
 # Generated with:
-# echo "int foo() { return 0; } void _start() { foo(); }" | \
+# echo "int bar() { return 0; }" | \
 # clang++ -Os -g -S -x c - -Xclang -fdebug-compilation-dir -Xclang . -gdwarf-aranges -o -
 
+
   .text
-  .globl  foo
-foo:
+  .file  "-"
+  .globl  bar
+bar:
 .Lfunc_begin0:
   .file "<stdin>"
   xorl  %eax, %eax
-  retq
-
-  .globl  _start
-_start:
   retq
 
 
@@ -62,15 +37,6 @@ _start:
   .byte  0                       # EOM(1)
   .byte  0                       # EOM(2)
   .byte  3                       # Abbreviation Code
-  .byte  46                      # DW_TAG_subprogram
-  .byte  0                       # DW_CHILDREN_no
-  .byte  58                      # DW_AT_decl_file
-  .byte  11                      # DW_FORM_data1
-  .byte  59                      # DW_AT_decl_line
-  .byte  11                      # DW_FORM_data1
-  .byte  0                       # EOM(1)
-  .byte  0                       # EOM(2)
-  .byte  4                       # Abbreviation Code
   .byte  36                      # DW_TAG_base_type
   .byte  0                       # DW_CHILDREN_no
   .byte  3                       # DW_AT_name
@@ -91,15 +57,12 @@ _start:
   .short  4                      # DWARF version number
   .long  .debug_abbrev           # Offset Into Abbrev. Section
   .byte  8                       # Address Size (in bytes)
-  .byte  1                       # Abbrev [1] 0xb:0x55 DW_TAG_compile_unit
+  .byte  1                       # Abbrev [1] 0xb:0x40 DW_TAG_compile_unit
   .short  12                     # DW_AT_language
   .byte  2                       # Abbrev [2] 0x2a:0x19 DW_TAG_subprogram
   .byte  1                       # DW_AT_decl_file
   .byte  1                       # DW_AT_decl_line
-  .byte  3                       # Abbrev [3] 0x43:0x15 DW_TAG_subprogram
-  .byte  1                       # DW_AT_decl_file
-  .byte  1                       # DW_AT_decl_line
-  .byte  4                       # Abbrev [4] 0x58:0x7 DW_TAG_base_type
+  .byte  3                       # Abbrev [3] 0x43:0x7 DW_TAG_base_type
   .long  .Linfo_string4          # DW_AT_name
   .byte  5                       # DW_AT_encoding
   .byte  4                       # DW_AT_byte_size

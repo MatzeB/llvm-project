@@ -24,13 +24,24 @@
 #include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/Filesystem.h"
 #include "lld/Common/Strings.h"
+#include "llvm/ADT/STLExtras.h" // facebook T37438891
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/BLAKE3.h"
 #include "llvm/Support/Parallel.h"
+// facebook begin T37438891
+#include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
+#include "llvm/Support/DataExtractor.h"
+#include "llvm/Support/LEB128.h"
+// facebook begin T37438891
 #include "llvm/Support/RandomNumberGenerator.h"
 #include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/xxhash.h"
 #include <climits>
+// facebook begin T37438891
+#include <unordered_map>
+#include <vector>
+// facebook end T37438891
 
 #define DEBUG_TYPE "lld"
 
@@ -63,6 +74,9 @@ private:
   void finalizeSections();
   void checkExecuteOnly();
   void setReservedSymbolSections();
+  // facebook begin T37438891
+  void reduceNonLineDwarfDebug();
+  // facebook end T37438891
 
   SmallVector<PhdrEntry *, 0> createPhdrs(Partition &part);
   void addPhdrForSection(Partition &part, unsigned shType, unsigned pType,
@@ -531,6 +545,15 @@ template <class ELFT> void Writer<ELFT>::run() {
   // finalizeSections does that.
   finalizeSections();
   checkExecuteOnly();
+
+  // facebook begin T37438891
+  // If --strip-debug-non-line is specified reduce the .debug_abbrev/.debug_info
+  // sections. Do it right now because:
+  // - it changes the size of output sections,
+  // - OutputSection::maybeCompress should compress the reduced sections.
+  if (config->strip == StripPolicy::DebugNonLine)
+    reduceNonLineDwarfDebug();
+  // facebook end T37438891
 
   // If --compressed-debug-sections is specified, compress .debug_* sections.
   // Do it right now because it changes the size of output sections.
@@ -1020,6 +1043,233 @@ template <class ELFT> void Writer<ELFT>::addRelIpltSymbols() {
       config->isRela ? "__rela_iplt_end" : "__rel_iplt_end",
       Out::elfHeader, 0, STV_HIDDEN);
 }
+
+// facebook begin T37438891
+template <typename value_type>
+void writeInt(raw_ostream &OS, value_type value, endianness endian) {
+  value = byte_swap<value_type>(value, endian);
+  OS.write(reinterpret_cast<const char *>(&value), sizeof(value_type));
+}
+
+template <class ELFT> void Writer<ELFT>::reduceNonLineDwarfDebug() {
+  OutputSection *AbbrSec = nullptr;
+  OutputSection *ArangesSec = nullptr;
+  OutputSection *InfoSec = nullptr;
+  for (OutputSection *Sec : outputSections) {
+    if (Sec->name == ".debug_abbrev")
+      AbbrSec = Sec;
+    else if (Sec->name == ".debug_info")
+      InfoSec = Sec;
+    else if (Sec->name == ".debug_aranges")
+      ArangesSec = Sec;
+  }
+
+  if (AbbrSec == nullptr || InfoSec == nullptr)
+    return;
+
+  std::vector<uint8_t> AbbrBuf(AbbrSec->size);
+  {
+    parallel::TaskGroup tg;
+    AbbrSec->writeTo<ELFT>(AbbrBuf.data(), tg);
+  }
+  std::vector<uint8_t> InfoBuf(InfoSec->size);
+  {
+    parallel::TaskGroup tg;
+    InfoSec->writeTo<ELFT>(InfoBuf.data(), tg);
+  }
+
+  auto Endian = ELFT::TargetEndianness;
+  auto MakeDataExtractor = [](StringRef Data) {
+    uint8_t AddressSize = config->is64 ? 8 : 4;
+    return llvm::DataExtractor(Data, config->isLE, AddressSize);
+  };
+
+  // map original -> reduced (AbbrevCode, AbbrOffset)
+  std::unordered_map<std::pair<uint64_t, uint32_t>,
+                     std::pair<uint64_t, uint32_t>,
+                     pair_hash<uint64_t, uint32_t>>
+      AbbrCodeOffMap;
+  SmallString<0> ReducedAbbr;
+  // Reduce .debug_abbrev
+  {
+    raw_svector_ostream OS(ReducedAbbr);
+    llvm::DataExtractor AbbrData = MakeDataExtractor(toStringRef(AbbrBuf));
+    uint64_t AbbrOffset = 0;
+    uint64_t ReducedAbbrCode = 0;
+    while (AbbrOffset < AbbrData.getData().size()) {
+      uint32_t AbbrStart = AbbrOffset;
+      while (uint64_t AbbrCode = AbbrData.getULEB128(&AbbrOffset)) {
+        uint64_t AbbrType = AbbrData.getULEB128(&AbbrOffset);
+        // This would ordinarily be the has_children
+        // field of the abbreviation.  But it's going to
+        // be false after reducing the information, so
+        // there's no point in storing it.
+        AbbrData.getU8(&AbbrOffset);
+
+        // Read to the end of the current abbreviation.
+        // This is indicated by two zero unsigned LEBs
+        // in a row.  We don't need to parse the data
+        // yet, so we just scan through the data looking
+        // for two consecutive 0 bytes indicating the
+        // end of the abbreviation.
+        uint32_t AbbrEnd = AbbrOffset;
+        while ((AbbrEnd + 1 < AbbrData.getData().size()) &&
+               (AbbrData.getData()[AbbrEnd] || AbbrData.getData()[AbbrEnd + 1]))
+          AbbrEnd++;
+        // Account for the two nulls and advance to the
+        // start of the next abbreviation.
+        AbbrEnd += 2;
+
+        if (AbbrType == dwarf::DW_TAG_compile_unit) {
+          ReducedAbbrCode++;
+          encodeULEB128(ReducedAbbrCode, OS);
+          encodeULEB128(AbbrType, OS);
+          OS.write(0); // has_children: false
+          AbbrCodeOffMap[std::make_pair(AbbrCode, AbbrStart)] =
+              std::make_pair(ReducedAbbrCode, OS.str().size());
+          OS << AbbrData.getData().slice(AbbrOffset, AbbrEnd);
+        }
+        AbbrOffset = AbbrEnd;
+      }
+    }
+    // Null terminate the list of abbreviations
+    OS.write(0);
+  }
+
+  // map original -> reduced offsets to start of DIE
+  std::unordered_map<uint32_t, uint32_t> InfoOffMap;
+  SmallString<0> ReducedInfo;
+  // Reduce .debug_info
+  {
+    llvm::DataExtractor InfoData = MakeDataExtractor(toStringRef(InfoBuf));
+    llvm::DataExtractor ReducedAbbrData =
+        MakeDataExtractor(StringRef(ReducedAbbr.data(), ReducedAbbr.size()));
+
+    raw_svector_ostream OS(ReducedInfo);
+    uint64_t InfoOffset = 0;
+    while (InfoOffset < InfoData.getData().size()) {
+      uint32_t InfoStart = InfoOffset;
+      uint32_t Length = InfoData.getU32(&InfoOffset);
+      dwarf::DwarfFormat Format = dwarf::DwarfFormat::DWARF32;
+      if (Length == 0xFFFFFFFF) {
+        Format = llvm::dwarf::DwarfFormat::DWARF64;
+        Length = InfoData.getU64(&InfoOffset);
+      }
+      bool IsDWARF64 = Format == llvm::dwarf::DwarfFormat::DWARF64;
+      uint32_t SizeOfLength = IsDWARF64 ? sizeof(uint64_t) : sizeof(uint32_t);
+
+      uint32_t NextInfoOffset = InfoOffset + Length;
+      uint16_t Version = InfoData.getU16(&InfoOffset);
+
+      uint8_t UnitType = 0;
+      uint64_t AbbrOffset = 0;
+      uint8_t AddrSize = 0;
+      if (Version >= 5) {
+        UnitType = InfoData.getU8(&InfoOffset);
+        AddrSize = InfoData.getU8(&InfoOffset);
+        AbbrOffset = InfoData.getUnsigned(&InfoOffset, SizeOfLength);
+      } else {
+        AbbrOffset = InfoData.getUnsigned(&InfoOffset, SizeOfLength);
+        AddrSize = InfoData.getU8(&InfoOffset);
+      }
+      uint64_t AbbrCode = InfoData.getULEB128(&InfoOffset);
+
+      auto It = AbbrCodeOffMap.find(std::make_pair(AbbrCode, AbbrOffset));
+      if (It == AbbrCodeOffMap.end()) {
+        warn("Will not reduce debug_abbrev/debug_info: failed to find "
+             "abbrev mapping for AbbrCode: " +
+             toString(AbbrCode) + " AbbrOffset: " + toString(AbbrOffset));
+        return;
+      }
+      std::tie(AbbrCode, AbbrOffset) = It->second;
+      uint32_t AttrStart = InfoOffset;
+      do {
+        uint32_t Name = ReducedAbbrData.getULEB128(&AbbrOffset);
+        auto Form =
+            static_cast<dwarf::Form>(ReducedAbbrData.getULEB128(&AbbrOffset));
+        if (Name == 0 && Form == 0)
+          break;
+        DWARFFormValue::skipValue(
+            Form, InfoData, &InfoOffset,
+            dwarf::FormParams({Version, AddrSize, Format}));
+      } while (true);
+
+      InfoOffMap[InfoStart] = OS.str().size();
+
+      Length = sizeof(Version) + ((Version >= 5) ? sizeof(UnitType) : 0) +
+               SizeOfLength + sizeof(AddrSize) + getULEB128Size(AbbrCode) +
+               (InfoOffset - AttrStart);
+      if (IsDWARF64) {
+        writeInt(OS, uint32_t(0xFFFFFFFF), Endian);
+        writeInt(OS, uint64_t(Length), Endian);
+      } else
+        writeInt(OS, Length, Endian);
+      writeInt(OS, Version, Endian);
+      if (Version >= 5) {
+        writeInt(OS, UnitType, Endian);
+        writeInt(OS, AddrSize, Endian);
+        if (IsDWARF64)
+          writeInt(OS, uint64_t(0), Endian); // Offset: 0
+        else
+          writeInt(OS, uint32_t(0), Endian); // Offset: 0
+      } else {
+        if (IsDWARF64)
+          writeInt(OS, uint64_t(0), Endian); // Offset: 0
+        else
+          writeInt(OS, uint32_t(0), Endian); // Offset: 0
+        writeInt(OS, AddrSize, Endian);
+      }
+      encodeULEB128(AbbrCode, OS);
+      OS << InfoData.getData().slice(AttrStart, InfoOffset);
+      InfoOffset = NextInfoOffset;
+    }
+  }
+
+  AbbrSec->setReducedDebugData(std::move(ReducedAbbr));
+  InfoSec->setReducedDebugData(std::move(ReducedInfo));
+  if (!ArangesSec)
+    return;
+
+  // Fixup references from .debug_aranges to reduced .debug_info
+  SmallString<0> ReducedAranges;
+  ReducedAranges.resize(ArangesSec->size);
+  {
+    parallel::TaskGroup tg;
+    ArangesSec->writeTo<ELFT>(reinterpret_cast<uint8_t *>(&ReducedAranges[0]), tg);
+  }
+
+  {
+    char *Aranges = &ReducedAranges[0];
+    uint32_t ArangesOffset = 0;
+    auto endian = ELFT::TargetEndianness;
+    while (ArangesOffset < ReducedAranges.size()) {
+      uint32_t Length = endian::read32(Aranges + ArangesOffset, endian);
+      ArangesOffset += sizeof(uint32_t);
+      bool IsDWARF64 = false;
+      if (Length == 0xFFFFFFFF) {
+        IsDWARF64 = true;
+        Length = endian::read64(Aranges + ArangesOffset, endian);
+        ArangesOffset += sizeof(uint64_t);
+      }
+      uint32_t NextArangesOffset = ArangesOffset + Length;
+
+      ArangesOffset += 2; // Skip over version (u16).
+      uint32_t InfoOffset =
+          IsDWARF64 ? endian::read64(Aranges + ArangesOffset, endian)
+                    : endian::read32(Aranges + ArangesOffset, endian);
+      auto It = InfoOffMap.find(InfoOffset);
+      if (It != InfoOffMap.end()) {
+        if (IsDWARF64)
+          endian::write64(Aranges + ArangesOffset, It->second, endian);
+        else
+          endian::write32(Aranges + ArangesOffset, It->second, endian);
+      }
+      ArangesOffset = NextArangesOffset;
+    }
+  }
+  ArangesSec->setReducedDebugData(std::move(ReducedAranges));
+}
+// facebook end T37438891
 
 // This function generates assignments for predefined symbols (e.g. _end or
 // _etext) and inserts them into the commands sequence to be processed at the

@@ -19,9 +19,7 @@
 #include "llvm/DebugInfo/DWARF/DWARFFormValue.h" // facebook T37438891
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Compression.h"
-#include "llvm/Support/Debug.h" // facebook T37438891
 #include "llvm/Support/Endian.h"
-#include "llvm/Support/LEB128.h" // facebook T37438891
 #include "llvm/Support/xxhash.h"
 #include <algorithm>
 #include <mutex>
@@ -312,99 +310,6 @@ std::string InputSectionBase::getObjMsg(uint64_t off) {
   return (filename + ":(" + name + "+0x" + utohexstr(off) + ")" + archive)
       .str();
 }
-
-// facebook begin T37438891
-bool InputSectionBase::reduceDebugAbbrevSection() {
-  if (!this->name.equals(".debug_abbrev")) {
-    LLVM_DEBUG(dbgs() << "Error: section is not .debug_abbrev\n");
-    return false;
-  }
-
-  const unsigned char *abbrevData = this->data().begin();
-  const unsigned char *abbrevEnd = this->data().end();
-
-  unsigned long abbrevCount = 0;
-
-  while (abbrevData < abbrevEnd) {
-    unsigned LEBSize;
-    const char *err;
-    while (uint64_t abbrevNumber =
-               decodeULEB128(abbrevData, &LEBSize, abbrevEnd, &err)) {
-      if (err) {
-        LLVM_DEBUG(dbgs() << "Failed to decode abbrev number: " << err);
-        return false;
-      }
-      abbrevData += LEBSize;
-
-      // Together with the abbreviation number these fields make up
-      // the header for each abbreviation.
-      uint64_t abbrevType =
-          decodeULEB128(abbrevData, &LEBSize, abbrevEnd, &err);
-      if (err) {
-        LLVM_DEBUG(dbgs() << "Failed to decode abbrev type: " << err);
-        return false;
-      }
-      abbrevData += LEBSize;
-
-      // This would ordinarily be the has_children field of the
-      // abbreviation.  But it's going to be false after reducing the
-      // information, so there's no point in storing it.
-      abbrevData++;
-
-      // Read to the end of the current abbreviation.
-      // This is indicated by two zero unsigned LEBs in a row.  We don't
-      // need to parse the data yet, so we just scan through the data
-      // looking for two consecutive 0 bytes indicating the end of the
-      // abbreviation.
-      const unsigned char *currentAbbrev = abbrevData;
-      while ((currentAbbrev + 1 < abbrevEnd) &&
-             (currentAbbrev[0] || currentAbbrev[1])) {
-        currentAbbrev++;
-      }
-      if (currentAbbrev[0] || currentAbbrev[1]) {
-        LLVM_DEBUG(dbgs() << "Debug abbreviations extend beyond .debug_abbrev "
-                          << "section; failed to reduce debug abbreviations. "
-                          << "Current abbrev is " << currentAbbrev << ", "
-                          << "abbrev end is " << abbrevEnd << ".\n");
-        return false;
-      }
-      // Account for the two nulls and advance to the start of the
-      // next abbreviation.
-      currentAbbrev += 2;
-
-      if (abbrevType == llvm::dwarf::DW_TAG_compile_unit) {
-        uint8_t buf[16];
-        unsigned abbrevLEBSize = encodeULEB128(++abbrevCount, buf);
-        reducedDebugBuffer.insert(reducedDebugBuffer.end(), buf,
-                                  buf + abbrevLEBSize);
-        abbrevLEBSize = encodeULEB128(abbrevType, buf);
-        reducedDebugBuffer.insert(reducedDebugBuffer.end(), buf,
-                                  buf + abbrevLEBSize);
-        // has_children is false for all entries
-        reducedDebugBuffer.push_back(0);
-        reducedDebugBuffer.insert(reducedDebugBuffer.end(), abbrevData,
-                                  currentAbbrev);
-      }
-      abbrevData = currentAbbrev;
-    }
-    if (LEBSize != 1) {
-      LLVM_DEBUG(dbgs() << "Incorrect LEB size, .debug_abbrev is mangled, "
-                        << "cannot reduced .debug_abbrev section\n");
-      return false;
-    }
-    abbrevData += LEBSize;
-  }
-
-  this->rawData = makeArrayRef(reducedDebugBuffer);
-  return true;
-}
-
-void InputSectionBase::nullTerminateReducedDebugAbbrev() {
-  reducedDebugBuffer = std::vector<uint8_t>(this->rawData);
-  reducedDebugBuffer.push_back(0);
-  this->rawData = makeArrayRef(reducedDebugBuffer);
-}
-// facebook end T37438891
 
 InputSection InputSection::discarded(nullptr, 0, 0, 0, ArrayRef<uint8_t>(), "");
 
