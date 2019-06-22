@@ -295,16 +295,29 @@ template <class ELFT> void OutputSection::maybeCompress() {
   hdr->ch_size = size;
   hdr->ch_addralign = alignment;
 
+  // facebook begin T37438891
   // Write section contents to a temporary buffer and compress it.
   std::vector<uint8_t> buf(size);
-  writeTo<ELFT>(buf.data());
+  if (reducedDebugData.empty())
+    writeTo<ELFT>(buf.data());
   // We chose 1 as the default compression level because it is the fastest. If
   // -O2 is given, we use level 6 to compress debug info more by ~15%. We found
   // that level 7 to 9 doesn't make much difference (~1% more compression) while
   // they take significant amount of time (~2x), so level 6 seems enough.
-  if (Error e = zlib::compress(toStringRef(buf), compressedData,
-                               config->optimize >= 2 ? 6 : 1))
+  if (Error e = zlib::compress(
+          reducedDebugData.empty()
+              ? toStringRef(buf)
+              : StringRef(reducedDebugData.data(), reducedDebugData.size()),
+          compressedData, config->optimize >= 2 ? 6 : 1))
     fatal("compress failed: " + llvm::toString(std::move(e)));
+
+  {
+    // Free memory.
+    using std::swap;
+    decltype(reducedDebugData) tmp;
+    swap(reducedDebugData, tmp);
+  }
+  // facebook end T37438891
 
   // Update section headers.
   size = sizeof(Elf_Chdr) + compressedData.size();
@@ -328,7 +341,7 @@ template <class ELFT> void OutputSection::writeTo(uint8_t *buf) {
   if (type == SHT_NOBITS)
     return;
 
-  // If -compress-debug-section is specified and if this is a debug section,
+  // If --compress-debug-section is specified and if this is a debug section,
   // we've already compressed section contents. If that's the case,
   // just write it down.
   if (!compressedData.empty()) {
@@ -337,6 +350,16 @@ template <class ELFT> void OutputSection::writeTo(uint8_t *buf) {
            compressedData.size());
     return;
   }
+
+  // facebook begin T37438891
+  // If --strip-debug-non-line is specified and if this is a debug section,
+  // we've already reduced section contents. If that's the case,
+  // just write it down.
+  if (!reducedDebugData.empty()) {
+    memcpy(buf, reducedDebugData.data(), reducedDebugData.size());
+    return;
+  }
+  // facebook end T37438891
 
   // Write leading padding.
   std::vector<InputSection *> sections = getInputSections(this);

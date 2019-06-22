@@ -237,12 +237,6 @@ public:
     return llvm::makeArrayRef<T>((const T *)data().data(), s / sizeof(T));
   }
 
-  // facebook begin T37438891
-  bool reduceDebugAbbrevSection();
-
-  void nullTerminateReducedDebugAbbrev();
-  // facebook end T37438891
-
 protected:
   template <typename ELFT>
   void parseCompressedHeader();
