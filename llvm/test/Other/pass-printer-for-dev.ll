@@ -1,10 +1,12 @@
 ; facebook T44360418
 ; RUN: opt < %s 2>&1 -disable-output \
-; RUN: 	   -passes=inline -print-after-all -filter-print-funcs=foo -print-for-dev | \
+; RUN: 	   -passes=sample-profile -sample-profile-file=%S/Inputs/pass-printer-for-dev.prof -print-after-all -filter-print-funcs=foo -print-for-dev | \
 ; RUN:     FileCheck %s --implicit-check-not="call void @llvm.dbg" --implicit-check-not="DILocation"
 
-; CHECK: IR Dump After InlinerPass
+; CHECK: IR Dump After SampleProfileLoaderPass 
 ; CHECK: define dso_local i32 @foo
+; CHECK-NOT: !dbg
+; CHECK-SAME: function_entry_count 101
 ; CHECK: [ tiny.c:2:3 ]
 ; CHECK: [ tiny.c:2:10 ]
 
