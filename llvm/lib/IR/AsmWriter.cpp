@@ -1264,6 +1264,10 @@ void SlotTracker::CreateFunctionSlot(const Value *V) {
 /// CreateModuleSlot - Insert the specified MDNode* into the slot table.
 void SlotTracker::CreateMetadataSlot(const MDNode *N) {
   assert(N && "Can't insert a null Value into SlotTracker!");
+  // facebook begin T44360418
+  if (PrintForDev)
+    return;
+  // facebook end
 
   // Don't make slots for DIExpressions or DIArgLists. We just print them inline
   // everywhere.
@@ -2499,6 +2503,11 @@ static void WriteAsOperandInternal(raw_ostream &Out, const Value *V,
 static void WriteAsOperandInternal(raw_ostream &Out, const Metadata *MD,
                                    AsmWriterContext &WriterCtx,
                                    bool FromValue) {
+  // facebook begin T44360418
+  if (PrintForDev)
+    return;
+  // facebook end
+
   // Write DIExpressions and DIArgLists inline when used as a value. Improves
   // readability of debug info intrinsics.
   if (const DIExpression *Expr = dyn_cast<DIExpression>(MD)) {
@@ -4509,6 +4518,27 @@ void AssemblyWriter::printMetadataAttachments(
 
   if (MDNames.empty())
     MDs[0].second->getContext().getMDKindNames(MDNames);
+
+  // facebook begin T44360418
+  // Under PrintForDev mode, only print metadata related to the profile counter.
+  // The profile counter attached to the instructions won't even printed,
+  // because printInstruction function returns before the metadata printing
+  // under PrintForDev.
+  if (PrintForDev) {
+    for (const auto &I : MDs) {
+      unsigned Kind = I.first;
+      if (Kind == LLVMContext::MD_prof) {
+        Out << Separator;
+        auto *Name = dyn_cast<MDString>(I.second->getOperand(0));
+        Out << Name->getString() << " ";
+        ConstantInt *CI =
+            mdconst::extract<ConstantInt>(I.second->getOperand(1));
+        Out << CI->getZExtValue();
+      }
+    }
+    return;
+  }
+  // facebook end
 
   auto WriterCtx = getContext();
   for (const auto &I : MDs) {
