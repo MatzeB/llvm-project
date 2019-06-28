@@ -25,12 +25,12 @@
 ;
 ; There is one sample record with 0 samples at offset 4 in main() that we never
 ; use:
-; CHECK: warning: coverage.cc:7: 4 of 5 available profile records (80%) were applied
+; CHECK: warning: coverage.cc:7: main: 4 of 5 available profile records (80%) were applied
 ;
 ; Since the unused sample record contributes no samples, sample coverage should
 ; be 100%. Note that we get this warning because we are requesting an impossible
 ; 110% coverage check.
-; CHECK: warning: coverage.cc:7: 78834 of 78834 available profile samples (100%) were applied
+; CHECK: warning: coverage.cc:7: main: 78834 of 78834 available profile samples (100%) were applied
 
 define i64 @_Z3fool(i64 %i) #0 !dbg !4 {
 entry:

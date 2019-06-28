@@ -1,11 +1,16 @@
-; RUN: opt < %s -sample-profile -sample-profile-file=%S/Inputs/coverage-warning.prof -sample-profile-check-record-coverage=90 -sample-profile-check-sample-coverage=100 -o /dev/null 2>&1 | FileCheck %s
-; RUN: opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/coverage-warning.prof -sample-profile-check-record-coverage=90 -sample-profile-check-sample-coverage=100 -o /dev/null 2>&1 | FileCheck %s
+;; facebook begin T46352508
+; RUN: opt < %s -sample-profile -sample-profile-file=%S/Inputs/coverage-warning.prof -sample-profile-check-record-coverage=90 -sample-profile-check-sample-coverage=100 -sample-profile-block-coverage=90 -o /dev/null 2>&1 | FileCheck %s
+; RUN: opt < %s -passes=sample-profile -sample-profile-file=%S/Inputs/coverage-warning.prof -sample-profile-check-record-coverage=90 -sample-profile-check-sample-coverage=100 -sample-profile-block-coverage=90 -o /dev/null 2>&1 | FileCheck %s
+;; facebook end
 define i32 @foo(i32 %i) #0 !dbg !4 {
 ; The profile has samples for line locations that are no longer present.
 ; Coverage does not reach 90%, so we should get this warning:
 ;
-; CHECK: warning: coverage-warning.c:1: 2 of 3 available profile records (66%) were applied
-; CHECK: warning: coverage-warning.c:1: 29000 of 30700 available profile samples (94%) were applied
+;; facebook begin T46352508
+; CHECK: warning: coverage-warning.c:1: foo: 2 of 4 blocks (50%) were sampled
+; CHECK: warning: coverage-warning.c:1: foo: 2 of 3 available profile records (66%) were applied
+; CHECK: warning: coverage-warning.c:1: foo: 29000 of 30700 available profile samples (94%) were applied
+;; facebook end
 entry:
   %retval = alloca i32, align 4
   %i.addr = alloca i32, align 4

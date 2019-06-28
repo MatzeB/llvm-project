@@ -78,6 +78,9 @@ extern cl::opt<unsigned> SampleProfileMaxPropagateIterations;
 extern cl::opt<unsigned> SampleProfileRecordCoverage;
 extern cl::opt<unsigned> SampleProfileSampleCoverage;
 extern cl::opt<bool> NoWarnSampleUnused;
+// facebook T46352508
+extern cl::opt<unsigned> SampleProfileBlockCoverage;
+// facebook end
 
 template <typename BT> class SampleProfileLoaderBaseImpl {
 public:
@@ -373,6 +376,23 @@ bool SampleProfileLoaderBaseImpl<BT>::computeBlockWeights(FunctionT &F) {
     }
     LLVM_DEBUG(printBlockWeight(dbgs(), &BB));
   }
+
+  // facebook T46352508
+  if (SampleProfileBlockCoverage) {
+    unsigned SampledBlock = VisitedBlocks.size();
+    const Function &Func = getFunction(F);
+    unsigned Coverage =
+        Func.size() > 0 ? (SampledBlock * 100 / Func.size()) : 100;
+    if (Coverage < SampleProfileBlockCoverage) {
+      Func.getContext().diagnose(DiagnosticInfoSampleProfile(
+          Func.getSubprogram()->getFilename(), getFunctionLoc(F),
+          Func.getName() + ": " + Twine(SampledBlock) + " of " +
+              Twine(Func.size()) + " blocks (" + Twine(Coverage) +
+              "%) were sampled",
+          DS_Warning));
+    }
+  }
+  // facebook end
 
   return Changed;
 }
@@ -878,11 +898,14 @@ void SampleProfileLoaderBaseImpl<BT>::emitCoverageRemarks(FunctionT &F) {
     unsigned Total = CoverageTracker.countBodyRecords(Samples, PSI);
     unsigned Coverage = CoverageTracker.computeCoverage(Used, Total);
     if (Coverage < SampleProfileRecordCoverage) {
+      // facebook begin T46352508
       Func.getContext().diagnose(DiagnosticInfoSampleProfile(
           Func.getSubprogram()->getFilename(), getFunctionLoc(F),
-          Twine(Used) + " of " + Twine(Total) + " available profile records (" +
-              Twine(Coverage) + "%) were applied",
+          Func.getName() + ": " + Twine(Used) + " of " + Twine(Total) +
+              " available profile records (" + Twine(Coverage) +
+              "%) were applied",
           DS_Warning));
+      // facebook end T46352508
     }
   }
 
@@ -891,11 +914,14 @@ void SampleProfileLoaderBaseImpl<BT>::emitCoverageRemarks(FunctionT &F) {
     uint64_t Total = CoverageTracker.countBodySamples(Samples, PSI);
     unsigned Coverage = CoverageTracker.computeCoverage(Used, Total);
     if (Coverage < SampleProfileSampleCoverage) {
+      // facebook begin T46352508
       Func.getContext().diagnose(DiagnosticInfoSampleProfile(
           Func.getSubprogram()->getFilename(), getFunctionLoc(F),
-          Twine(Used) + " of " + Twine(Total) + " available profile samples (" +
-              Twine(Coverage) + "%) were applied",
+          Func.getName() + ": " + Twine(Used) + " of " + Twine(Total) +
+              " available profile samples (" + Twine(Coverage) +
+              "%) were applied",
           DS_Warning));
+      // facebook end T46352508
     }
   }
 }

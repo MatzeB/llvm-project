@@ -41,6 +41,13 @@ static cl::opt<double> SampleProfileHotThreshold(
              "collected in the parent function, will be inlined again."));
 // facebook end
 
+// facebook T46352508
+cl::opt<unsigned> SampleProfileBlockCoverage(
+    "sample-profile-block-coverage", cl::init(0), cl::value_desc("N"),
+    cl::desc("Emit a warning if less than N% of all basic blocks have weights "
+             "from input profile."));
+// facebook end
+
 cl::opt<bool> NoWarnSampleUnused(
     "no-warn-sample-unused", cl::init(false), cl::Hidden,
     cl::desc("Use this option to turn off/on warnings about function with "
