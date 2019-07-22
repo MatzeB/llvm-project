@@ -1,0 +1,8 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples1.txt --profiler text --format compbinary --binary %S/Inputs/find --out %t2 > %t3 2>&1
+; RUN: llvm-profdata show -sample %t2 | FileCheck %s
+
+; CHECK: Function: 6207114967331250144: 776, 0, 21 sampled lines
+; CHECK-NEXT: Samples collected in the function's body
+; CHECK-NEXT: 1: 22
+; CHECK: Samples collected in inlined callsites 
+; CHECK-NEXT: 4: inlined callee: 7702722197349704696: 577, 0, 0 sampled lines

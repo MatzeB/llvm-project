@@ -67,8 +67,11 @@ int main(int argc, char **argv) {
     writer.reset(new autofdo::LLVMProfileWriter(llvm::sampleprof::SPF_Text));
   } else if (Format.getValue() == "binary") {
     writer.reset(new autofdo::LLVMProfileWriter(llvm::sampleprof::SPF_Binary));
+  } else if (Format.getValue() == "compbinary") {
+    writer.reset(
+        new autofdo::LLVMProfileWriter(llvm::sampleprof::SPF_Compact_Binary));
   } else {
-    llvm::errs() << "--format must be one of 'text' or 'binary'";
+    llvm::errs() << "--format must be one of 'text', 'binary' or 'compbinary'";
     return -1;
   }
 
