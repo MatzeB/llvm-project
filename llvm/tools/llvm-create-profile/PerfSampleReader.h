@@ -32,6 +32,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Regex.h"
+#include <numeric>
 
 #define DEBUG_TYPE "autofdo_perf_parser"
 extern llvm::cl::opt<std::string> PrintPerformanceSamples;
@@ -498,16 +499,31 @@ public:
       parseSingleLine(line);
     };
 
-    log << "Total number of Address parsed : "
-        << ip_count_map.size() + nbDropedIP << " dropped " << nbDropedIP
-        << std::endl;
+    auto total_valid_ip =
+        std::accumulate(ip_count_map.begin(), ip_count_map.end(), 0,
+                        [](int acc, decltype(*ip_count_map.begin()) b) {
+                          return acc + b.second;
+                        });
+    auto total_valid_branches =
+        std::accumulate(branchCountMap.begin(), branchCountMap.end(), 0,
+                        [](int acc, decltype(*branchCountMap.begin()) b) {
+                          return acc + b.second;
+                        });
+    auto total_valid_ranges =
+        std::accumulate(rangeCountMap.begin(), rangeCountMap.end(), 0,
+                        [](int acc, decltype(*rangeCountMap.begin()) b) {
+                          return acc + b.second;
+                        });
+
+    log << "Total number of Address parsed : " << total_valid_ip + nbDropedIP
+        << " dropped " << nbDropedIP << std::endl;
 
     log << "Total number of branch parsed : "
-        << branchCountMap.size() + nbDropedBranch << " dropped "
+        << total_valid_branches + nbDropedBranch << " dropped "
         << nbDropedBranch << std::endl;
 
     log << "Total number of range parsed : "
-        << rangeCountMap.size() + nbDropedRange << " dropped " << nbDropedRange
+        << total_valid_ranges + nbDropedRange << " dropped " << nbDropedRange
         << std::endl;
 
     if (PrintPerformanceSamples.getNumOccurrences() > 0) {
