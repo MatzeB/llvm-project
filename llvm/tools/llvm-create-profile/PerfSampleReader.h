@@ -389,7 +389,8 @@ private:
         nbDropedIP += 1;
         log << "on event : " << line << std::endl;
         log << "dropping address count because could not resolve : "
-            << event.getValue().InstructionPointer << std::endl;
+            << std::hex << event.getValue().InstructionPointer << std::dec 
+            << std::endl;
       }
       std::reverse(event.getValue().BranchStack.begin(),
                    event.getValue().BranchStack.end());
@@ -405,7 +406,7 @@ private:
       size_t i = 0;
       for (; i < lbr.size() - 1; i++) {
         LLVM_DEBUG(log << "LBR element : " << i << std::endl);
-        LLVM_DEBUG(log << event.getValue().BranchStack[i] << std::endl);
+        LLVM_DEBUG(log << std::hex << event.getValue().BranchStack[i] << std::dec << std::endl);
         auto &from = lbr[i].first;
         auto &to = lbr[i].second;
 
@@ -416,7 +417,7 @@ private:
         } else {
           nbDropedBranch += 1;
           LLVM_DEBUG(log << "Dropping lbr element : "
-                         << event.getValue().BranchStack[i] << std::endl);
+                          << std::hex  << event.getValue().BranchStack[i] << std::dec <<  std::endl);
         }
 
         auto &next_from = lbr[i + 1].first;
@@ -459,7 +460,7 @@ private:
                        << std::endl);
       } else {
         LLVM_DEBUG(log << "Dropping lbr element : "
-                       << event.getValue().BranchStack[i] << std::endl);
+                       << std::hex << event.getValue().BranchStack[i] <<  std::dec << std::endl);
       }
 
     } else {
