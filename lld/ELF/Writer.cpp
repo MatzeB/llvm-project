@@ -1182,7 +1182,7 @@ template <class ELFT> void Writer<ELFT>::reduceNonLineDwarfDebug() {
         return;
       }
       std::tie(AbbrCode, AbbrOffset) = It->second;
-      uint32_t AttrStart = InfoOffset;
+      uint64_t AttrStart = InfoOffset;
       do {
         uint32_t Name = ReducedAbbrData.getULEB128(&AbbrOffset);
         auto Form =
