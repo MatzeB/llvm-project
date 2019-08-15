@@ -50,6 +50,10 @@ add_llvm_external_project(clang-tools-extra extra)
 add_subdirectory(fbcc-plugin)
 # facebook end
 
+# Angliru is an optional external Clang tool that can be enabled by
+# setting LLVM_EXTERNAL_ANGLIRU_SOURCE_DIR.
+add_llvm_external_project(angliru)
+
 # libclang may require clang-tidy in clang-tools-extra.
 add_clang_subdirectory(libclang)
 
