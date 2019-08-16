@@ -179,6 +179,11 @@ def discard_locals: F<"discard-locals">,
 def discard_none: F<"discard-none">,
   HelpText<"Keep all symbols in the symbol table">;
 
+// facebook begin T46459577
+defm discard_section:
+  Eq<"discard-section", "Discard a section">, MetaVarName<"<section>">;
+// facebook end T46459577
+
 defm dynamic_linker: Eq<"dynamic-linker", "Which dynamic linker to use">;
 
 defm dynamic_list : Eq<"dynamic-list",
@@ -319,6 +324,12 @@ def nmagic: F<"nmagic">, MetaVarName<"<magic>">,
 
 def nostdlib: F<"nostdlib">,
   HelpText<"Only search directories specified on the command line">;
+
+// facebook begin T46459577
+defm no_discard_section:
+  Eq<"no-discard-section", "Do not discard a section">,
+  MetaVarName<"<section>">;
+// facebook end T46459577
 
 def no_dynamic_linker: F<"no-dynamic-linker">,
   HelpText<"Inhibit output of .interp section">;

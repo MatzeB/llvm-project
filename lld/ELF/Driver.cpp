@@ -786,6 +786,44 @@ static DiscardPolicy getDiscard(opt::InputArgList &args) {
   return DiscardPolicy::None;
 }
 
+// facebook begin T46459577
+// We need to parse the arguments to take the last of --discard-section=S or
+// --no-discard-section=S.  This ensures we have a proper override
+// mechanism.
+static std::unordered_set<llvm::StringRef>
+getDiscardSections(opt::InputArgList &Args) {
+  std::unordered_set<llvm::StringRef> discardSections;
+  bool warnOnRelocatable = false;
+  for (auto *A : Args) {
+    if (!(A->getOption().matches(OPT_discard_section) ||
+          A->getOption().matches(OPT_no_discard_section)))
+      continue;
+    A->claim();
+    if (A->getOption().matches(OPT_discard_section)) {
+      if (config->relocatable) {
+        warnOnRelocatable = true;
+        break;
+      }
+      llvm::StringRef val = A->getValue();
+      // Discard DWARF sections even when --emit-relocs is used T87639747
+      if (!config->emitRelocs || val.find(".debug_") == 0 ||
+          val.find(".rela.debug_") == 0)
+        discardSections.insert(val);
+      else
+        warn("--emit-relocs  may not be used with --discard-section unless "
+             "section is a debug section, ignoring " +
+             A->getAsString(Args));
+    } else if (A->getOption().matches(OPT_no_discard_section))
+      discardSections.erase(A->getValue());
+  }
+  if (warnOnRelocatable) {
+    warn("-r may not be used with --discard-section, "
+         "ignoring all instances of --discard-section");
+  }
+  return discardSections;
+}
+// facebook end T46459577
+
 static StringRef getDynamicLinker(opt::InputArgList &args) {
   auto *arg = args.getLastArg(OPT_dynamic_linker, OPT_no_dynamic_linker);
   if (!arg)
@@ -1807,6 +1845,9 @@ static void setConfigs(opt::InputArgList &args) {
   uint16_t m = config->emachine;
 
   config->copyRelocs = (config->relocatable || config->emitRelocs);
+  // facebook begins T46459577
+  config->discardSections = getDiscardSections(args);
+  // facebook ends T46459577
   config->is64 = (k == ELF64LEKind || k == ELF64BEKind);
   config->isLE = (k == ELF32LEKind || k == ELF64LEKind);
   config->endianness = config->isLE ? endianness::little : endianness::big;
@@ -3062,6 +3103,16 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
         return true;
       });
     }
+    // facebook begin T46459577
+    if (!config->discardSections.empty()) {
+      llvm::erase_if(ctx.inputSections, [](InputSectionBase *s) {
+        if (config->discardSections.find(s->name) !=
+            config->discardSections.end())
+          return true;
+        return false;
+      });
+    }
+    // facebook end T46459577
     // We do not want to emit debug sections if --strip-all
     // or --strip-debug are given.
     if (config->strip != StripPolicy::None) {
