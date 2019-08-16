@@ -22,6 +22,7 @@
 #include "llvm/Support/GlobPattern.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include <atomic>
+#include <unordered_set> // facebook T46459577
 #include <vector>
 
 namespace lld {
@@ -133,6 +134,7 @@ struct Configuration {
   std::pair<llvm::StringRef, llvm::StringRef> thinLTOObjectSuffixReplace;
   std::pair<llvm::StringRef, llvm::StringRef> thinLTOPrefixReplace;
   std::string rpath;
+  std::unordered_set<llvm::StringRef> discardSections; // facebook T46459577
   std::vector<VersionDefinition> versionDefinitions;
   std::vector<llvm::StringRef> auxiliaryList;
   std::vector<llvm::StringRef> filterList;
