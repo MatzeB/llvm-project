@@ -147,6 +147,11 @@ def discard_locals: F<"discard-locals">,
 def discard_none: F<"discard-none">,
   HelpText<"Keep all symbols in the symbol table">;
 
+// facebook begin T46459577
+defm discard_section:
+  Eq<"discard-section", "Discard a section">, MetaVarName<"<section>">;
+// facebook end T46459577
+
 defm dynamic_linker: Eq<"dynamic-linker", "Which dynamic linker to use">;
 
 defm dynamic_list : Eq<"dynamic-list",

@@ -697,6 +697,16 @@ static DiscardPolicy getDiscard(opt::InputArgList &args) {
   return DiscardPolicy::None;
 }
 
+// facebook begin T46459577
+static std::unordered_set<llvm::StringRef>
+getDiscardSections(opt::InputArgList &Args) {
+  std::vector<llvm::StringRef> v = args::getStrings(Args, OPT_discard_section);
+  std::unordered_set<llvm::StringRef> discardSections(
+      std::make_move_iterator(v.begin()), std::make_move_iterator(v.end()));
+  return discardSections;
+}
+// facebook end T46459577
+
 static StringRef getDynamicLinker(opt::InputArgList &args) {
   auto *arg = args.getLastArg(OPT_dynamic_linker, OPT_no_dynamic_linker);
   if (!arg)
@@ -1069,6 +1079,7 @@ static void readConfigs(opt::InputArgList &args) {
   config->dependentLibraries = args.hasFlag(OPT_dependent_libraries, OPT_no_dependent_libraries, true);
   config->disableVerify = args.hasArg(OPT_disable_verify);
   config->discard = getDiscard(args);
+  config->discardSections = getDiscardSections(args); // facebook T46459577
   config->dwoDir = args.getLastArgValue(OPT_plugin_opt_dwo_dir_eq);
   config->dynamicLinker = getDynamicLinker(args);
   config->ehFrameHdr =
