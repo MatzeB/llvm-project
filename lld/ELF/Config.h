@@ -30,6 +30,7 @@
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <unordered_set> // facebook T46459577
 #include <vector>
 
 namespace lld::elf {
@@ -189,6 +190,7 @@ struct Config {
   llvm::StringRef thinLTOPrefixReplaceNew;
   llvm::StringRef thinLTOPrefixReplaceNativeObject;
   std::string rpath;
+  std::unordered_set<llvm::StringRef> discardSections; // facebook T46459577
   llvm::SmallVector<VersionDefinition, 0> versionDefinitions;
   llvm::SmallVector<llvm::StringRef, 0> auxiliaryList;
   llvm::SmallVector<llvm::StringRef, 0> filterList;
