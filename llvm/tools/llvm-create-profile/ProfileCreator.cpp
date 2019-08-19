@@ -32,6 +32,10 @@ cl::opt<bool> AddEmptyRanges ("fill-missing-addresses-with-zero",
                               cl::desc("When an address in the binary is not sampled, attributes to it a count of zero"),
                               cl::init(true));
 
+cl::opt<bool> AddEmptyBinary ("fill-missing-binaries-with-zero",
+                              cl::desc("When a binary doesn't have sample hits, attributes to all address in it a count of zero"),
+                              cl::init(false));
+
 bool ProfileCreator::CreateProfile(const string &input_profile_name,
                                    const string &profiler,
                                    ProfileWriter *writer,
@@ -77,7 +81,7 @@ bool ProfileCreator::ComputeProfile(SymbolMap &symbol_map) {
          auto &ProfileSymbol = p.second;
          if (!symbol_map.ShouldEmit(ProfileSymbol->total_count))
            continue;
-         auto &elfSymbol = symbol_map.ElfSymbols().at(instruction) ;
+         auto &elfSymbol = symbol_map.ElfSymbols().at(instruction);
          profile.AddRange(elfSymbol.range(), 0);
       }
   }
@@ -100,6 +104,11 @@ bool ProfileCreator::CreateProfileFromSample(ProfileWriter *writer,
   for (const auto &range : sample_reader_->range_count_map()) {
     binaries.insert(range.first.begin.objectFile);
     binaries.insert(range.first.end.objectFile);
+  }
+
+  if (AddEmptyBinary) {
+    for (auto &binary : object_files_)
+      binaries.insert(binary);
   }
 
   SymbolMap symbol_map(std::move(binaries));
