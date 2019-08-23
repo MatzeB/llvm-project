@@ -2015,6 +2015,10 @@ def fexperimental_strict_floating_point : Flag<["-"], "fexperimental-strict-floa
 def finput_charset_EQ : Joined<["-"], "finput-charset=">, Flags<[FlangOption, FC1Option]>, Group<f_Group>,
   HelpText<"Specify the default character set for source files">;
 def fexec_charset_EQ : Joined<["-"], "fexec-charset=">, Group<f_Group>;
+// facebook begin T48837209
+def fpersist_block_annotation: Flag<["-"], "fpersist-block-annotation">, Group<f_Group>, Flags<[CC1Option]>,
+  HelpText<"Encode MIR block info (label+profile count) into the binary.">;
+// facebook end
 def finstrument_functions : Flag<["-"], "finstrument-functions">, Group<f_Group>, Flags<[CC1Option]>,
   HelpText<"Generate calls to instrument function entry and exit">,
   MarshallingInfoFlag<CodeGenOpts<"InstrumentFunctions">>;

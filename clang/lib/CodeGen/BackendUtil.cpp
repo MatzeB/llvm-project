@@ -471,6 +471,9 @@ static bool initTargetOptions(DiagnosticsEngine &Diags,
     break;
   }
 
+  // facebook begin T48837209
+  Options.PersistBlockAnnotation = CodeGenOpts.PersistBlockAnnotation;
+  // facebook end
   Options.MCOptions.SplitDwarfFile = CodeGenOpts.SplitDwarfFile;
   Options.MCOptions.EmitDwarfUnwind = CodeGenOpts.getEmitDwarfUnwind();
   Options.MCOptions.MCRelaxAll = CodeGenOpts.RelaxAll;

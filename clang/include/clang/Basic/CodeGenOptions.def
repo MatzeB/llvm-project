@@ -95,6 +95,10 @@ ENUM_CODEGENOPT(InlineAsmDialect, InlineAsmDialectKind, 1, IAD_ATT)
 CODEGENOPT(ForbidGuardVariables , 1, 0) ///< Issue errors if C++ guard variables
                                         ///< are required.
 CODEGENOPT(FunctionSections  , 1, 0) ///< Set when -ffunction-sections is enabled.
+// facebook begin T48837209
+CODEGENOPT(PersistBlockAnnotation, 1, 0) ///< Set if -fpersist-block-annotation
+                                         ///< is enabled.
+// facebook end
 CODEGENOPT(InstrumentFunctions , 1, 0) ///< Set when -finstrument-functions is
                                        ///< enabled.
 CODEGENOPT(InstrumentFunctionsAfterInlining , 1, 0) ///< Set when

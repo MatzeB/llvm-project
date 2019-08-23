@@ -1803,6 +1803,9 @@ bool CompilerInvocation::ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args,
     }
   }
 
+  // facebook begin T48837209
+  Opts.PersistBlockAnnotation = Args.hasArg(OPT_fpersist_block_annotation);
+  // facebook end
   auto XRayInstrBundles =
       Args.getAllArgValues(OPT_fxray_instrumentation_bundle);
   if (XRayInstrBundles.empty())

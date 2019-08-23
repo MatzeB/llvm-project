@@ -5722,6 +5722,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
           << A->getAsString(Args) << TripleStr;
     }
   }
+  // facebook begin T48837209
+  if (Args.hasArg(options::OPT_fpersist_block_annotation))
+    CmdArgs.push_back("-fpersist-block-annotation");
+  // facebook end
 
   Args.AddLastArg(CmdArgs, options::OPT_finstrument_functions,
                   options::OPT_finstrument_functions_after_inlining,
