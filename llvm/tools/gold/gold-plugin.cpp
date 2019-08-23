@@ -208,6 +208,10 @@ namespace options {
   static std::string stats_file;
   // Asserts that LTO link has whole program visibility
   static bool whole_program_visibility = false;
+  // facebook begin T48837209
+  // Encode MIR block info (label+profile count) into the binary.
+  static bool persist_block_annotation = false;
+  // facebook end
 
   // Optimization remarks filename, accepted passes and hotness options
   static std::string RemarksFilename;
@@ -310,6 +314,10 @@ namespace options {
       stats_file = std::string(opt);
     } else if (opt == "opaque-pointers") {
       // We always use opaque pointers.
+      // facebook begin T48837209
+    } else if (opt == "persist-block-annotation") {
+      persist_block_annotation = true;
+      // facebook end
     } else {
       // Save this option to pass to the code generator.
       // ParseCommandLineOptions() expects argv[0] to be program name. Lazily
@@ -960,6 +968,9 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
   Conf.HasWholeProgramVisibility = options::whole_program_visibility;
 
   Conf.StatsFile = options::stats_file;
+  // facebook begin T48837209
+  Conf.Options.PersistBlockAnnotation = options::persist_block_annotation;
+  // facebook end
   return std::make_unique<LTO>(std::move(Conf), Backend,
                                 options::ParallelCodeGenParallelismLevel);
 }

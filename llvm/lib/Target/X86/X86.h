@@ -153,6 +153,11 @@ FunctionPass *createX86InsertPrefetchPass();
 /// fp exceptions when strict-fp enabled.
 FunctionPass *createX86InsertX87waitPass();
 
+// facebook begin T48837209
+/// This pass inserts block label into the symbol table.
+FunctionPass *createX86BlockAnnotationInserter();
+// facebook end
+
 /// This pass optimizes arithmetic based on knowledge that is only used by
 /// a reduction sequence and is therefore safe to reassociate in interesting
 /// ways.
@@ -178,6 +183,7 @@ void initializeX86FixupVectorConstantsPassPass(PassRegistry &);
 void initializeWinEHStatePassPass(PassRegistry &);
 void initializeX86AvoidSFBPassPass(PassRegistry &);
 void initializeX86AvoidTrailingCallPassPass(PassRegistry &);
+void initializeX86BlockAnnotationInserterPass(PassRegistry &); // facebook T48837209
 void initializeX86CallFrameOptimizationPass(PassRegistry &);
 void initializeX86CmovConverterPassPass(PassRegistry &);
 void initializeX86DAGToDAGISelPass(PassRegistry &);

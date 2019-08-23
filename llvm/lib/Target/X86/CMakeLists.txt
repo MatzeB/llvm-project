@@ -26,6 +26,7 @@ set(sources
   X86ArgumentStackSlotRebase.cpp
   X86AsmPrinter.cpp
   X86AvoidTrailingCall.cpp
+  X86BlockAnnotationInserter.cpp  # facebook T48837209
   X86CallFrameOptimization.cpp
   X86CallingConv.cpp
   X86CallLowering.cpp
