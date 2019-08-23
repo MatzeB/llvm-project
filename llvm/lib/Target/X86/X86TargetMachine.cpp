@@ -622,6 +622,11 @@ void X86PassConfig::addPreEmitPass2() {
             (M->getFunction("objc_retainAutoreleasedReturnValue") ||
              M->getFunction("objc_unsafeClaimAutoreleasedReturnValue")));
   }));
+
+  // facebook begin T48837209
+  if (TM->Options.PersistBlockAnnotation)
+    addPass(createX86BlockAnnotationInserter());
+  // facebook end
 }
 
 bool X86PassConfig::addPostFastRegAllocRewrite() {

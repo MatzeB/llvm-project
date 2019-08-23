@@ -96,6 +96,7 @@ CGOPT(bool, EnableStackSizeSection)
 CGOPT(bool, EnableAddrsig)
 CGOPT(bool, EmitCallSiteInfo)
 CGOPT(bool, EnableMachineFunctionSplitter)
+CGOPT(bool, PersistBlockAnnotation) // facebook T48837209
 CGOPT(bool, EnableDebugEntryValues)
 CGOPT(bool, ForceDwarfFrameSection)
 CGOPT(bool, XRayOmitFunctionIndex)
@@ -446,6 +447,14 @@ codegen::RegisterCodeGenFlags::RegisterCodeGenFlags() {
       cl::init(false));
   CGBINDOPT(EmitCallSiteInfo);
 
+  // facebook begin T48837209
+  static cl::opt<bool> PersistBlockAnnotation(
+      "persist-block-annotation",
+      cl::desc("Encode MIR block info (label+profile count) into the binary"),
+      cl::init(false));
+  CGBINDOPT(PersistBlockAnnotation);
+  // facebook end
+
   static cl::opt<bool> EnableDebugEntryValues(
       "debug-entry-values",
       cl::desc("Enable debug info for the debug entry values."),
@@ -554,6 +563,9 @@ codegen::InitTargetOptionsFromCodeGenFlags(const Triple &TheTriple) {
   Options.EnableMachineFunctionSplitter = getEnableMachineFunctionSplitter();
   Options.EmitAddrsig = getEnableAddrsig();
   Options.EmitCallSiteInfo = getEmitCallSiteInfo();
+  // facebook begin T48837209
+  Options.PersistBlockAnnotation = getPersistBlockAnnotation();
+  // facebook end T48837209
   Options.EnableDebugEntryValues = getEnableDebugEntryValues();
   Options.ForceDwarfFrameSection = getForceDwarfFrameSection();
   Options.XRayOmitFunctionIndex = getXRayOmitFunctionIndex();

@@ -210,6 +210,10 @@ namespace options {
   static bool whole_program_visibility = false;
   // Use opaque pointer types.
   static bool opaque_pointers = true;
+  // facebook begin T48837209
+  // Encode MIR block info (label+profile count) into the binary.
+  static bool persist_block_annotation = false;
+  // facebook end
 
   // Optimization remarks filename, accepted passes and hotness options
   static std::string RemarksFilename;
@@ -314,6 +318,10 @@ namespace options {
       opaque_pointers = true;
     } else if (opt == "no-opaque-pointers") {
       opaque_pointers = false;
+      // facebook begin T48837209
+    } else if (opt == "persist-block-annotation") {
+      persist_block_annotation = true;
+      // facebook end
     } else {
       // Save this option to pass to the code generator.
       // ParseCommandLineOptions() expects argv[0] to be program name. Lazily
@@ -974,6 +982,9 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
   Conf.OpaquePointers = options::opaque_pointers;
 
   Conf.StatsFile = options::stats_file;
+  // facebook begin T48837209
+  Conf.Options.PersistBlockAnnotation = options::persist_block_annotation;
+  // facebook end
   return std::make_unique<LTO>(std::move(Conf), Backend,
                                 options::ParallelCodeGenParallelismLevel);
 }

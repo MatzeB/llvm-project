@@ -140,6 +140,7 @@ namespace llvm {
           EmitStackSizeSection(false), EnableMachineOutliner(false),
           EnableMachineFunctionSplitter(false), SupportsDefaultOutlining(false),
           EmitAddrsig(false), EmitCallSiteInfo(false),
+          PersistBlockAnnotation(false), // facebook T48837209
           SupportsDebugEntryValues(false), EnableDebugEntryValues(false),
           ValueTrackingVariableLocations(false), ForceDwarfFrameSection(false),
           XRayOmitFunctionIndex(false), DebugStrictDwarf(false),
@@ -322,6 +323,12 @@ namespace llvm {
     /// info, and it is restricted only to optimized code. This can be used for
     /// something else, so that should be controlled in the frontend.
     unsigned EmitCallSiteInfo : 1;
+
+    // facebook begin T48837209
+    /// Encode MIR block info (label+profile count) into the binary.
+    unsigned PersistBlockAnnotation : 1;
+    // facebook end
+
     /// Set if the target supports the debug entry values by default.
     unsigned SupportsDebugEntryValues : 1;
     /// When set to true, the EnableDebugEntryValues option forces production
