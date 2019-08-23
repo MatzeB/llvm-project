@@ -829,6 +829,11 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
     CmdArgs.push_back(
         Args.MakeArgString(Twine(PluginOptPrefix) + "-stack-size-section"));
 
+  // facebook begin T48837209
+  if (Args.hasArg(options::OPT_fpersist_block_annotation))
+    CmdArgs.push_back("-plugin-opt=persist-block-annotation");
+  // facebook end
+
   // Setup statistics file output.
   SmallString<128> StatsFile = getStatsFileName(Args, Output, Input, D);
   if (!StatsFile.empty())
