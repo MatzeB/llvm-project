@@ -65,6 +65,13 @@ static cl::opt<bool>
                      cl::desc("Enable the tile register allocation pass"),
                      cl::init(true), cl::Hidden);
 
+// facebook begin T48837209
+static cl::opt<bool> PersistBlockAnnotation(
+    "persist-block-annotation",
+    cl::desc("Encode MIR block info (label+profile count) into the binary"),
+    cl::init(false));
+// facebook end
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   // Register the target.
   RegisterTargetMachine<X86TargetMachine> X(getTheX86_32Target());
@@ -664,6 +671,11 @@ void X86PassConfig::addPreEmitPass2() {
             (M->getFunction("objc_retainAutoreleasedReturnValue") ||
              M->getFunction("objc_unsafeClaimAutoreleasedReturnValue")));
   }));
+
+  // facebook begin T48837209
+  if (PersistBlockAnnotation)
+    addPass(createX86BlockAnnotationInserter());
+  // facebook end
 }
 
 bool X86PassConfig::addPostFastRegAllocRewrite() {

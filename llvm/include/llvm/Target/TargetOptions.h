@@ -335,6 +335,7 @@ namespace llvm {
     /// info, and it is restricted only to optimized code. This can be used for
     /// something else, so that should be controlled in the frontend.
     unsigned EmitCallSiteInfo : 1;
+
     /// Set if the target supports the debug entry values by default.
     unsigned SupportsDebugEntryValues : 1;
     /// When set to true, the EnableDebugEntryValues option forces production

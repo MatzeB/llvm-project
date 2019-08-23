@@ -155,6 +155,12 @@ FunctionPass *createX86InsertPrefetchPass();
 /// fp exceptions when strict-fp enabled.
 FunctionPass *createX86InsertX87waitPass();
 
+// facebook begin T48837209
+/// This pass inserts block label into the symbol table.
+FunctionPass *createX86BlockAnnotationInserter();
+void initializeX86BlockAnnotationInserterPass(PassRegistry &);
+// facebook end
+
 /// This pass optimizes arithmetic based on knowledge that is only used by
 /// a reduction sequence and is therefore safe to reassociate in interesting
 /// ways.
