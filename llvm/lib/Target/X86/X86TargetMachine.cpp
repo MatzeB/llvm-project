@@ -585,6 +585,11 @@ void X86PassConfig::addPreEmitPass2() {
     addPass(createEHContGuardCatchretPass());
   }
   addPass(createX86LoadValueInjectionRetHardeningPass());
+
+  // facebook begin T48837209
+  if (TM->Options.PersistBlockAnnotation)
+    addPass(createX86BlockAnnotationInserter());
+  // facebook end
 }
 
 bool X86PassConfig::addPostFastRegAllocRewrite() {

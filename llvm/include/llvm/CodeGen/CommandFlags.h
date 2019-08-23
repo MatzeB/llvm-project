@@ -126,6 +126,8 @@ bool getEmitCallSiteInfo();
 
 bool getEnableMachineFunctionSplitter();
 
+bool getPersistBlockAnnotation(); // facebook T48837209
+
 bool getEnableDebugEntryValues();
 
 bool getPseudoProbeForProfiling();

@@ -214,6 +214,10 @@ namespace options {
   // Codegen only. Do not perform optimization.
   static bool codegen_only = false;
   // facebook end
+  // facebook begin T48837209
+  // Encode MIR block info (label+profile count) into the binary.
+  static bool persist_block_annotation = false;
+  // facebook end
 
   // Optimization remarks filename, accepted passes and hotness options
   static std::string RemarksFilename;
@@ -319,6 +323,10 @@ namespace options {
       // facebook begin T30875122
     } else if (opt == "codegen-only") {
       codegen_only = true;
+      // facebook end
+      // facebook begin T48837209
+    } else if (opt == "persist-block-annotation") {
+      persist_block_annotation = true;
       // facebook end
     } else {
       // Save this option to pass to the code generator.
@@ -974,6 +982,9 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
   Conf.StatsFile = options::stats_file;
   // facebook begin T30875122
   Conf.CodeGenOnly = options::codegen_only;
+  // facebook end
+  // facebook begin T48837209
+  Conf.Options.PersistBlockAnnotation = options::persist_block_annotation;
   // facebook end
   return std::make_unique<LTO>(std::move(Conf), Backend,
                                 options::ParallelCodeGenParallelismLevel);
