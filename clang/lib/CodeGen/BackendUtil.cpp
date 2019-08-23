@@ -585,6 +585,9 @@ static bool initTargetOptions(DiagnosticsEngine &Diags,
   Options.XRayOmitFunctionIndex = CodeGenOpts.XRayOmitFunctionIndex;
   Options.LoopAlignment = CodeGenOpts.LoopAlignment;
 
+  // facebook begin T48837209
+  Options.PersistBlockAnnotation = CodeGenOpts.PersistBlockAnnotation;
+  // facebook end
   Options.MCOptions.SplitDwarfFile = CodeGenOpts.SplitDwarfFile;
   Options.MCOptions.MCRelaxAll = CodeGenOpts.RelaxAll;
   Options.MCOptions.MCSaveTempLabels = CodeGenOpts.SaveTempLabels;

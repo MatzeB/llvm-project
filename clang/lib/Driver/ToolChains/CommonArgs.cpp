@@ -624,6 +624,11 @@ void tools::addLTOOptions(const ToolChain &ToolChain, const ArgList &Args,
   if (Args.hasFlag(options::OPT_fpseudo_probe_for_profiling,
                    options::OPT_fno_pseudo_probe_for_profiling, false))
     CmdArgs.push_back("-plugin-opt=pseudo-probe-for-profiling");
+    
+  // facebook begin T48837209
+  if (Args.hasArg(options::OPT_fpersist_block_annotation))
+    CmdArgs.push_back("-plugin-opt=persist-block-annotation");
+  // facebook end
 
   // Setup statistics file output.
   SmallString<128> StatsFile = getStatsFileName(Args, Output, Input, D);
