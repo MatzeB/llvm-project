@@ -45,6 +45,8 @@ protected:
   ///
   virtual bool runOnMachineFunction(MachineFunction &MF) = 0;
 
+  bool isMachineFunctionPass() override { return true; } // facebook T53546053
+
   /// getAnalysisUsage - Subclasses that override getAnalysisUsage
   /// must call this.
   ///

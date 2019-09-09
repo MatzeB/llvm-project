@@ -965,6 +965,14 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
   if (TM)
     TheModule->setDataLayout(TM->createDataLayout());
 
+  // facebook begin T53546053
+  // This is only to expose CFGChnageLog APIs via callback, not to register
+  // them to pass pipeline.
+  PassInstrumentationCallbacks PIC;
+  StandardInstrumentations SI(CodeGenOpts.DebugPassManager);
+  SI.registerCallbacks(PIC);
+  // facebook end
+
   DebugifyCustomPassManager PerModulePasses;
   DebugInfoPerPassMap DIPreservationMap;
   if (CodeGenOpts.EnableDIPreservationVerify) {

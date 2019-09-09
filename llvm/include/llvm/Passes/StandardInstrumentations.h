@@ -22,6 +22,7 @@
 #include "llvm/IR/OptBisect.h"
 #include "llvm/IR/PassTimingInfo.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/Passes/CFGChangeLogManager.h" // facebook T53546053
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/IPO/SampleProfileProbe.h"
 
@@ -421,6 +422,7 @@ class StandardInstrumentations {
   IRChangedPrinter PrintChangedIR;
   PseudoProbeVerifier PseudoProbeVerification;
   InLineChangePrinter PrintChangedDiff;
+  CFGChangeLogManager CFGChangeLog; // facebook T53546053
   VerifyInstrumentation Verify;
 
   bool VerifyEach;

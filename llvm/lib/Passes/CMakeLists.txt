@@ -1,4 +1,5 @@
 add_llvm_component_library(LLVMPasses
+  CFGChangeLogManager.cpp # facebook T53546053
   PassBuilder.cpp
   PassBuilderBindings.cpp
   PassPlugin.cpp
@@ -14,6 +15,7 @@ add_llvm_component_library(LLVMPasses
   LINK_COMPONENTS
   AggressiveInstCombine
   Analysis
+  CodeGen #facebook T53546053
   Core
   Coroutines
   IPO

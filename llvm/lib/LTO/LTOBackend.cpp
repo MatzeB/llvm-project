@@ -316,6 +316,14 @@ static void runNewPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
 static void runOldPMPasses(const Config &Conf, Module &Mod, TargetMachine *TM,
                            bool IsThinLTO, ModuleSummaryIndex *ExportSummary,
                            const ModuleSummaryIndex *ImportSummary) {
+  // facebook begin T53546053
+  // This is only to expose CFGChnageLog APIs via callback, not to register
+  // them to pass pipeline.
+  PassInstrumentationCallbacks PIC;
+  StandardInstrumentations SI(Conf.DebugPassManager);
+  SI.registerCallbacks(PIC);
+  // facebook end T53546053
+
   legacy::PassManager passes;
   passes.add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
 
