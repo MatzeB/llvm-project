@@ -1,4 +1,5 @@
 add_llvm_component_library(LLVMPasses
+  CFGChangeLogManager.cpp # facebook T53546053
   CodeGenPassBuilder.cpp
   OptimizationLevel.cpp
   PassBuilder.cpp
