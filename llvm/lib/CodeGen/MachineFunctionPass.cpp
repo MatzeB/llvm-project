@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/IR/CFGChangeLogHandler.h" // facebook T53546053
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/PrintPasses.h"
@@ -89,6 +90,18 @@ bool MachineFunctionPass::runOnFunction(Function &F) {
   }
 
   bool RV = runOnMachineFunction(MF);
+
+  // facebook begin T53546053
+  auto CFGLogHandler = getCFGChangeLogHandler<MachineFunction>();
+  const PassInfo *PI =
+      PassRegistry::getPassRegistry()->getPassInfo(getPassID());
+  if (PI && !PI->isAnalysis() &&
+      CFGLogHandler.callIsLoggingTarget(F.getName())) {
+    std::string Banner = "*** CFGChangeLog After " + getPassName().str() +
+                         " (function: " + F.getName().str() + ")";
+    CFGLogHandler.callRunAfter(&MF, Banner);
+  }
+  // facebook end T53546053
 
   if (ShouldEmitSizeRemarks) {
     // We wanted size remarks. Check if there was a change to the number of

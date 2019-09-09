@@ -41,6 +41,7 @@
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassPlugin.h"
+#include "llvm/Passes/StandardInstrumentations.h" // facebook T53546053
 #include "llvm/Remarks/HotnessThresholdParser.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
@@ -795,6 +796,15 @@ int main(int argc, char **argv) {
                ? 0
                : 1;
   }
+  // facebook begin T53546053
+  else {
+    // This is only to expose CFGChnageLog APIs via callback, not to register
+    // them to pass pipeline.
+    PassInstrumentationCallbacks PIC;
+    StandardInstrumentations SI(false);
+    SI.registerCallbacks(PIC);
+  }
+  // facebook end
 
   // Create a PassManager to hold and optimize the collection of passes we are
   // about to build. If the -debugify-each option is set, wrap each pass with

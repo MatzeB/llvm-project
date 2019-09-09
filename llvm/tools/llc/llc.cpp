@@ -40,6 +40,7 @@
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Pass.h"
+#include "llvm/Passes/StandardInstrumentations.h" // facebook T53546053
 #include "llvm/Remarks/HotnessThresholdParser.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -189,6 +190,9 @@ static cl::opt<std::string> RemarksFormat(
     "pass-remarks-format",
     cl::desc("The format used for serializing remarks (default: YAML)"),
     cl::value_desc("format"), cl::init("yaml"));
+
+extern cl::list<std::string> CFGChangeLogFuncs;     // facebook T53546053
+extern cl::opt<std::string> CFGChangeLogCfgDumpDir; // facebook T53546053
 
 namespace {
 
@@ -392,6 +396,14 @@ int main(int argc, char **argv) {
       timeTraceProfilerCleanup();
     }
   });
+
+  // facebook begin T53546053
+  // This is only to expose CFGChnageLog APIs via callback, not to register
+  // them to pass pipeline.
+  PassInstrumentationCallbacks PIC;
+  StandardInstrumentations SI(false);
+  SI.registerCallbacks(PIC);
+  // facebook end T53546053
 
   LLVMContext Context;
   Context.setDiscardValueNames(DiscardValueNames);

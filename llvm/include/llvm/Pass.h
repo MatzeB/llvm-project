@@ -317,6 +317,8 @@ public:
   /// per-function processing of the pass.
   virtual bool runOnFunction(Function &F) = 0;
 
+  virtual bool isMachineFunctionPass() { return false; } // facebook T53546053
+
   void assignPassManager(PMStack &PMS, PassManagerType T) override;
 
   ///  Return what kind of Pass Manager can manage this pass.

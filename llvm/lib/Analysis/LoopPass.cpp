@@ -14,6 +14,7 @@
 
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/CFGChangeLogHandler.h" // facebook T53546053
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/OptBisect.h"
@@ -217,6 +218,21 @@ bool LPPassManager::runOnFunction(Function &F) {
           }
         }
       }
+
+      // facebook begin T53546053
+      auto CFGLogHandler = getCFGChangeLogHandler<Function>();
+      const PassInfo *PI =
+          PassRegistry::getPassRegistry()->getPassInfo(P->getPassID());
+      if (PI && !PI->isAnalysis() &&
+          CFGLogHandler.callIsLoggingTarget(F.getName())) {
+        auto LoopName = CurrentLoop->getHeader()->getName().str();
+        std::string Banner = "*** CFGChangeLog After " +
+                             P->getPassName().str() +
+                             " (function: " + F.getName().str() + ")" +
+                             " (loop: " + LoopName + ")";
+        CFGLogHandler.callRunAfter(&F, Banner);
+      }
+      // facebook end T53546053
 
       if (LocalChanged)
         dumpPassInfo(P, MODIFICATION_MSG, ON_LOOP_MSG,

@@ -12,8 +12,10 @@
 
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/IR/GraphChangeLog.h" // facebook t13480588
+#include "llvm/ADT/Statistic.h"
+#include "llvm/IR/CFGChangeLogHandler.h" // facebook T53546053
 #include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/GraphChangeLog.h" // facebook t13480588
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LegacyPassManagers.h"
@@ -1469,6 +1471,19 @@ bool FPPassManager::runOnFunction(Function &F) {
           FunctionSize = NewSize;
         }
       }
+
+      // facebook begin T53546053
+      auto CFGLogHandler = getCFGChangeLogHandler<Function>();
+      const PassInfo *PI =
+          PassRegistry::getPassRegistry()->getPassInfo(FP->getPassID());
+      if (PI && !PI->isAnalysis() && !FP->isMachineFunctionPass() &&
+          CFGLogHandler.callIsLoggingTarget(F.getName())) {
+        std::string Banner = "*** CFGChangeLog After " +
+                             FP->getPassName().str() +
+                             " (function: " + F.getName().str() + ")";
+        CFGLogHandler.callRunAfter(&F, Banner);
+      }
+      // facebook end T53546053
     }
 
     Changed |= LocalChanged;
@@ -1578,6 +1593,21 @@ MPPassManager::runOnModule(Module &M) {
           InstrCount = ModuleCount;
         }
       }
+
+      // facebook begin T53546053
+      auto CFGLogHandler = getCFGChangeLogHandler<Function>();
+      const PassInfo *PI =
+          PassRegistry::getPassRegistry()->getPassInfo(MP->getPassID());
+      if (PI && !PI->isAnalysis() && CFGLogHandler.callHasLoggingTarget())
+        for (Function &F : M)
+          if (!F.isDeclaration() &&
+              CFGLogHandler.callIsLoggingTarget(F.getName())) {
+            std::string Banner = "*** CFGChangeLog After " +
+                                 MP->getPassName().str() +
+                                 " (function: " + F.getName().str() + ")";
+            CFGLogHandler.callRunAfter(&F, Banner);
+          }
+      // facebook end T53546053
     }
 
     Changed |= LocalChanged;

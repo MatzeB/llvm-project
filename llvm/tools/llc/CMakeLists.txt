@@ -18,6 +18,7 @@ set(LLVM_LINK_COMPONENTS
   Target
   TransformUtils
   Vectorize
+  Passes # facebook T53546053
   )
 
 add_llvm_tool(llc

@@ -20,6 +20,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/IR/AbstractCallSite.h"
+#include "llvm/IR/CFGChangeLogHandler.h" // facebook T53546053
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
@@ -141,6 +142,25 @@ bool CGPassManager::RunPassOnSCC(Pass *P, CallGraphSCC &CurSCC,
         InstrCount = initSizeRemarkInfo(M, FunctionToInstrCount);
       Changed = CGSP->runOnSCC(CurSCC);
 
+      // facebook begin T53546053
+      auto CFGLogHandler = getCFGChangeLogHandler<Function>();
+      const PassInfo *PI =
+          PassRegistry::getPassRegistry()->getPassInfo(CGSP->getPassID());
+      if (CFGLogHandler.callHasLoggingTarget() && PI && !PI->isAnalysis()) {
+        for (CallGraphNode *CGN : CurSCC) {
+          Function *F = CGN->getFunction();
+          if (!F)
+            continue;
+          if (CFGLogHandler.callIsLoggingTarget(F->getName())) {
+            std::string Banner = "*** CFGChangeLog After " +
+                                 CGSP->getPassName().str() +
+                                 " (function: " + F->getName().str() + ")";
+            CFGLogHandler.callRunAfter(F, Banner);
+          }
+        }
+      }
+      // facebook end T53546053
+
       if (EmitICRemark) {
         // FIXME: Add getInstructionCount to CallGraphSCC.
         SCCCount = M.getInstructionCount();
@@ -178,6 +198,20 @@ bool CGPassManager::RunPassOnSCC(Pass *P, CallGraphSCC &CurSCC,
         TimeRegion PassTimer(getPassTimer(FPP));
         Changed |= FPP->runOnFunction(*F);
       }
+
+      // facebook begin T53546053
+      auto CFGLogHandler = getCFGChangeLogHandler<Function>();
+      const PassInfo *PI =
+          PassRegistry::getPassRegistry()->getPassInfo(FPP->getPassID());
+      if (PI && !PI->isAnalysis() &&
+          CFGLogHandler.callIsLoggingTarget(F->getName())) {
+        std::string Banner = "*** CFGChangeLog After " +
+                             P->getPassName().str() +
+                             " (function: " + F->getName().str() + ")";
+        CFGLogHandler.callRunAfter(F, Banner);
+      }
+      // facebook end T53546053
+
       F->getContext().yield();
     }
   }
