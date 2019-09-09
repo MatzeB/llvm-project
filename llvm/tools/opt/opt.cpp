@@ -37,6 +37,7 @@
 #include "llvm/LinkAllPasses.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassPlugin.h"
+#include "llvm/Passes/StandardInstrumentations.h" // facebook T53546053
 #include "llvm/Remarks/HotnessThresholdParser.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
@@ -715,6 +716,15 @@ int main(int argc, char **argv) {
                ? 0
                : 1;
   }
+  // facebook begin T53546053
+  else {
+    // This is only to expose CFGChnageLog APIs via callback, not to register
+    // them to pass pipeline.
+    PassInstrumentationCallbacks PIC;
+    StandardInstrumentations SI(M->getContext(), false);
+    SI.registerCallbacks(PIC);
+  }
+  // facebook end
 
   if (OptLevelO0 || OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz ||
       OptLevelO3) {

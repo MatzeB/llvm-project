@@ -2294,6 +2294,7 @@ void StandardInstrumentations::registerCallbacks(
   OptPassGate.registerCallbacks(PIC);
   PrintChangedIR.registerCallbacks(PIC);
   PseudoProbeVerification.registerCallbacks(PIC);
+  CFGChangeLog.registerCallbacks(PIC); // facebook begin T53546053
   if (VerifyEach)
     Verify.registerCallbacks(PIC);
   PrintChangedDiff.registerCallbacks(PIC);
