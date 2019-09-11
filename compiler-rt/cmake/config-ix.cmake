@@ -876,3 +876,5 @@ else()
   set(COMPILER_RT_HAS_GWP_ASAN FALSE)
 endif()
 pythonize_bool(COMPILER_RT_HAS_GWP_ASAN)
+
+set(COMPILER_RT_HAS_HWASAN FALSE) # facebook T53805321
