@@ -4,9 +4,10 @@
 ; RUN:     FileCheck %s --implicit-check-not="call void @llvm.dbg" --implicit-check-not="DILocation"
 
 ; CHECK: IR Dump After SampleProfileLoaderPass 
+; CHECK: Function Profile: function_entry_count(101)
 ; CHECK: define dso_local i32 @foo
+; CHECK-SAME: [ tiny.c:1 ]
 ; CHECK-NOT: !dbg
-; CHECK-SAME: function_entry_count 101
 ; CHECK: [ tiny.c:2:3 ]
 ; CHECK: [ tiny.c:2:10 ]
 
