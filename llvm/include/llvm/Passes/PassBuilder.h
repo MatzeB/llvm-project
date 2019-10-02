@@ -184,6 +184,7 @@ public:
 
   /// Construct the module pipeline that performs inlining as well as
   /// the inlining-driven cleanups.
+  // facebook begin T54911391
   ModuleInlinerWrapperPass buildInlinerPipeline(OptimizationLevel Level,
                                                 ThinOrFullLTOPhase Phase);
 
