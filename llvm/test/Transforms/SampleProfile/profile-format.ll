@@ -23,7 +23,7 @@
 ;
 @.str = private unnamed_addr constant [11 x i8] c"sum is %d\0A\00", align 1
 
-; Check sample-profile phase using compactbinary or extbinary format profile
+; Check sample-profile phase using compactbinary, or extbinary format profile
 ; will annotate the IR with exactly the same result as using text format.
 ; CHECK: br i1 %cmp, label %while.body, label %while.end{{.*}} !prof ![[IDX1:[0-9]*]]
 ; CHECK: br i1 %cmp1, label %if.then, label %if.else{{.*}} !prof ![[IDX2:[0-9]*]]

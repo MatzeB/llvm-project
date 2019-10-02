@@ -517,8 +517,11 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   // inaccurate. The normal unroller doesn't pay attention to forced full unroll
   // attributes so we need to make sure and allow the full unroll pass to pay
   // attention to it.
-  if (Phase != ThinOrFullLTOPhase::ThinLTOPreLink || !PGOOpt ||
-      PGOOpt->Action != PGOOptions::SampleUse)
+  // facebook begin T54911391
+  if ((Phase != ThinOrFullLTOPhase::FullLTOPreLink &&
+       Phase != ThinOrFullLTOPhase::ThinLTOPreLink) ||
+      !PGOOpt || PGOOpt->Action != PGOOptions::SampleUse)
+      // facebook end T54911391
     LPM2.addPass(LoopFullUnrollPass(Level.getSpeedupLevel(),
                                     /* OnlyWhenForced= */ !PTO.LoopUnrolling,
                                     PTO.ForgetAllSCEVInLoopUnroll));
@@ -731,8 +734,11 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
   //
   // [1] Note the cost of a function could be below zero due to erased
   // prologue / epilogue.
-  if (Phase == ThinOrFullLTOPhase::ThinLTOPreLink && PGOOpt &&
-      PGOOpt->Action == PGOOptions::SampleUse)
+  // facebook begin T54911391
+  if ((Phase == ThinOrFullLTOPhase::ThinLTOPreLink ||
+       Phase == ThinOrFullLTOPhase::FullLTOPreLink) &&
+      PGOOpt && PGOOpt->Action == PGOOptions::SampleUse)
+      // facebook end T54911391
     IP.HotCallSiteThreshold = 0;
 
   if (PGOOpt)
