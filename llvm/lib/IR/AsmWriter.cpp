@@ -2832,6 +2832,7 @@ public:
 
   // facebook begin T44538829
   void printNeighborBlocksWithWeights(const BasicBlock *BB);
+  void printFunctionDefWithProfile(const Function *F);
   // facebook end
 
 private:
@@ -4049,8 +4050,18 @@ void AssemblyWriter::printFunction(const Function *F) {
     F->getAllMetadata(MDs);
     printMetadataAttachments(MDs, " ");
     Out << ' ';
-  } else
+  } else {
+    // facebook begin T44360418
+    // Under PrintForDev mode, print metadata related to the profile counter.
+    // The profile counter attached to the instructions won't even printed,
+    // because printInstruction function returns before the metadata printing
+    // under PrintForDev.
+    if (PrintForDev) {
+      printFunctionDefWithProfile(F);
+    }
+    // facebook end
     Out << "define ";
+  }
 
   Out << getLinkageNameWithSpace(F->getLinkage());
   PrintDSOLocation(*F, Out);
@@ -4147,11 +4158,21 @@ void AssemblyWriter::printFunction(const Function *F) {
   if (F->isDeclaration()) {
     Out << '\n';
   } else {
-    SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
-    F->getAllMetadata(MDs);
-    printMetadataAttachments(MDs, " ");
+    // facebook begin T44538829
+    if (IsForDev) {
+      Out << " {";
+      if (DISubprogram *SP = F->getSubprogram()) {
+        Out.PadToColumn(LocationColumn);
+        Out << "[ " << SP->getFilename() << ":" << SP->getLine() << " ]";
+      }
+    } else {
+      SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
+      F->getAllMetadata(MDs);
+      printMetadataAttachments(MDs, " ");
+      Out << " {";
+    }
+    // facebook end
 
-    Out << " {";
     // Output all of the function's basic blocks.
     for (const BasicBlock &BB : *F)
       printBasicBlock(&BB);
@@ -4231,6 +4252,31 @@ void AssemblyWriter::printNeighborBlocksWithWeights(const BasicBlock *BB) {
     }
     ++succIndex;
   }
+}
+
+void AssemblyWriter::printFunctionDefWithProfile(const Function *F) {
+  SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
+  F->getAllMetadata(MDs);
+  bool FirstMeta = true;
+  for (const auto &I : MDs) {
+    unsigned Kind = I.first;
+    if (Kind == LLVMContext::MD_prof) {
+      auto *NameOp = dyn_cast<MDString>(I.second->getOperand(0));
+      StringRef Name = NameOp->getString();
+      ConstantInt *CI = mdconst::extract<ConstantInt>(I.second->getOperand(1));
+      uint64_t Count = CI->getZExtValue();
+      Out << (FirstMeta ? "; Function Profile: " : ", ") << Name << "(";
+      if (Name == "function_entry_count" and Count == ~uint64_t{0}) {
+        Out << "~0";
+      } else {
+        Out << Count;
+      }
+      Out << ')';
+      FirstMeta = false;
+    }
+  }
+  if (!FirstMeta)
+    Out << "\n";
 }
 // facebook end
 
@@ -4885,24 +4931,8 @@ void AssemblyWriter::printMetadataAttachments(
     MDs[0].second->getContext().getMDKindNames(MDNames);
 
   // facebook begin T44360418
-  // Under PrintForDev mode, only print metadata related to the profile counter.
-  // The profile counter attached to the instructions won't even printed,
-  // because printInstruction function returns before the metadata printing
-  // under PrintForDev.
-  if (PrintForDev) {
-    for (const auto &I : MDs) {
-      unsigned Kind = I.first;
-      if (Kind == LLVMContext::MD_prof) {
-        Out << Separator;
-        auto *Name = dyn_cast<MDString>(I.second->getOperand(0));
-        Out << Name->getString() << " ";
-        ConstantInt *CI =
-            mdconst::extract<ConstantInt>(I.second->getOperand(1));
-        Out << CI->getZExtValue();
-      }
-    }
+  if (PrintForDev)
     return;
-  }
   // facebook end
 
   auto WriterCtx = getContext();
