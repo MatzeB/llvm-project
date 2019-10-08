@@ -1,0 +1,10 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples1.txt --profiler text --format binary --binary %S/Inputs/find --out %t4 > %t5 2>&1
+; RUN: llvm-profdata show -sample %t4 | FileCheck %s
+; RUN: llvm-create-profile --sample_threshold_frac=0.001 --profile %S/Inputs/samples1.txt --profiler text --format extbinary --binary %S/Inputs/find --out %t6 > %t7 2>&1
+; RUN: llvm-profdata show -sample %t6 | FileCheck %s
+
+; CHECK: Function: parse_user: 776, 0, 21 sampled lines
+; CHECK-NEXT: Samples collected in the function's body
+; CHECK-NEXT: 1: 22
+; CHECK: Samples collected in inlined callsites
+; CHECK-NEXT: 4: inlined callee: collect_arg: 577, 0, 0 sampled lines

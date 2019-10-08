@@ -70,8 +70,12 @@ int main(int argc, char **argv) {
   } else if (Format.getValue() == "compbinary") {
     writer.reset(
         new autofdo::LLVMProfileWriter(llvm::sampleprof::SPF_Compact_Binary));
+  } else if (Format.getValue() == "extbinary") {
+    writer.reset(
+        new autofdo::LLVMProfileWriter(llvm::sampleprof::SPF_Ext_Binary));
   } else {
-    llvm::errs() << "--format must be one of 'text', 'binary' or 'compbinary'";
+    llvm::errs() << "--format must be one of 'text', 'binary', "
+                    "'compbinary', or 'extbinary'";
     return -1;
   }
 
