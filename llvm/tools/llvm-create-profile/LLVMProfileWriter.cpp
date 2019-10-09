@@ -27,7 +27,6 @@
 #include <utility>
 #include <vector>
 
-// bool debug_dump = false ;
 
 namespace autofdo {
 using namespace std;
@@ -47,7 +46,18 @@ bool LLVMProfileBuilder::Write(const string &output_filename,
                  << "': " << EC.message();
     return false;
   }
+
+  // Populate profile symbol list if extended binary format is used
+  llvm::sampleprof::ProfileSymbolList symbol_list;
+  if (format == llvm::sampleprof::SPF_Ext_Binary) {
+    for (const auto &p : symbol_map.map()) {
+      auto &ProfileSymbol = p.second;
+      symbol_list.add(ProfileSymbol->name(), true);
+    }
+  }
+
   auto Writer = std::move(WriterOrErr.get());
+  Writer->setProfileSymbolList(&symbol_list);
   if (std::error_code EC = Writer->write(profiles)) {
     llvm::errs() << "Error writing profile output to '" << output_filename
                  << "': " << EC.message();
@@ -71,7 +81,6 @@ void LLVMProfileBuilder::VisitTopSymbol(const string &name,
           result_, profile.addHeadSamples(node->head_count))) {
     llvm::errs() << "Error updating head samples for '" << name
                  << "': " << EC.message();
-    // llvm::ExitOnError(llvm::Error<void>);
     exit(-1);
   }
   if (std::error_code EC = llvm::MergeResult(
