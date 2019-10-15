@@ -22,7 +22,7 @@
 #include "llvm/Support/GlobPattern.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include <atomic>
-#include <unordered_set> // facebook T46459577
+#include <unordered_set> // facebook T46459577 T55702441
 #include <vector>
 
 namespace lld {
@@ -135,6 +135,8 @@ struct Configuration {
   std::pair<llvm::StringRef, llvm::StringRef> thinLTOPrefixReplace;
   std::string rpath;
   std::unordered_set<llvm::StringRef> discardSections; // facebook T46459577
+  // facebook T55702441
+  std::unordered_set<llvm::StringRef> traceSymbolsFromFile;
   std::vector<VersionDefinition> versionDefinitions;
   std::vector<llvm::StringRef> auxiliaryList;
   std::vector<llvm::StringRef> filterList;
@@ -217,6 +219,9 @@ struct Configuration {
   bool sysvHash = false;
   bool target1Rel;
   bool trace;
+  // facebook begin T55702441
+  bool traceAllSymbols;
+  // facebook end T55702441
   bool thinLTOEmitImportsFiles;
   bool thinLTOIndexOnly;
   bool timeTraceEnabled;

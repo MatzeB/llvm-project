@@ -832,6 +832,17 @@ static std::pair<bool, bool> getPackDynRelocs(opt::InputArgList &args) {
   return {false, false};
 }
 
+// facebook begin T46459577
+static std::unordered_set<llvm::StringRef>
+getTraceSymbolsFromFile(opt::InputArgList &Args) {
+  std::vector<llvm::StringRef> v =
+      args::getStrings(Args, OPT_trace_symbols_from_file);
+  std::unordered_set<llvm::StringRef> traceSymbolsFromFile(
+      std::make_move_iterator(v.begin()), std::make_move_iterator(v.end()));
+  return traceSymbolsFromFile;
+}
+// facebook end T46459577
+
 static void readCallGraph(MemoryBufferRef mb) {
   // Build a map from symbol name to section
   DenseMap<StringRef, Symbol *> map;
@@ -1175,6 +1186,10 @@ static void readConfigs(opt::InputArgList &args) {
   config->timeTraceGranularity =
       args::getInteger(args, OPT_time_trace_granularity, 500);
   config->trace = args.hasArg(OPT_trace);
+  // facebook begin T55702441
+  config->traceAllSymbols = args.hasArg(OPT_trace_all_symbols);
+  config->traceSymbolsFromFile = getTraceSymbolsFromFile(args);
+  // facebook end T55702441
   config->undefined = args::getStrings(args, OPT_undefined);
   config->undefinedVersion =
       args.hasFlag(OPT_undefined_version, OPT_no_undefined_version, true);

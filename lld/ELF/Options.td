@@ -434,6 +434,13 @@ defm pcrel_optimize : BB<"pcrel-optimize",
 
 def trace: F<"trace">, HelpText<"Print the names of the input files">;
 
+// facebook begin T55702441
+def trace_all_symbols: F<"trace-all-symbols">, HelpText<"Trace references to all symbols">;
+
+defm trace_symbols_from_file: Eq<"trace-symbols-from-file",
+     "Trace symbols referenced or defined in a file">;
+// facebook end T55702441
+
 defm trace_symbol: Eq<"trace-symbol", "Trace references to symbols">;
 
 defm undefined: Eq<"undefined", "Force undefined symbol during linking">,

@@ -142,6 +142,7 @@ public:
   // True if this symbol is specified by --trace-symbol option.
   uint8_t traced : 1;
 
+  inline bool needToTraceSymbol(); // facebook T55702441
   inline void replace(const Symbol &newSym);
 
   bool includeInDynsym() const;
@@ -525,6 +526,20 @@ size_t Symbol::getSymbolSize() const {
   llvm_unreachable("unknown symbol kind");
 }
 
+// facebook begin T55702441
+// The symbol table is initialized after the file is parsed, but
+// symbol tracing information is printed during parsing.  If we
+// want to print tracing information of symbols in a file, we need
+// to check that the symbol is in the file the first time it is
+// processed.
+bool Symbol::needToTraceSymbol() {
+  return traced || config->traceAllSymbols ||
+         (this->file != nullptr &&
+          config->traceSymbolsFromFile.find(this->file->getName()) !=
+              config->traceSymbolsFromFile.end());
+}
+// facebook end T55702441
+
 // replace() replaces "this" object with a given symbol by memcpy'ing
 // it over to "this". This function is called as a result of name
 // resolution, e.g. to replace an undefind symbol with a defined symbol.
@@ -566,10 +581,13 @@ void Symbol::replace(const Symbol &newSym) {
   if (nameData == old.nameData && nameSize == 0 && old.nameSize != 0)
     nameSize = old.nameSize;
 
-  // Print out a log message if --trace-symbol was specified.
+  // facebook begin T55702441
+  // Print out a log message if --trace-symbol or --trace-all-symbols
+  // was specified.
   // This is for debugging.
-  if (traced)
+  if (needToTraceSymbol())
     printTraceSymbol(this);
+  // facebook end T55702441
 }
 
 void maybeWarnUnorderableSymbol(const Symbol *sym);

@@ -467,8 +467,10 @@ void Symbol::resolveUndefined(const Undefined &other) {
     return;
   }
 
-  if (traced)
+  // facebook begin T55702441
+  if (needToTraceSymbol())
     printTraceSymbol(&other);
+  // facebook end T55702441
 
   if (isLazy()) {
     // An undefined weak will not fetch archive members. See comment on Lazy in
