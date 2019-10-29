@@ -698,11 +698,22 @@ static DiscardPolicy getDiscard(opt::InputArgList &args) {
 }
 
 // facebook begin T46459577
+// We need to parse the arguments to take the last of --discard-section=S or
+// --no-discard-section=S.  This ensures we have a proper override
+// mechanism.
 static std::unordered_set<llvm::StringRef>
 getDiscardSections(opt::InputArgList &Args) {
-  std::vector<llvm::StringRef> v = args::getStrings(Args, OPT_discard_section);
-  std::unordered_set<llvm::StringRef> discardSections(
-      std::make_move_iterator(v.begin()), std::make_move_iterator(v.end()));
+  std::unordered_set<llvm::StringRef> discardSections;
+  for (auto *A : Args) {
+    if (!(A->getOption().matches(OPT_discard_section) ||
+          A->getOption().matches(OPT_no_discard_section)))
+      continue;
+    A->claim();
+    if (A->getOption().matches(OPT_discard_section))
+      discardSections.insert(A->getValue());
+    else if (A->getOption().matches(OPT_no_discard_section))
+      discardSections.erase(A->getValue());
+  }
   return discardSections;
 }
 // facebook end T46459577

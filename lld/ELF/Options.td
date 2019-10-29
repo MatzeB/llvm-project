@@ -287,6 +287,12 @@ def nmagic: F<"nmagic">, MetaVarName<"<magic>">,
 def nostdlib: F<"nostdlib">,
   HelpText<"Only search directories specified on the command line">;
 
+// facebook begin T46459577
+defm no_discard_section:
+  Eq<"no-discard-section", "Do not discard a section">,
+  MetaVarName<"<section>">;
+// facebook end T46459577
+
 def no_dynamic_linker: F<"no-dynamic-linker">,
   HelpText<"Inhibit output of .interp section">;
 
