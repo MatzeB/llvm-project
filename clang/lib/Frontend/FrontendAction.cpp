@@ -627,7 +627,17 @@ bool FrontendAction::BeginSourceFile(CompilerInstance &CI,
     std::unique_ptr<ASTUnit> AST = ASTUnit::LoadFromASTFile(
         std::string(InputFile), CI.getPCHContainerReader(),
         ASTUnit::LoadPreprocessorOnly, ASTDiags, CI.getFileSystemOpts(),
-        /*HeaderSearchOptions=*/nullptr);
+        /*HeaderSearchOptions=*/nullptr,
+// facebook begin T59242408 D18533994
+        /*LangOpts=*/nullptr,
+        /*OnlyLocalDecls=*/false,
+        /*CaptureDiagnostics=*/CaptureDiagsKind::None,
+        /*AllowASTWithCompilerErrors=*/false,
+        /*UserFilesAreVolatile=*/false,
+        /*VFS=*/llvm::vfs::getRealFileSystem(),
+        /*PrebuiltModuleFiles=*/CI.getHeaderSearchOpts().PrebuiltModuleFiles
+// facebook end
+    );
     if (!AST)
       return false;
 
@@ -695,7 +705,16 @@ bool FrontendAction::BeginSourceFile(CompilerInstance &CI,
     std::unique_ptr<ASTUnit> AST = ASTUnit::LoadFromASTFile(
         std::string(InputFile), CI.getPCHContainerReader(),
         ASTUnit::LoadEverything, Diags, CI.getFileSystemOpts(),
-        CI.getHeaderSearchOptsPtr(), CI.getLangOptsPtr());
+        CI.getHeaderSearchOptsPtr(),  CI.getLangOptsPtr(),
+// facebook begin T59242408 D18533994
+        /*OnlyLocalDecls=*/false,
+        /*CaptureDiagnostics=*/CaptureDiagsKind::None,
+        /*AllowASTWithCompilerErrors=*/false,
+        /*UserFilesAreVolatile=*/false,
+        /*VFS=*/llvm::vfs::getRealFileSystem(),
+        /*PrebuiltModuleFiles=*/CI.getHeaderSearchOpts().PrebuiltModuleFiles
+// facebook end
+    );
 
     if (!AST)
       return false;
