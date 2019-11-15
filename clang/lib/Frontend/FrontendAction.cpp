@@ -610,8 +610,13 @@ bool FrontendAction::BeginSourceFile(CompilerInstance &CI,
 
     std::unique_ptr<ASTUnit> AST = ASTUnit::LoadFromASTFile(
         std::string(InputFile), CI.getPCHContainerReader(),
-        ASTUnit::LoadPreprocessorOnly, ASTDiags, CI.getFileSystemOpts(),
-        CI.getCodeGenOpts().DebugTypeExtRefs);
+        ASTUnit::LoadPreprocessorOnly,
+        // facebook begin T59242408 D18533994
+        ASTDiags, CI.getFileSystemOpts(), CI.getCodeGenOpts().DebugTypeExtRefs,
+        false, CaptureDiagsKind::None, false, false,
+        llvm::vfs::getRealFileSystem(),
+        CI.getHeaderSearchOpts().PrebuiltModuleFiles);
+    // facebook end
     if (!AST)
       return false;
 
@@ -679,8 +684,13 @@ bool FrontendAction::BeginSourceFile(CompilerInstance &CI,
 
     std::unique_ptr<ASTUnit> AST = ASTUnit::LoadFromASTFile(
         std::string(InputFile), CI.getPCHContainerReader(),
-        ASTUnit::LoadEverything, Diags, CI.getFileSystemOpts(),
-        CI.getCodeGenOpts().DebugTypeExtRefs);
+        ASTUnit::LoadEverything, Diags,
+        // facebook begin T59242408 D18533994
+        CI.getFileSystemOpts(), CI.getCodeGenOpts().DebugTypeExtRefs, false,
+        CaptureDiagsKind::None, false, false,
+        llvm::vfs::getRealFileSystem(),
+        CI.getHeaderSearchOpts().PrebuiltModuleFiles);
+    // facebook end
 
     if (!AST)
       return false;

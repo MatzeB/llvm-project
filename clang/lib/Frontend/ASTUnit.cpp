@@ -760,7 +760,10 @@ std::unique_ptr<ASTUnit> ASTUnit::LoadFromASTFile(
     const FileSystemOptions &FileSystemOpts, bool UseDebugInfo,
     bool OnlyLocalDecls, CaptureDiagsKind CaptureDiagnostics,
     bool AllowASTWithCompilerErrors, bool UserFilesAreVolatile,
-    IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS) {
+    IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS,
+    // facebook begin T59242408 D18533994
+    const std::map<std::string, std::string, std::less<>> &PrebuiltModuleFiles) {
+    // facebook end
   std::unique_ptr<ASTUnit> AST(new ASTUnit(true));
 
   // Recover resources if we crash before exiting this method.
@@ -784,6 +787,9 @@ std::unique_ptr<ASTUnit> ASTUnit::LoadFromASTFile(
   AST->ModuleCache = new InMemoryModuleCache;
   AST->HSOpts = std::make_shared<HeaderSearchOptions>();
   AST->HSOpts->ModuleFormat = std::string(PCHContainerRdr.getFormat());
+  // facebook begin T59242408 D18533994
+  AST->HSOpts->PrebuiltModuleFiles = PrebuiltModuleFiles;
+  // facebook end
   AST->HeaderInfo.reset(new HeaderSearch(AST->HSOpts,
                                          AST->getSourceManager(),
                                          AST->getDiagnostics(),
