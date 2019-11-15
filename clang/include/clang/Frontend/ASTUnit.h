@@ -686,6 +686,10 @@ public:
   /// creating modules.
   /// \param Diags - The diagnostics engine to use for reporting errors; its
   /// lifetime is expected to extend past that of the returned ASTUnit.
+  // facebook begin T59242408 D18533994
+  /// \param PrebuiltModuleFiles - A map for module names to prebuilt module
+  /// paths.
+  // facebook end
   ///
   /// \returns - The initialized ASTUnit or null if the AST failed to load.
   static std::unique_ptr<ASTUnit>
@@ -696,7 +700,11 @@ public:
                   bool UseDebugInfo = false, bool OnlyLocalDecls = false,
                   CaptureDiagsKind CaptureDiagnostics = CaptureDiagsKind::None,
                   bool AllowASTWithCompilerErrors = false,
-                  bool UserFilesAreVolatile = false);
+                  bool UserFilesAreVolatile = false,
+                  // facebook begin T59242408 D18533994
+                  const std::map<std::string, std::string, std::less<>>
+                      &PrebuiltModuleFiles = {});
+  // facebook end
 
 private:
   /// Helper function for \c LoadFromCompilerInvocation() and
