@@ -73,6 +73,21 @@ void clang::ProcessWarningOptions(DiagnosticsEngine &Diags,
   SmallVector<diag::kind, 10> _Diags;
   const IntrusiveRefCntPtr< DiagnosticIDs > DiagIDs =
     Diags.getDiagnosticIDs();
+
+  // facebook begin T59137049
+  // "Kill" switch to always ignore -Werror[=diag] regaredless of order.
+  // This is to make sure `-Wforce-no-error` takes precedence even if there's
+  // `-Werror` after it. We need `-Wforce-no-error` so we can effecitively
+  // disable warning as error even if fbcode TARGETs enable them explicitly.
+  bool forceWNoError = false;
+  for (unsigned i = 0, e = Opts.Warnings.size(); i != e; ++i) {
+    if (Opts.Warnings[i] == "force-no-error") {
+      forceWNoError = true;
+      break;
+    }
+  }
+  // facebook end
+
   // We parse the warning options twice.  The first pass sets diagnostic state,
   // while the second pass reports warnings/errors.  This has the effect that
   // we follow the more canonical "last option wins" paradigm when there are
@@ -89,6 +104,12 @@ void clang::ProcessWarningOptions(DiagnosticsEngine &Diags,
       const auto Flavor = diag::Flavor::WarningOrError;
       StringRef Opt = Opts.Warnings[i];
       StringRef OrigOpt = Opts.Warnings[i];
+
+      // facebook begin T59137049
+      if (Opt == "force-no-error") {
+        continue;
+      }
+      // facebook end
 
       // Treat -Wformat=0 as an alias for -Wno-format.
       if (Opt == "format=0")
@@ -134,6 +155,11 @@ void clang::ProcessWarningOptions(DiagnosticsEngine &Diags,
       // the deprecated -Werror-implicit-function-declaration which is used by
       // a few projects.
       if (Opt.startswith("error")) {
+        // facebook begin T59137049
+        if (isPositive && forceWNoError) {
+          continue;
+        }
+        // facebook end
         StringRef Specifier;
         if (Opt.size() > 5) {  // Specifier must be present.
           if (Opt[5] != '=' &&
