@@ -227,7 +227,16 @@ def: Flag<["-"], "s">, Alias<strip_all>, HelpText<"Alias for --strip-all">;
 def: Flag<["-"], "S">, Alias<strip_debug>, HelpText<"Alias for --strip-debug">;
 def: Flag<["-"], "t">, Alias<trace>, HelpText<"Alias for --trace">;
 def: JoinedOrSeparate<["-"], "y">, Alias<trace_symbol>, HelpText<"Alias for --trace-symbol">;
+
+// facebook begin T59573428
+defm discard_section
+    : Eq<"discard-section",
+         "Ignored for compatibility with fb internal linkers T59573428">;
+defm no_discard_section
+    : Eq<"no-discard-section",
+         "Ignored for compatibility with fb internal linkers T59573428">;
 def: JoinedOrSeparate<["-"], "u">, Alias<undefined>;
+// facebook end T59573428
 
 // LTO-related options.
 def lto_O: JJ<"lto-O">, MetaVarName<"<opt-level>">,
