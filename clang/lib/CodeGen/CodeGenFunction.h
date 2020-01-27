@@ -2128,7 +2128,8 @@ private:
   void EmitKernelMetadata(const FunctionDecl *FD, llvm::Function *Fn);
 
 public:
-  CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext=false);
+  CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext = false,
+                  llvm::Function *Fn = nullptr);
   ~CodeGenFunction();
 
   CodeGenTypes &getTypes() const { return CGM.getTypes(); }
