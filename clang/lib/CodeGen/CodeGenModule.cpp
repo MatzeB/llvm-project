@@ -77,6 +77,14 @@ static llvm::cl::opt<bool> LimitedCoverage(
     "limited-coverage-experimental", llvm::cl::Hidden,
     llvm::cl::desc("Emit limited coverage mapping information (experimental)"));
 
+// facebook begin T60099708
+static llvm::cl::opt<uint64_t>
+    OptCXXConstructLimit("opt-cxxconstruct-limit",
+                         llvm::cl::desc("The maximum number of cxx constructor "
+                                        "calls that the optimizer can handle"),
+                         llvm::cl::init(10000));
+// facebook end
+
 static const char AnnotationSection[] = "llvm.metadata";
 
 static CGCXXABI *createCXXABI(CodeGenModule &CGM) {
@@ -1952,6 +1960,51 @@ CodeGenModule::GetOrCreateRTTIProxyGlobalVariable(llvm::Constant *Addr) {
   return FTRTTIProxy;
 }
 
+// facebook begin T60099708
+// A function walker to check if a function is too big to optimize.
+struct FunctionSizeChecker : public RecursiveASTVisitor<FunctionSizeChecker> {
+  bool ShouldOptimize = true;
+
+  // A function with a lot constructor calls may incur the creation of many
+  // lifetime markers which might turn into conditional code that slows down the
+  // optimizer.
+  unsigned long CXXConstructCount = 0;
+  const unsigned long CXXConstructLimit = OptCXXConstructLimit;
+
+  bool shouldVisitImplicitCode() const { return true; }
+
+  bool VisitCXXConstructExpr(CXXConstructExpr *E) {
+    CXXConstructCount++;
+    ShouldOptimize = CXXConstructCount <= CXXConstructLimit;
+    return ShouldOptimize;
+  }
+};
+
+void CodeGenModule::PreSetOptimizationAttributesForFunction(const Decl *D,
+                                                            llvm::Function *F) {
+  // Track whether we need to add the optnone LLVM attribute,
+  // starting with the default for this optimization level.
+  bool ShouldAddOptNone =
+      !CodeGenOpts.DisableO0ImplyOptNone && CodeGenOpts.OptimizationLevel == 0;
+
+  // We can't add optnone in the following cases, it won't pass the verifier.
+  if (!ShouldAddOptNone && !D->hasAttr<MinSizeAttr>() &&
+      !D->hasAttr<AlwaysInlineAttr>() &&
+      !F->hasFnAttribute(llvm::Attribute::AlwaysInline)) {
+    if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+      // Disable optimizations for gigantic functions
+      FunctionSizeChecker Checker;
+      Checker.TraverseFunctionDecl(const_cast<FunctionDecl *>(FD));
+      if (!Checker.ShouldOptimize) {
+        F->addFnAttr(llvm::Attribute::OptimizeNone);
+        F->addFnAttr(llvm::Attribute::NoInline);
+        Diags.Report(diag::warn_function_too_big_to_optimize) << F->getName();
+      }
+    }
+  }
+}
+// facebook end
+
 void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
                                                            llvm::Function *F) {
   llvm::AttrBuilder B(F->getContext());
@@ -1997,6 +2050,10 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
   ShouldAddOptNone &= !D->hasAttr<MinSizeAttr>();
   ShouldAddOptNone &= !D->hasAttr<AlwaysInlineAttr>();
 
+  // facebook begin T60099708
+  ShouldAddOptNone |= F->hasFnAttribute(llvm::Attribute::OptimizeNone);
+  // facebook end
+
   // Add optnone, but do so only if the function isn't always_inline.
   if ((ShouldAddOptNone || D->hasAttr<OptimizeNoneAttr>()) &&
       !F->hasFnAttribute(llvm::Attribute::AlwaysInline)) {
@@ -2023,7 +2080,7 @@ void CodeGenModule::SetLLVMFunctionAttributesForDefinition(const Decl *D,
     // Add noinline if the function isn't always_inline.
     B.addAttribute(llvm::Attribute::NoInline);
   } else if (D->hasAttr<AlwaysInlineAttr>() &&
-             !F->hasFnAttribute(llvm::Attribute::NoInline)) {
+           !F->hasFnAttribute(llvm::Attribute::NoInline)) {
     // (noinline wins over always_inline, and we can't specify both in IR)
     B.addAttribute(llvm::Attribute::AlwaysInline);
   } else if (CodeGenOpts.getInlining() == CodeGenOptions::OnlyAlwaysInlining) {
@@ -5318,7 +5375,13 @@ void CodeGenModule::EmitGlobalFunctionDefinition(GlobalDecl GD,
   // Set CodeGen attributes that represent floating point environment.
   setLLVMFunctionFEnvAttributes(D, Fn);
 
-  CodeGenFunction(*this).GenerateCode(GD, Fn, FI);
+  // facebook begin T60099708
+  // Setting the non-opt attribute for huge functions before generating IR for
+  // them. The IR generation needs to check the attribute to turn off liftime
+  // marker emission.
+  PreSetOptimizationAttributesForFunction(D, Fn);
+  CodeGenFunction(*this, false, Fn).GenerateCode(GD, Fn, FI);
+  // facebook end
 
   setNonAliasAttributes(GD, Fn);
   SetLLVMFunctionAttributesForDefinition(D, Fn);

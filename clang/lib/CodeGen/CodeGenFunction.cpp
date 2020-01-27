@@ -53,7 +53,8 @@ using namespace CodeGen;
 /// shouldEmitLifetimeMarkers - Decide whether we need emit the life-time
 /// markers.
 static bool shouldEmitLifetimeMarkers(const CodeGenOptions &CGOpts,
-                                      const LangOptions &LangOpts) {
+                                      const LangOptions &LangOpts,
+                                      const llvm::Function *Fn) {
   if (CGOpts.DisableLifetimeMarkers)
     return false;
 
@@ -63,18 +64,24 @@ static bool shouldEmitLifetimeMarkers(const CodeGenOptions &CGOpts,
       LangOpts.Sanitize.has(SanitizerKind::Memory))
     return true;
 
+  // facebook begin T60099708
+  if (Fn && Fn->hasFnAttribute(llvm::Attribute::OptimizeNone))
+    return false;
+  // facebook end
+
   // For now, only in optimized builds.
   return CGOpts.OptimizationLevel != 0;
 }
 
-CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
+CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext,
+                                 llvm::Function *Fn)
     : CodeGenTypeCache(cgm), CGM(cgm), Target(cgm.getTarget()),
       Builder(cgm, cgm.getModule().getContext(), llvm::ConstantFolder(),
               CGBuilderInserterTy(this)),
       SanOpts(CGM.getLangOpts().Sanitize), CurFPFeatures(CGM.getLangOpts()),
       DebugInfo(CGM.getModuleDebugInfo()), PGO(cgm),
       ShouldEmitLifetimeMarkers(
-          shouldEmitLifetimeMarkers(CGM.getCodeGenOpts(), CGM.getLangOpts())) {
+          shouldEmitLifetimeMarkers(CGM.getCodeGenOpts(), CGM.getLangOpts(), Fn)) { // facebook T60099708
   if (!suppressNewContext)
     CGM.getCXXABI().getMangleContext().startNewFunction();
   EHStack.setCGF(this);

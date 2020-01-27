@@ -1213,6 +1213,13 @@ public:
   /// Set the LLVM function attributes that represent floating point
   /// environment.
   void setLLVMFunctionFEnvAttributes(const FunctionDecl *D, llvm::Function *F);
+  
+  // facebook begin T60099708
+  /// Set the optimization attributes for functions to favor both the front end
+  /// and the back end.
+  void PreSetOptimizationAttributesForFunction(const Decl *D,
+                                               llvm::Function *F);
+  // facebook end
 
   /// Return true iff the given type uses 'sret' when used as a return type.
   bool ReturnTypeUsesSRet(const CGFunctionInfo &FI);
