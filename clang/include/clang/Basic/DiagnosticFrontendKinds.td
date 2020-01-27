@@ -281,6 +281,12 @@ def err_cyclic_alias : Error<
 def err_ifunc_resolver_return : Error<
   "ifunc resolver function must return a pointer">;
 
+// facebook begin T60099708
+def warn_function_too_big_to_optimize : Warning<
+  "Function %0 is too big to optimize">,
+  InGroup<IgnoredOptimizationArgument>;
+// facebook end
+
 def warn_atomic_op_misaligned : Warning<
   "misaligned atomic operation may incur "
   "significant performance penalty"
