@@ -58,7 +58,9 @@ enum ELFKind : uint8_t {
 enum class BsymbolicKind { None, NonWeakFunctions, Functions, NonWeak, All };
 
 // For --build-id.
-enum class BuildIdKind { None, Fast, Md5, Sha1, Hexstring, Uuid };
+// facebook begin T60662148
+enum class BuildIdKind { None, Fast, Md5, Sha1, Hexstring, Uuid, XxhPadded };
+// facebook end T60662148
 
 // For --call-graph-profile-sort={none,hfsort,cdsort}.
 enum class CGProfileSortKind { None, Hfsort, Cdsort };
