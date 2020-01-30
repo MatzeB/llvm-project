@@ -33,6 +33,11 @@
 # RUN: ld.lld --build-id=0x12345678 %t -o %t2
 # RUN: llvm-objdump -s %t2 | FileCheck --check-prefix=HEX %s
 
+# facebook begin T60662148
+# RUN: ld.lld --build-id=xxhpadded %t -o %t2
+# RUN: llvm-objdump -s %t2 | FileCheck -check-prefix=XXHPADDED %s
+# facebook end T60662148
+
 # RUN: ld.lld %t -o %t2
 # RUN: llvm-objdump -s %t2 | FileCheck --check-prefix=NONE %s
 
@@ -81,6 +86,13 @@ _start:
 # HEX:      Contents of section .note.gnu.build-id:
 # HEX-NEXT: 04000000 04000000 03000000 474e5500  ............GNU.
 # HEX-NEXT: 12345678
+
+# facebook begin T60662148
+# XXHPADDED:      Contents of section .note.gnu.build-id:
+# XXHPADDED-NEXT: 04000000 14000000 03000000 474e5500  ............GNU.
+# XXHPADDED-NEXT: 00000000 00000000 00000000 8a143817  ..............8.
+# XXHPADDED-NEXT: ffb2f7ec
+# facebook end T60662148
 
 # NONE-NOT: Contents of section .note.gnu.build-id:
 
