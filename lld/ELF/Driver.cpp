@@ -845,6 +845,10 @@ getBuildId(opt::InputArgList &args) {
     return {BuildIdKind::Sha1, {}};
   if (s == "uuid")
     return {BuildIdKind::Uuid, {}};
+  // facebook begin T60662148
+  if (s == "xxhpadded")
+    return {BuildIdKind::XxhPadded, {}};
+  // facebook end T60662148
   if (s.startswith("0x"))
     return {BuildIdKind::Hexstring, parseHex(s.substr(2))};
 

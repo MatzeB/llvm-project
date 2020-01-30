@@ -3215,6 +3215,21 @@ template <class ELFT> void Writer<ELFT>::writeBuildId() {
     if (auto ec = llvm::getRandomBytes(buildId.get(), hashSize))
       error("entropy source failure: " + ec.message());
     break;
+  // facebook begin T60662148
+  case BuildIdKind::XxhPadded:
+    computeHash(output, input, [&](uint8_t *dest, ArrayRef<uint8_t> arr) {
+      auto xxhash = xxHash64(arr);
+      auto padSize = hashSize - sizeof(xxhash);
+      assert(
+          padSize >= 0 &&
+          "Expect build-id hash size to be big enough for the computed hash");
+      // Zero-pad computed hash, endianess does not matter because we do not use
+      // build-id as a checksum
+      memset(dest, 0, hashSize);
+      memcpy(dest + padSize, &xxhash, sizeof(xxhash));
+    });
+    break;
+  // facebook end T60662148
   default:
     llvm_unreachable("unknown BuildIdKind");
   }

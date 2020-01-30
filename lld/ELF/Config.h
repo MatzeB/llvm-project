@@ -51,7 +51,9 @@ enum ELFKind : uint8_t {
 enum class BsymbolicKind { None, NonWeakFunctions, Functions, All };
 
 // For --build-id.
-enum class BuildIdKind { None, Fast, Md5, Sha1, Hexstring, Uuid };
+// facebook begin T60662148
+enum class BuildIdKind { None, Fast, Md5, Sha1, Hexstring, Uuid, XxhPadded };
+// facebook end T60662148
 
 // For --discard-{all,locals,none}.
 enum class DiscardPolicy { Default, All, Locals, None };

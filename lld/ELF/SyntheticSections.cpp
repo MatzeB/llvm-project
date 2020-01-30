@@ -281,6 +281,9 @@ static size_t getHashSize() {
   case BuildIdKind::Uuid:
     return 16;
   case BuildIdKind::Sha1:
+  // facebook begin T60662148
+  case BuildIdKind::XxhPadded:
+    // facebook end T60662148
     return 20;
   case BuildIdKind::Hexstring:
     return config->buildIdVector.size();
