@@ -280,6 +280,9 @@ struct Config {
   bool sysvHash = false;
   bool target1Rel;
   bool trace;
+  // facebook begin T48837209
+  bool persistBlockAnnotation = false;
+  // end
   bool thinLTOEmitImportsFiles;
   bool thinLTOEmitIndexFiles;
   bool thinLTOIndexOnly;
