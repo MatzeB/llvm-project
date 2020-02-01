@@ -153,6 +153,10 @@ static lto::Config createConfig() {
   c.DebugPassManager = config->ltoDebugPassManager;
   c.DwoDir = std::string(config->dwoDir);
 
+  // facebook begin T48837209
+  c.Options.PersistBlockAnnotation = config->persistBlockAnnotation;
+  // facebook end
+
   c.HasWholeProgramVisibility = config->ltoWholeProgramVisibility;
   c.AlwaysEmitRegularLTOObj = !config->ltoObjPath.empty();
 

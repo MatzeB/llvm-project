@@ -588,6 +588,10 @@ def lto_sample_profile: JJ<"lto-sample-profile=">,
 defm lto_whole_program_visibility: BB<"lto-whole-program-visibility",
   "Asserts that the LTO link has whole program visibility",
   "Asserts that the LTO link does not have whole program visibility">;
+// facebook begin T48837209
+def lto_persist_block_annotation: F<"lto-persist-block-annotation">,
+  HelpText<"Encode MIR block info (label+profile count) into the binary.">;
+// facebook end
 def disable_verify: F<"disable-verify">;
 defm mllvm: Eq<"mllvm", "Additional arguments to forward to LLVM's option processing">;
 def opt_remarks_filename: Separate<["--"], "opt-remarks-filename">,
@@ -668,6 +672,10 @@ def: F<"plugin-opt=opt-remarks-with-hotness">,
 def: J<"plugin-opt=opt-remarks-hotness-threshold=">,
   Alias<opt_remarks_hotness_threshold>,
   HelpText<"Alias for --opt-remarks-hotness-threshold">;
+// facebook begin T48837209
+def: J<"plugin-opt=persist-block-annotation">,
+  Alias<lto_persist_block_annotation>, HelpText<"Alias for -lto-persist-block-annotation">;
+// facebook end
 def: J<"plugin-opt=sample-profile=">,
   Alias<lto_sample_profile>, HelpText<"Alias for --lto-sample-profile">;
 def: F<"plugin-opt=save-temps">, Alias<save_temps>, HelpText<"Alias for --save-temps">;

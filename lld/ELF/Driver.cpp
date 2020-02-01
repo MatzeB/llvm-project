@@ -1148,6 +1148,10 @@ static void readConfigs(opt::InputArgList &args) {
   config->ltoUniqueBasicBlockSectionNames =
       args.hasFlag(OPT_lto_unique_basic_block_section_names,
                    OPT_no_lto_unique_basic_block_section_names, false);
+  // facebook begin T48837209
+  config->persistBlockAnnotation =
+      args.hasArg(OPT_lto_persist_block_annotation);
+  // facebook end
   config->mapFile = args.getLastArgValue(OPT_Map);
   config->mipsGotSize = args::getInteger(args, OPT_mips_got_size, 0xfff0);
   config->mergeArmExidx =
