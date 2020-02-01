@@ -222,6 +222,9 @@ struct Configuration {
   // facebook begin T55702441
   bool traceAllSymbols;
   // facebook end T55702441
+  // facebook begin T48837209
+  bool persistBlockAnnotation = false;
+  // end
   bool thinLTOEmitImportsFiles;
   bool thinLTOIndexOnly;
   bool timeTraceEnabled;
