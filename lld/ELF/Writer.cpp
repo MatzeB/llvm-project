@@ -1588,6 +1588,16 @@ static DenseMap<const InputSectionBase *, int> buildSectionOrder() {
   // All explicitly mentioned symbols have negative (higher) priorities.
   DenseMap<StringRef, SymbolOrderEntry> symbolOrder;
   int priority = -config->symbolOrderingFile.size();
+  // facebook begin T62621959
+  if (config->enableHugeText) {
+    // __hot_start should go before the first hot function, __hot_end should go
+    // after the last hot function. shift everything back by 1 so we can set
+    // __hot_end to -1 < 0
+    priority -= 1;
+    symbolOrder.insert({"__hot_start", {priority - 1, false}});
+    symbolOrder.insert({"__hot_end", {-1, false}});
+  }
+  // facebook end T62621959
   for (StringRef s : config->symbolOrderingFile)
     symbolOrder.insert({s, {priority++, false}});
 
@@ -1768,6 +1778,15 @@ template <class ELFT> void Writer<ELFT>::sortInputSections() {
 template <class ELFT> void Writer<ELFT>::sortSections() {
   llvm::TimeTraceScope timeScope("Sort sections");
   script->adjustSectionsBeforeSorting();
+
+  // facebook begin T62621959
+  if (config->enableHugeText) {
+    if (OutputSection *sec = findSection(".text"))
+      sec->alignment = config->hugeTextAlignment;
+    else
+      warn(".text section not found, cannot hugify .text");
+  }
+  // facebook end T62621959
 
   // Don't sort if using -r. It is not necessary and we want to preserve the
   // relative order for SHF_LINK_ORDER sections.

@@ -223,6 +223,15 @@ DenseMap<const InputSectionBase *, int> CallGraphSort::run() {
 
   DenseMap<const InputSectionBase *, int> orderMap;
   int curOrder = 1;
+  // facebook begin T62621959
+  if (config->enableHugeText) {
+    orderMap[dyn_cast_or_null<InputSectionBase>(
+        dyn_cast<Defined>(symtab->find("__hot_start"))->section)] = curOrder++;
+    orderMap[dyn_cast_or_null<InputSectionBase>(
+        dyn_cast<Defined>(symtab->find("__hot_end"))->section)] =
+        sections.size() + curOrder;
+  }
+  // facebook end T62621959
   for (int leader : sorted) {
     for (int i = leader;;) {
       orderMap[sections[i]] = curOrder++;

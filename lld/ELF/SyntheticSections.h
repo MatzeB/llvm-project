@@ -59,6 +59,15 @@ public:
   }
 };
 
+// facebook begin T62621959
+class HotTextPlaceholderSection : public SyntheticSection {
+public:
+  HotTextPlaceholderSection(bool isStart);
+  void writeTo(uint8_t *buf) override { return; };
+  size_t getSize() const override { return 0; }
+};
+// facebook end T62621959
+
 struct CieRecord {
   EhSectionPiece *cie = nullptr;
   std::vector<EhSectionPiece *> fdes;
