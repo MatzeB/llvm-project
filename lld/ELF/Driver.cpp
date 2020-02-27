@@ -1323,6 +1323,9 @@ static void readConfigs(opt::InputArgList &args) {
       args.hasFlag(OPT_eh_frame_hdr, OPT_no_eh_frame_hdr, false);
   config->emitLLVM = args.hasArg(OPT_lto_emit_llvm);
   config->emitRelocs = args.hasArg(OPT_emit_relocs);
+  config->enableHugeText =
+      args.hasArg(OPT_enable_huge_text, OPT_no_enable_huge_text,
+                  false); // facebook T62621959
   config->enableNewDtags =
       args.hasFlag(OPT_enable_new_dtags, OPT_disable_new_dtags, true);
   config->enableNonContiguousRegions =
@@ -1785,6 +1788,21 @@ static void readConfigs(opt::InputArgList &args) {
     }
   }
 
+  // facebook begin T62621959
+  if (config->enableHugeText) {
+    // Huge text must be used with a layout ordering option
+    // We want to check for args.hasArg(OPT_call_graph_ordering_file) instead of
+    // config->symbolOrderingFile.empty() in case the ordering file is
+    // deliberately empty
+    if (!args.hasArg(OPT_symbol_ordering_file) &&
+        !args.hasArg(OPT_call_graph_ordering_file) &&
+        config->callGraphProfileSort == CGProfileSortKind::None) {
+      warn("Ignoring --enable-huge-text since no layout ordering option given");
+      config->enableHugeText = false;
+    }
+  }
+  // facebook end T62621959
+
   assert(config->versionDefinitions.empty());
   config->versionDefinitions.push_back(
       {"local", (uint16_t)VER_NDX_LOCAL, {}, {}});
@@ -2093,6 +2111,22 @@ void LinkerDriver::inferMachineType() {
   if (!inferred)
     error("target emulation unknown: -m or at least one .o file required");
 }
+
+// facebook begin T62621959
+// Parse -z huge-text-alignment=<value>. The default value is defined by
+// each target.
+static uint64_t getHugeTextAlignment(opt::InputArgList &args) {
+  uint64_t val = args::getZOptionValue(args, OPT_z, "huge-text-alignment",
+                                       target->defaultHugeTextAlignment);
+  if (!isPowerOf2_64(val))
+    error("huge-text-alignment: value isn't a power of 2");
+  if (!config->enableHugeText && val != target->defaultHugeTextAlignment) {
+    warn("-z huge-text-alignment set, but --enable-huge-text is disabled");
+    return 1;
+  }
+  return val;
+}
+// facebook end T62621959
 
 // Parse -z max-page-size=<value>. The default value is defined by
 // each target.
@@ -3133,6 +3167,14 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
     }
   }
 
+  // facebook begin T62621959
+  if (config->enableHugeText) {
+    // add placeholder sections
+    ctx.inputSections.push_back(make<HotTextPlaceholderSection>(true));
+    ctx.inputSections.push_back(make<HotTextPlaceholderSection>(false));
+  }
+  // facebook end T62621959
+
   // Since we now have a complete set of input files, we can create
   // a .d file to record build dependencies.
   if (!config->dependencyFile.empty())
@@ -3163,6 +3205,8 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
   // optimizations such as DATA_SEGMENT_ALIGN in linker scripts. LLD's use of it
   // is limited to writing trap instructions on the last executable segment.
   config->commonPageSize = getCommonPageSize(args);
+
+  config->hugeTextAlignment = getHugeTextAlignment(args); // facebook T62621959
 
   config->imageBase = getImageBase(args);
 

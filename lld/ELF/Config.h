@@ -247,6 +247,7 @@ struct Config {
   bool ehFrameHdr;
   bool emitLLVM;
   bool emitRelocs;
+  bool enableHugeText = false; // facebook T62621959
   bool enableNewDtags;
   bool enableNonContiguousRegions;
   bool executeOnly;
@@ -362,6 +363,7 @@ struct Config {
   std::optional<uint64_t> imageBase;
   uint64_t commonPageSize;
   uint64_t maxPageSize;
+  uint64_t hugeTextAlignment; // facebook T62621959
   uint64_t mipsGotSize;
   uint64_t zStackSize;
   unsigned ltoPartitions;

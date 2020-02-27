@@ -26,6 +26,7 @@
 #include "CallGraphSort.h"
 #include "InputFiles.h"
 #include "InputSection.h"
+#include "SymbolTable.h" // facebook T62621959
 #include "Symbols.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Transforms/Utils/CodeLayout.h"
@@ -235,6 +236,15 @@ DenseMap<const InputSectionBase *, int> CallGraphSort::run() {
 
   DenseMap<const InputSectionBase *, int> orderMap;
   int curOrder = 1;
+  // facebook begin T62621959
+  if (config->enableHugeText) {
+    orderMap[dyn_cast_or_null<InputSectionBase>(
+        dyn_cast<Defined>(symtab.find("__hot_start"))->section)] = curOrder++;
+    orderMap[dyn_cast_or_null<InputSectionBase>(
+        dyn_cast<Defined>(symtab.find("__hot_end"))->section)] =
+        sections.size() + curOrder;
+  }
+  // facebook end T62621959
   for (int leader : sorted) {
     for (int i = leader;;) {
       orderMap[sections[i]] = curOrder++;
@@ -326,6 +336,15 @@ DenseMap<const InputSectionBase *, int> elf::computeCacheDirectedSortOrder() {
   // Create the final order.
   DenseMap<const InputSectionBase *, int> orderMap;
   int curOrder = 1;
+  // facebook begin T62621959
+  if (config->enableHugeText) {
+    orderMap[dyn_cast_or_null<InputSectionBase>(
+        dyn_cast<Defined>(symtab.find("__hot_start"))->section)] = curOrder++;
+    orderMap[dyn_cast_or_null<InputSectionBase>(
+        dyn_cast<Defined>(symtab.find("__hot_end"))->section)] =
+        sections.size() + curOrder;
+  }
+  // facebook end T62621959
   for (uint64_t secIdx : sortedSections)
     orderMap[sections[secIdx]] = curOrder++;
 
