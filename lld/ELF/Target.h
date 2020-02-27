@@ -110,6 +110,8 @@ public:
   unsigned defaultCommonPageSize = 4096;
   unsigned defaultMaxPageSize = 4096;
 
+  unsigned defaultHugeTextAlignment = 1024 * 2048; // facebook T62621959
+
   uint64_t getImageBase() const;
 
   // True if _GLOBAL_OFFSET_TABLE_ is relative to .got.plt, false if .got.

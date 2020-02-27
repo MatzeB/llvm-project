@@ -168,6 +168,12 @@ defm eh_frame_hdr: B<"eh-frame-hdr",
 
 def emit_relocs: F<"emit-relocs">, HelpText<"Generate relocations in output">;
 
+// facebook begin T62621959
+defm enable_huge_text: B<"enable-huge-text",
+  "Enable huge text, must be used with a section layout ordering option",
+  "Do not enable huge text">;
+// facebook end T62621959
+
 def enable_new_dtags: F<"enable-new-dtags">,
   HelpText<"Enable new dynamic tags (default)">;
 

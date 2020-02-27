@@ -292,6 +292,25 @@ static size_t getHashSize() {
   }
 }
 
+// facebook begin T62621959
+
+// This class represents empty placeholder section for inserting
+// __hot_start and __hot_end symbols
+HotTextPlaceholderSection::HotTextPlaceholderSection(bool isStart)
+    : SyntheticSection(llvm::ELF::SHF_ALLOC, llvm::ELF::SHT_NOBITS, 4,
+                       isStart ? ".text._hot_start" : ".text._hot_end") {
+  StringRef symbolName = isStart ? "__hot_start" : "__hot_end";
+  if (symtab->find(symbolName)) {
+    error(symbolName + " found in input, failed to enable huge text.");
+  }
+  Symbol *sym = symtab->addSymbol(Defined{nullptr, symbolName, STB_GLOBAL,
+                                  STV_DEFAULT, STT_OBJECT, 0, 0, this});
+  sym->isUsedInRegularObj = true;
+
+  this->markLive(); // --gc-sections should not remove placeholder sections
+}
+// facebook end T62621959
+
 // This class represents a linker-synthesized .note.gnu.property section.
 //
 // In x86 and AArch64, object files may contain feature flags indicating the
