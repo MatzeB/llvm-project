@@ -833,6 +833,17 @@ bool Sema::CheckCUDACall(SourceLocation Loc, FunctionDecl *Callee) {
   if (!LocsWithCUDACallDiags.insert({Caller, Loc}).second)
     return true;
 
+  // facebook begin T63033708
+  if (getLangOpts().CUDAIsDevice &&
+      DiagKind == SemaDiagnosticBuilder::K_ImmediateWithCallStack &&
+      IdentifyCUDATarget(Callee) == CFT_Host &&
+      getLangOpts().CUDAAllowHostCallsFromHostDevice) {
+    SemaDiagnosticBuilder(DiagKind, Loc, diag::warn_host_calls_from_host_device, Caller, *this)
+        << Callee->getNameAsString() << Caller->getNameAsString();
+    return true;
+  }
+  // facebook end
+
   SemaDiagnosticBuilder(DiagKind, Loc, diag::err_ref_bad_target, Caller, *this)
       << IdentifyCUDATarget(Callee) << /*function*/ 0 << Callee
       << IdentifyCUDATarget(Caller);
