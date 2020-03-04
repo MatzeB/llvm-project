@@ -28,6 +28,7 @@
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/CFGChangeLogHandler.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassInstrumentation.h"
@@ -122,15 +123,9 @@ struct Node {
 
 // Identify Node* with the pointing block's Ptr, not with the pointer value
 // itself.
-struct NodePtrHash {
-  size_t operator()(const Node &N) const {
-    return std::hash<const void *>()(N.Ptr);
-  }
-};
-
-struct NodePtrEqual {
-  bool operator()(const Node &N1, const Node &N2) const {
-    return N1.Ptr == N2.Ptr;
+struct NodeCmp {
+  bool operator()(const Node &a, const Node &b) const {
+    return a.Name < b.Name;
   }
 };
 
@@ -143,9 +138,7 @@ public:
     return Cfg;
   }
 
-  const std::unordered_set<Node, NodePtrHash, NodePtrEqual> &getNodes() const {
-    return Nodes;
-  }
+  const std::set<Node, NodeCmp> &getNodes() const { return Nodes; }
 
   bool hasNode(const Node &N) const { return Nodes.count(N); }
 
@@ -168,7 +161,7 @@ private:
   template <class T> void populateCFG(const T *);
 
   std::string Name;
-  std::unordered_set<Node, NodePtrHash, NodePtrEqual> Nodes;
+  std::set<Node, NodeCmp> Nodes;
 };
 
 raw_ostream &operator<<(raw_ostream &OS, const Node &N) {

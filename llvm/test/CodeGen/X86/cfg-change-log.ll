@@ -4,9 +4,9 @@
 ; CHECK: CFGChangeLog After Branch Probability Basic Block Placement (function: test)
 ; CHECK-NEXT: CFGChangeLog: changed %bb.{{[0-9]+}}.[[NAME1:[a-zA-Z\.]+]]
 ; CHECK-NEXT: -> %bb.{{[0-9]+}}.[[NAME1]]{{.+}}, outgoings 0x{{[0-9a-f]+}}:{{.+}} 0x{{[0-9a-f]+}}:{{.+}}
+; CHECK-NEXT: CFGChangeLog: deleted %bb.{{[0-9]+}}.loop
 ; CHECK-NEXT: CFGChangeLog: changed %bb.{{[0-9]+}}.[[NAME2:[a-zA-Z\.]+]]
 ; CHECK-NEXT: -> %bb.{{[0-9]+}}.[[NAME2]]{{.+}}, outgoings 0x{{[0-9a-f]+}}:{{.+}} 0x{{[0-9a-f]+}}:{{.+}}
-; CHECK-NEXT: CFGChangeLog: deleted %bb.{{[0-9]+}}.loop
 
 define i32 @test(i1 %c) {
 entry:
