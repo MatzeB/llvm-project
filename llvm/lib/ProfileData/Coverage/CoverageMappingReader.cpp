@@ -47,6 +47,11 @@ using namespace object;
 STATISTIC(CovMapNumRecords, "The # of coverage function records");
 STATISTIC(CovMapNumUsedRecords, "The # of used coverage function records");
 
+cl::opt<bool> coverage::IgnoreMalformedCoverageMappingRegions(
+    "ignore-malformed-coverage-mapping-regions",
+    cl::desc("Ignore malformed code coverage mapping regions"),
+    cl::init(true)); // facebook T47767012
+
 void CoverageMappingIterator::increment() {
   if (ReadErr != coveragemap_error::success)
     return;
@@ -340,8 +345,16 @@ Error RawCoverageMappingReader::readMappingRegionsSubArray(
     auto CMR = CounterMappingRegion(C, C2, InferredFileID, ExpandedFileID,
                                     LineStart, ColumnStart,
                                     LineStart + NumLines, ColumnEnd, Kind);
-    if (CMR.startLoc() > CMR.endLoc())
-      return make_error<CoverageMapError>(coveragemap_error::malformed);
+    if (CMR.startLoc() > CMR.endLoc()) {
+      LLVM_DEBUG(dbgs() << "Malformed coverage mapping region: "
+                        << CMR.startLoc().first << ":" << CMR.startLoc().second
+                        << " -> " << CMR.endLoc().first << ":"
+                        << CMR.endLoc().second << "\n");
+      if (IgnoreMalformedCoverageMappingRegions)
+        continue;
+      else
+        return make_error<CoverageMapError>(coveragemap_error::malformed);
+    }
     MappingRegions.push_back(CMR);
   }
   return Error::success();
