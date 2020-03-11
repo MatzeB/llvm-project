@@ -18,6 +18,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ProfileData/Coverage/CoverageMapping.h"
 #include "llvm/ProfileData/InstrProf.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <cstddef>
@@ -238,6 +239,13 @@ public:
 
   Error read(CovMapVersion Version);
 };
+
+// Whether to ignore coverage mapping regions that are invalid, for example
+// regions for which the frontend has indicated the start location comes after
+// the end location. These are typically bugs in the frontend generating source
+// location information, but by enabling this option users can have coverage
+// information for regions such as these silently ignored.
+extern cl::opt<bool> IgnoreMalformedCoverageMappingRegions;
 
 } // end namespace coverage
 } // end namespace llvm
