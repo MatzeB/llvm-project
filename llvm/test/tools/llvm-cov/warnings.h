@@ -12,5 +12,8 @@
 // FAKE-FUNC-STDOUT-NOT: warning: Could not read coverage for '{{.*}}'.
 // FAKE-FUNC-STDERR: Could not read coverage for '{{.*}}'.
 
-// RUN: not llvm-cov report %S/Inputs/malformedRegions.covmapping -instr-profile %S/Inputs/elf_binary_comdat.profdata 2>&1 | FileCheck %s -check-prefix=MALFORMED-REGION
-// MALFORMED-REGION: Failed to load coverage: '{{.*}}malformedRegions.covmapping': Malformed coverage data
+// facebook begin T47767012
+// RUN: llvm-cov report %S/Inputs/malformedRegions.covmapping -instr-profile %S/Inputs/elf_binary_comdat.profdata 2>&1 | FileCheck %s -check-prefix=MALFORMED-REGION
+// MALFORMED-REGION: warning: 1 functions have mismatched data
+// MALFORMED-REGION-NOT: Failed to load coverage
+// facebook end T47767012
