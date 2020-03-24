@@ -406,7 +406,13 @@ static bool shouldApply(Function &F, ProfileSummaryInfo& PSI) {
     return CHRFunctions.count(F.getName());
   }
 
-  assert(PSI.hasProfileSummary() && "Empty PSI?");
+  // facebook begin T64508013
+  // When we disable pre-LTO profile annotation, we won't have profile
+  // summary pre-LTO. Skip CHR in such cases, and defer that to LTO.
+  if (!PSI.hasProfileSummary())
+    return false;
+  // facebook end T64508013
+
   return PSI.isFunctionEntryHot(&F);
 }
 

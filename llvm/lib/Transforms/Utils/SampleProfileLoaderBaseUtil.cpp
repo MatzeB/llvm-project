@@ -112,6 +112,7 @@ bool callsiteIsHotLocal(const FunctionSamples *CallerFS,
 bool callsiteIsHot(const FunctionSamples *CallerFS,
                    const FunctionSamples *CallsiteFS, ProfileSummaryInfo *PSI,
                    bool ProfAccForSymsInList) {
+  // CSFDO-TODO: check head of callee when using cs profile
   if (SampleProfileUseLocalHotness)
     return callsiteIsHotLocal(CallerFS, CallsiteFS);
   return callsiteIsHot(CallsiteFS, PSI, ProfAccForSymsInList);

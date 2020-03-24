@@ -2091,6 +2091,9 @@ bool SampleProfileLoader::runOnModule(Module &M, ModuleAnalysisManager *AM,
   // Compute the total number of samples collected in this profile.
   for (const auto &I : Reader->getProfiles()) {
     TotalCollectedSamples += I.second.getTotalSamples();
+    // facebook begin T64508013
+    assert(!FunctionSamples::ProfileIsCS || I.second.getCallsiteSamples().size() == 0);
+    // facebook end T64508013
     for (auto &callSite : I.second.getCallsiteSamples()) {
       for (auto &func_sample : callSite.second) {
         sumSampleFromInlineInstance[func_sample.first] +=
@@ -2214,7 +2217,8 @@ bool SampleProfileLoader::runOnFunction(Function &F, ModuleAnalysisManager *AM) 
   if (adaptativeOptLevel) {
     uint64_t functionSampleCount =
         (Samples != nullptr) ? Samples->getTotalSamples() : 0;
-    functionSampleCount += sumSampleFromInlineInstance[F.getName()];
+    if (!FunctionSamples::ProfileIsCS) // facebook T64508013
+      functionSampleCount += sumSampleFromInlineInstance[F.getName()];
     // If the function optimization level was adjusted, we still need
     // to do annotation so inlinee's count will be merged back to its
     // outlined version. But we won't do profile guided inlining here.
