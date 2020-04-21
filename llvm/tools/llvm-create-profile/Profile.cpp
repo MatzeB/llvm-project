@@ -134,6 +134,8 @@ void Profile::ComputeProfile(const RangeCountMap &range_map,
     }
   }
 
+  symbol_map_.MergeSplitFunctions();
+
   symbol_map_.CalculateThresholdFromTotalCount();
 
   LLVM_DEBUG(std::cout << std::cout.rdbuf());

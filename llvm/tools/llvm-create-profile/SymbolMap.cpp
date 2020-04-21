@@ -143,7 +143,36 @@ void Symbol::Merge(const Symbol *other) {
   }
 }
 
-void SymbolMap::Merge() { return; }
+void SymbolMap::MergeSplitFunctions() {
+  for (const auto &group : symbol_groups_) {
+    if (group.size() <= 1)
+      continue;
+    // Merge all ranges into the master range which is the first range seen to
+    // have a non-null profile.
+#ifndef NDEBUG
+    int masterIdx = 0;
+#endif
+    auto masterProfile = FindSymbol(group[0].StartAddress);
+    for (unsigned i = 1; i < group.size(); i++) {
+      auto profile = FindSymbol(group[i].StartAddress);
+      if (!profile)
+        continue;
+      if (masterProfile) {
+#ifndef NDEBUG
+        assert(group[i].Name == group[masterIdx].Name);
+        LLVM_DEBUG(std::cout << " Merging Profile : " << group[i].Name << " "
+                             << group[masterIdx].StartAddress << " "
+                             << group[i].StartAddress << std::endl);
+#endif
+        masterProfile->Merge(profile);
+        RemoveSymbol(group[i].StartAddress);
+      } else {
+        masterProfile = profile;
+        LLVM_DEBUG(masterIdx = i);
+      }
+    }
+  }
+}
 
 void SymbolMap::AddSymbol(const InstructionLocation &loc,
                           const std::string &name) {
@@ -154,6 +183,15 @@ void SymbolMap::AddSymbol(const InstructionLocation &loc,
     info.FunctionName = name;
     ret.first->second = new Symbol(std::move(info));
   }
+}
+
+Symbol *SymbolMap::FindSymbol(const InstructionLocation &loc) const {
+  auto iter = map_.find(loc);
+  return iter != map_.end() ? iter->second : nullptr;
+}
+
+void SymbolMap::RemoveSymbol(const InstructionLocation &loc) {
+  map_.erase(loc);
 }
 
 void SymbolMap::CalculateThresholdFromTotalCount() {
@@ -168,24 +206,24 @@ void SymbolMap::CalculateThresholdFromTotalCount() {
 }
 
 void SymbolMap::BuildSymbolMap(const std::string &binary) {
-  std::vector<SymbolLoader::ElfSymbol> symbols;
   if (LoadSymbolFromDebugSection){
-    SymbolLoader::loadSymbolFromDebugTable(binary, symbols);
+    SymbolLoader::loadSymbolFromDebugTable(binary, symbol_groups_);
   } else {
-    SymbolLoader::loadSymbolFromSymbolTable(binary, symbols);
+    SymbolLoader::loadSymbolFromSymbolTable(binary, symbol_groups_);
   }
 
-  for (const auto &symb : symbols) {
-    std::pair<AddressSymbolMap::iterator, bool> ret =
-        address_symbol_map_.insert(
-            std::make_pair(symb.StartAddress, std::move(symb)));
-    if (!ret.second) {
-      ElfSymbol &prior = ret.first->second;
-      if (prior.Name == symb.Name)
-        continue;
-      std::cerr << "Duplicated symbol address : 0x  " << std::hex
-                << symb.StartAddress.offset << std::dec << " " << prior.Name
-                << " and " << symb.Name << std::endl;
+  for (auto &group : symbol_groups_) {
+    for (auto &symb : group) {
+      std::pair<AddressSymbolMap::iterator, bool> ret =
+          address_symbol_map_.insert({symb.StartAddress, symb});
+      if (!ret.second) {
+        ElfSymbol &prior = ret.first->second;
+        if (prior.Name == symb.Name)
+          continue;
+        std::cerr << "Duplicated symbol address : 0x  " << std::hex
+                  << symb.StartAddress.offset << std::dec << " " << prior.Name
+                  << " and " << symb.Name << std::endl;
+      }
     }
   }
 }

@@ -34,8 +34,9 @@ public:
     }
   };
 
-  static void loadSymbolFromSymbolTable(const std::string &binary_path,
-                                        std::vector<ElfSymbol> &symbols) {
+  static void
+  loadSymbolFromSymbolTable(const std::string &binary_path,
+                            std::vector<std::vector<ElfSymbol>> &symbolGroups) {
     auto binary_file = openELFFile(binary_path);
     auto &elffile = *llvm::dyn_cast<llvm::object::ELFObjectFileBase>(
         binary_file.getBinary());
@@ -67,7 +68,8 @@ public:
                            << ", at address " << address.get()
                            << ", section offset : " << std::dec << std::endl);
 
-      symbols.emplace_back(
+      symbolGroups.emplace_back(std::vector<ElfSymbol>());
+      symbolGroups.back().emplace_back(
           ElfSymbol{InstructionLocation{binary_path, symbolVirtualAddress},
                     name.get().str(), symb.getSize()});
     }
@@ -106,8 +108,9 @@ public:
     return std::move(expected_file.get());
   }
 
-  static void loadSymbolFromDebugTable(const std::string &binary_path,
-                                       std::vector<ElfSymbol> &symbols) {
+  static void
+  loadSymbolFromDebugTable(const std::string &binary_path,
+                           std::vector<std::vector<ElfSymbol>> &symbolGroups) {
     auto binary_file = openELFFile(binary_path);
     auto &object_file = *llvm::dyn_cast<ObjectFile>(binary_file.getBinary());
     auto debugContext = llvm::DWARFContext::create(object_file);
@@ -132,26 +135,33 @@ public:
         if (!RangesOrError)
           continue;
         const llvm::DWARFAddressRangesVector &ranges = RangesOrError.get();
-        // TODO: we should warn about this, the tool current doesnt support non
-        // contiguous address ranges.
-        if (ranges.size() != 1)
+
+        if (ranges.empty())
           continue;
 
-        uint64_t functionStart = ranges[0].LowPC;
-        uint64_t functionSize = ranges[0].HighPC - functionStart;
+        // A function may be spilt into multiple non-continuous address ranges.
+        // Map each range to a standalone symbol and group the ranges by
+        // function names. This allows sample counts be processed independently
+        // for each range. Profiles of ranges with the same function name will
+        // be merged finally.
+        symbolGroups.emplace_back(std::vector<ElfSymbol>());
+        for (const auto &range : ranges) {
+          uint64_t functionStart = range.LowPC;
+          uint64_t functionSize = range.HighPC - functionStart;
 
-        LLVM_DEBUG(std::cout << std::hex << "Symbol for debug section "
-                             << std::string(Name)
-                             << ", symbol offset : " << functionStart
-                             << std::dec << ", symbol size : " << functionSize
-                             << std::endl);
+          LLVM_DEBUG(std::cout << std::hex << "Symbol for debug section "
+                               << std::string(Name)
+                               << ", symbol offset : " << functionStart
+                               << std::dec << ", symbol size : " << functionSize
+                               << std::endl);
 
-        symbols.emplace_back(
-            ElfSymbol{InstructionLocation{binary_path, (uint64_t)functionStart},
-                      std::string(Name), functionSize});
+          symbolGroups.back().emplace_back(ElfSymbol{
+              InstructionLocation{binary_path, (uint64_t)functionStart},
+              std::string(Name), functionSize});
+        }
       }
-    };
-  };
+    }
+  }
 
   static uint64_t preferedBasedAddress(const std::string &binary_path) {
     auto binary_file = openELFFile(binary_path);

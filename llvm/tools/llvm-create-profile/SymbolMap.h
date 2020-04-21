@@ -141,11 +141,13 @@ using ElfSymbol = SymbolLoader::ElfSymbol;
 // Maps function location to actual symbol. (Top level map).
 typedef map<InstructionLocation, Symbol *> LocationSymbolMap;
 // Maps symbol's start address to its name and size.
-typedef std::map<InstructionLocation, ElfSymbol> AddressSymbolMap;
+typedef std::map<InstructionLocation, ElfSymbol &> AddressSymbolMap;
 // Maps from symbol's name to its start address.
 typedef std::map<string, InstructionLocation> NameAddressMap;
 // Maps function name to alias names.
 typedef map<InstructionLocation, set<string>> NameAliasMap;
+// Maps function name to split ranges.
+typedef vector<vector<ElfSymbol>> SymbolGroups;
 
 // SymbolMap stores the symbols in the binary, and maintains
 // a map from symbol name to its related information.
@@ -191,13 +193,18 @@ public:
   // Adds an empty named symbol.
   void AddSymbol(const InstructionLocation &loc, const std::string &name);
 
+  // Rmoves a symbol starting at loc.
+  void RemoveSymbol(const InstructionLocation &loc);
+
+  // Finds a symbol starting at loc.
+  Symbol *FindSymbol(const InstructionLocation &loc) const;
+
   const LocationSymbolMap &map() const { return map_; }
 
   LocationSymbolMap &map() { return map_; }
 
-  // Merges symbols with suffixes like .isra, .part as a single symbol.
-  // TODO: Implement function profile merging
-  void Merge();
+  // Merges symbols with the same name.
+  void MergeSplitFunctions();
 
   // Increments symbol's entry count.
   void AddSymbolEntryCount(const InstructionLocation &symbol_location,
@@ -277,6 +284,7 @@ public:
 private:
   LocationSymbolMap map_;
   AddressSymbolMap address_symbol_map_;
+  SymbolGroups symbol_groups_;
   std::set<string> binaries_;
   double count_threshold_;
   bool use_discriminator_encoding_;
