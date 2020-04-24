@@ -27,6 +27,7 @@ public:
     InstructionLocation StartAddress;
     std::string Name;
     size_t Size;
+    uint32_t GroupId;
     Range range() const {
       InstructionLocation EndAddress = StartAddress;
       EndAddress.offset += Size;
@@ -69,9 +70,9 @@ public:
                            << ", section offset : " << std::dec << std::endl);
 
       symbolGroups.emplace_back(std::vector<ElfSymbol>());
-      symbolGroups.back().emplace_back(
-          ElfSymbol{InstructionLocation{binary_path, symbolVirtualAddress},
-                    name.get().str(), symb.getSize()});
+      symbolGroups.back().emplace_back(ElfSymbol{
+          InstructionLocation{binary_path, symbolVirtualAddress},
+          name.get().str(), symb.getSize(), (uint32_t)symbolGroups.size()});
     }
   }
 
@@ -157,7 +158,7 @@ public:
 
           symbolGroups.back().emplace_back(ElfSymbol{
               InstructionLocation{binary_path, (uint64_t)functionStart},
-              std::string(Name), functionSize});
+              std::string(Name), functionSize, (uint32_t)symbolGroups.size()});
         }
       }
     }

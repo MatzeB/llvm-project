@@ -164,6 +164,7 @@ void SymbolMap::MergeSplitFunctions() {
                              << group[masterIdx].StartAddress << " "
                              << group[i].StartAddress << std::endl);
 #endif
+        assert(profile->head_count == 0);
         masterProfile->Merge(profile);
         RemoveSymbol(group[i].StartAddress);
       } else {
@@ -192,6 +193,19 @@ Symbol *SymbolMap::FindSymbol(const InstructionLocation &loc) const {
 
 void SymbolMap::RemoveSymbol(const InstructionLocation &loc) {
   map_.erase(loc);
+}
+
+bool SymbolMap::IsCrossFunctionBranch(const Branch &branch) const {
+  auto iter = address_symbol_map_.find(branch.target);
+  // Skip local branches
+  if (iter == address_symbol_map_.end())
+    return false;
+  // It's guaranteed that the first entry in the group is always the orginal
+  // function entry (master) and other entires cannot be reached directly
+  // externally without going through the master entry.
+  auto TargetSym = &iter->second;
+  auto &Group = symbol_groups_[TargetSym->GroupId - 1];
+  return TargetSym == &Group[0];
 }
 
 void SymbolMap::CalculateThresholdFromTotalCount() {

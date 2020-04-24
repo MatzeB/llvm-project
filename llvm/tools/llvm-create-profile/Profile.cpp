@@ -123,6 +123,10 @@ void Profile::ComputeProfile(const RangeCountMap &range_map,
     LLVM_DEBUG(std::cout << "Found branch target" << std::hex
                          << branch_count.first << std::dec << std::endl);
 
+    // Skip branches between different ranges of a symbol
+    if (!symbol_map_.IsCrossFunctionBranch(branch))
+      continue;
+
     // If the target is a known function, add to its head_count
     symbol_map_.AddSymbolEntryCount(branch_count.first.target,
                                     branch_count.second);

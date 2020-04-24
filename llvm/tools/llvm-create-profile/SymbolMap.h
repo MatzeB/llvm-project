@@ -281,6 +281,10 @@ public:
   const  AddressSymbolMap& ElfSymbols() {
     return address_symbol_map_ ;
   }
+
+  // Validates if the branch is a cross-function branch.
+  bool IsCrossFunctionBranch(const Branch &branch) const;
+
 private:
   LocationSymbolMap map_;
   AddressSymbolMap address_symbol_map_;
