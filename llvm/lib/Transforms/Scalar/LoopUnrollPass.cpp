@@ -140,6 +140,12 @@ static cl::opt<unsigned> UnrollMaxUpperBound(
     cl::desc(
         "The max of trip count upper bound that is considered in unrolling"));
 
+// facebook begin T64625594
+static cl::opt<bool> UnrollUseUpperBound(
+    "unroll-use-upperbound", cl::Hidden,
+    cl::desc("Allow using trip count upper bound to unroll loops."));
+// facebook end
+
 static cl::opt<unsigned> PragmaUnrollThreshold(
     "pragma-unroll-threshold", cl::init(16 * 1024), cl::Hidden,
     cl::desc("Unrolled size limit for loops with an unroll(full) or "
@@ -247,6 +253,10 @@ TargetTransformInfo::UnrollingPreferences llvm::gatherUnrollingPreferences(
     UP.Runtime = UnrollRuntime;
   if (UnrollMaxUpperBound == 0)
     UP.UpperBound = false;
+  // facebook begin T64625594
+  if (UnrollUseUpperBound.getNumOccurrences() > 0)
+    UP.UpperBound = UnrollUseUpperBound;
+  // facebook end
   if (UnrollUnrollRemainder.getNumOccurrences() > 0)
     UP.UnrollRemainder = UnrollUnrollRemainder;
   if (UnrollMaxIterationsCountToAnalyze.getNumOccurrences() > 0)
