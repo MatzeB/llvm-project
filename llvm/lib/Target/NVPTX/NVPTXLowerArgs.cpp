@@ -25,6 +25,11 @@
 // param space restrictions, and gives us an opportunity to eliminate
 // the copy.
 //
+// facebook begin T64625594
+// nvptx-max-arg-size-to-lower can be used to set maximum size of
+// a byval struct to be copiped into local memory, if possible.
+// facebook end T64625594
+//
 // Pointer arguments to kernel functions need more work to be lowered:
 //
 // 1. Convert non-byval pointer arguments of CUDA kernels to pointers in the
@@ -100,10 +105,22 @@
 #include "llvm/Pass.h"
 #include <numeric>
 #include <queue>
+// facebook begin T64625594
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/Support/CommandLine.h"
+// facebook end
 
 #define DEBUG_TYPE "nvptx-lower-args"
 
 using namespace llvm;
+
+// facebook begin T64625594
+#define DEBUG_TYPE "nvptx-lower-pointer-args"
+
+static cl::opt<unsigned> NVPTXMaxArgSizeToLower(
+    "nvptx-max-arg-size-to-lower", cl::init(0), cl::Hidden,
+    cl::desc("Maximum size in bytes of a kernel argument to lower."));
+// facebook end
 
 namespace llvm {
 void initializeNVPTXLowerArgsPass(PassRegistry &);
@@ -123,6 +140,17 @@ class NVPTXLowerArgs : public FunctionPass {
   // NVPTXInferAddressSpaces to fold the global-to-generic cast into
   // loads/stores that appear later.
   void markPointerAsGlobal(Value *Ptr);
+
+  // facebook begin T64625594
+  // Returns a set of kernel arguments that are used in instructions that
+  // require a non-param address space.
+  void collectArgsWithNonParamUses(
+      Function &F, llvm::SmallDenseSet<Argument *> *ArgsInNonParamUse) const;
+
+  // Add addrspacecast to param and then back to generic.
+  // Expect InferAddressSpaces to fold the param-to-generic casts.
+  void markArgPointerAsParam(Argument *Arg);
+  // facebook end
 
 public:
   static char ID; // Pass identification, replacement for typeid
@@ -417,10 +445,83 @@ void NVPTXLowerArgs::markPointerAsGlobal(Value *Ptr) {
   PtrInGlobal->setOperand(0, Ptr);
 }
 
+// facebook begin T64625594
+void NVPTXLowerArgs::collectArgsWithNonParamUses(
+    Function &F, llvm::SmallDenseSet<Argument *> *ArgsInNonParamUse) const {
+  auto InsertIfArg = [&](Value *V) {
+    Value *U = getUnderlyingObject(V);
+    if (Argument *Arg = dyn_cast<Argument>(U)) {
+      ArgsInNonParamUse->insert(Arg);
+    }
+  };
+
+  for (auto &B : F) {
+    for (auto &I : B) {
+      switch (I.getOpcode()) {
+      default: {
+        assert(!I.mayWriteToMemory());
+        break;
+      }
+      case Instruction::Store: {
+        InsertIfArg(I.getOperand(1));
+        break;
+      }
+      case Instruction::Select: {
+        if (I.getType()->isPointerTy()) {
+          InsertIfArg(I.getOperand(1));
+          InsertIfArg(I.getOperand(2));
+        }
+        break;
+      }
+      case Instruction::PHI: {
+        if (I.getType()->isPointerTy()) {
+          const PHINode *PN = cast<PHINode>(&I);
+          for (Value *V : PN->incoming_values()) {
+            InsertIfArg(V);
+          }
+        }
+        break;
+      }
+      case Instruction::Call:
+      case Instruction::CallBr:
+      case Instruction::Invoke:
+        const CallBase *CB = cast<CallBase>(&I);
+        for (Value *V : CB->args()) {
+          InsertIfArg(V);
+        }
+        break;
+      }
+    }
+  }
+}
+
+void NVPTXLowerArgs::markArgPointerAsParam(Argument *Arg) {
+  if (Arg->getType()->getPointerAddressSpace() == ADDRESS_SPACE_PARAM)
+    return;
+
+  Instruction *FirstInst = &(Arg->getParent()->getEntryBlock().front());
+
+  Instruction *PtrInParam = new AddrSpaceCastInst(
+      Arg,
+      PointerType::get(Arg->getType()->getPointerElementType(),
+                       ADDRESS_SPACE_PARAM),
+      Arg->getName(), FirstInst);
+  Value *PtrInGeneric = new AddrSpaceCastInst(PtrInParam, Arg->getType(),
+                                              Arg->getName(), FirstInst);
+
+  // Replace with PtrInGeneric all uses of Arg except PtrInParam.
+  Arg->replaceAllUsesWith(PtrInGeneric);
+  PtrInParam->setOperand(0, Arg);
+}
+// facebook end
+
 // =============================================================================
 // Main function for this pass.
 // =============================================================================
 bool NVPTXLowerArgs::runOnKernelFunction(Function &F) {
+  // facebook begin T64625594
+  const DataLayout &DL = F.getParent()->getDataLayout();
+
   if (TM && TM->getDrvInterface() == NVPTX::CUDA) {
     // Mark pointers in byval structs as global.
     for (auto &B : F) {
@@ -441,14 +542,44 @@ bool NVPTXLowerArgs::runOnKernelFunction(Function &F) {
   }
 
   LLVM_DEBUG(dbgs() << "Lowering kernel args of " << F.getName() << "\n");
-  for (Argument &Arg : F.args()) {
-    if (Arg.getType()->isPointerTy()) {
-      if (Arg.hasByValAttr())
+  // InferAddressSpaces is enabled when getOptLevel() != None.
+  // Do not respect NVPTXMaxArgSizeToLower if getOptLevel() == None. Because we
+  // rely on InferAddressSpaces to clean up the illegal param to generic
+  // addspacecast that markArgPointerAsParam adds.
+  // Assuming that TM is nullptr when this runs via opt for tests.
+  if (NVPTXMaxArgSizeToLower > 0 &&
+      (!TM || TM->getOptLevel() != CodeGenOpt::None)) {
+    llvm::SmallDenseSet<Argument *> ArgsInNonParamUse;
+    collectArgsWithNonParamUses(F, &ArgsInNonParamUse);
+    for (Argument &Arg : F.args()) {
+      if (Arg.getType()->isPointerTy() && Arg.hasByValAttr()) {
+        auto ArgSize =
+            DL.getTypeStoreSize(Arg.getType()->getPointerElementType());
+
+        if (ArgSize < NVPTXMaxArgSizeToLower ||
+            ArgsInNonParamUse.count(&Arg) != 0)
+          handleByValParam(&Arg);
+        else
+          markArgPointerAsParam(&Arg);
+      }
+    }
+  } else {
+    for (Argument &Arg : F.args()) {
+      if (Arg.getType()->isPointerTy() && Arg.hasByValAttr()) {
         handleByValParam(&Arg);
-      else if (TM && TM->getDrvInterface() == NVPTX::CUDA)
-        markPointerAsGlobal(&Arg);
+      }
     }
   }
+
+  if (TM && TM->getDrvInterface() == NVPTX::CUDA) {
+    // Mark pointer non-byval Args as global.
+    for (Argument &Arg : F.args()) {
+      if (Arg.getType()->isPointerTy() && !Arg.hasByValAttr()) {
+        markPointerAsGlobal(&Arg);
+      }
+    }
+  }
+  // facebook end
   return true;
 }
 
