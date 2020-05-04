@@ -425,10 +425,14 @@ defm target2:
   Eq<"target2", "Interpret R_ARM_TARGET2 as <type>, where <type> is one of rel, abs, or got-rel">,
   MetaVarName<"<type>">;
 
-defm threads
-    : EEq<"threads",
-         "Number of threads. '1' disables multi-threading. By default all "
-         "available hardware threads are used">;
+// facebook begin T37628453
+// Separate '--threads=' from '--threads' for downwards compatibilty. 
+def threads
+   : J<"threads=">,
+        HelpText<"Number of threads. '1' disables multi-threading. By default all "
+              "available hardware threads are used">;
+def threads_dummy : F<"threads">, HelpText<"Ignored for compatibility with old linkers">;
+// facebook end T37628453
 
 def time_trace_eq: JJ<"time-trace=">, MetaVarName<"<file>">,
   HelpText<"Record time trace to <file>">;
