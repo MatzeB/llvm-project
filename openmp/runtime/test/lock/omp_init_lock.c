@@ -1,3 +1,6 @@
+// facebook begin T67092689
+// UNSUPPORTED: true
+// facebook end T67092689
 // RUN: %libomp-compile-and-run
 #include "omp_testsuite.h"
 #include <stdio.h>

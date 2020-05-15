@@ -1,3 +1,6 @@
+// facebook begin T67092689
+// UNSUPPORTED: true
+// facebook end T67092689
 // RUN: %libomp-compile-and-run
 #include <stdio.h>
 #include <stdlib.h>

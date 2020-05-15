@@ -1,3 +1,6 @@
+// facebook begin T67092689
+// UNSUPPORTED: true
+// facebook end T67092689
 // RUN: %libomp-compile
 // RUN: env KMP_DISP_NUM_BUFFERS=0 %libomp-run
 // RUN: env KMP_DISP_NUM_BUFFERS=1 %libomp-run

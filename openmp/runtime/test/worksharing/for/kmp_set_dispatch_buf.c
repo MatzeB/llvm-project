@@ -1,3 +1,6 @@
+// facebook begin T67092689
+// UNSUPPORTED: true
+// facebook end T67092689
 // RUN: %libomp-compile && %libomp-run 7
 // RUN: %libomp-run 0 && %libomp-run -1
 // RUN: %libomp-run 1 && %libomp-run 2 && %libomp-run 5
