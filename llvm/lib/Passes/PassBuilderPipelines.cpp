@@ -163,6 +163,16 @@ static cl::opt<bool>
                             cl::Hidden,
                             cl::desc("Enable inline deferral during PGO"));
 
+// facebook begin T64869484
+static cl::opt<bool> EnableCGSCCInline("enable-cgscc-inline", cl::init(true),
+                                       cl::Hidden,
+                                       cl::desc("Enable CGSCC Inlining"));
+
+static cl::opt<bool> EnblePreLTOSampleLoad(
+    "enable-prelto-sample-use", cl::init(true), cl::Hidden,
+    cl::desc("Enable Sample Loader pass for Pre-LTO pipeline"));
+// facebook end T64869484
+
 static cl::opt<bool> EnableModuleInliner("enable-module-inliner",
                                          cl::init(false), cl::Hidden,
                                          cl::desc("Enable module inliner"));
@@ -920,7 +930,8 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
 
   ModuleInlinerWrapperPass MIWP(IP, PerformMandatoryInliningsFirst,
                                 InlineContext{Phase, InlinePass::CGSCCInliner},
-                                UseInlineAdvisor, MaxDevirtIterations);
+                                UseInlineAdvisor, MaxDevirtIterations,
+                                !EnableCGSCCInline); // facebook T64869484
 
   // Require the GlobalsAA analysis for the module so we can query it within
   // the CGSCC pipeline.
@@ -1056,6 +1067,10 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   // no need to load the profile again in PostLink.
   bool LoadSampleProfile =
       HasSampleProfile &&
+      // facebook begin T64869484
+      !((Phase == ThinOrFullLTOPhase::FullLTOPreLink || Phase == ThinOrFullLTOPhase::ThinLTOPreLink) &&
+        !EnblePreLTOSampleLoad) &&
+      // facebook end T64869484
       !(FlattenedProfileUsed && Phase == ThinOrFullLTOPhase::ThinLTOPostLink);
 
   // During the ThinLTO backend phase we perform early indirect call promotion
@@ -1890,11 +1905,14 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
                                   UseInlineAdvisor,
                                   ThinOrFullLTOPhase::FullLTOPostLink));
   } else {
+    // facebook begin T64869484
     MPM.addPass(ModuleInlinerWrapperPass(
         getInlineParamsFromOptLevel(Level),
         /* MandatoryFirst */ true,
         InlineContext{ThinOrFullLTOPhase::FullLTOPostLink,
-                      InlinePass::CGSCCInliner}));
+                      InlinePass::CGSCCInliner},
+                      InliningAdvisorMode::Default, 0, !EnableCGSCCInline));
+    // facebook end T64869484
   }
 
   // Perform context disambiguation after inlining, since that would reduce the
