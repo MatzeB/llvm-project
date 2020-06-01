@@ -1011,7 +1011,10 @@ PreservedAnalyses InlinerPass::run(LazyCallGraph::SCC &InitialC,
 ModuleInlinerWrapperPass::ModuleInlinerWrapperPass(InlineParams Params,
                                                    bool MandatoryFirst,
                                                    InliningAdvisorMode Mode,
-                                                   unsigned MaxDevirtIterations)
+                                                   unsigned MaxDevirtIterations,
+                                                   // facebook begin T64869484
+                                                   bool skipInline)
+                                                   // facebook end T64869484
     : Params(Params), Mode(Mode), MaxDevirtIterations(MaxDevirtIterations),
       PM(), MPM() {
   // Run the inliner first. The theory is that we are walking bottom-up and so
@@ -1021,7 +1024,8 @@ ModuleInlinerWrapperPass::ModuleInlinerWrapperPass(InlineParams Params,
   // because it makes profile annotation in the backend inaccurate.
   if (MandatoryFirst)
     PM.addPass(InlinerPass(/*OnlyMandatory*/ true));
-  PM.addPass(InlinerPass());
+  if (!skipInline) // facebook T64869484
+    PM.addPass(InlinerPass());
 }
 
 PreservedAnalyses ModuleInlinerWrapperPass::run(Module &M,

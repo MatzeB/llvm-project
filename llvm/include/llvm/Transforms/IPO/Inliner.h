@@ -121,7 +121,8 @@ public:
   ModuleInlinerWrapperPass(
       InlineParams Params = getInlineParams(), bool MandatoryFirst = true,
       InliningAdvisorMode Mode = InliningAdvisorMode::Default,
-      unsigned MaxDevirtIterations = 0);
+      unsigned MaxDevirtIterations = 0,
+      bool skipInline = false); // facebook T64869484
   ModuleInlinerWrapperPass(ModuleInlinerWrapperPass &&Arg) = default;
 
   PreservedAnalyses run(Module &, ModuleAnalysisManager &);

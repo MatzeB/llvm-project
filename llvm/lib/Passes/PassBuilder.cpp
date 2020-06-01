@@ -264,6 +264,15 @@ static cl::opt<bool>
     EnablePGOInlineDeferral("enable-npm-pgo-inline-deferral", cl::init(true),
                             cl::Hidden,
                             cl::desc("Enable inline deferral during PGO"));
+// facebook begin T64869484
+static cl::opt<bool> EnableCGSCCInline("enable-cgscc-inline", cl::init(true),
+                                       cl::Hidden,
+                                       cl::desc("Enable CGSCC Inlining"));
+
+static cl::opt<bool> EnblePreLTOSampleLoad(
+    "enable-prelto-sample-use", cl::init(true), cl::Hidden,
+    cl::desc("Enable Sample Loader pass for Pre-LTO pipeline"));
+// facebook end T64869484
 
 static cl::opt<bool> EnableMemProfiler("enable-mem-prof", cl::init(false),
                                        cl::Hidden, cl::ZeroOrMore,
@@ -990,8 +999,11 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
   if (PGOOpt)
     IP.EnableDeferral = EnablePGOInlineDeferral;
 
-  ModuleInlinerWrapperPass MIWP(IP, PerformMandatoryInliningsFirst,
-                                UseInlineAdvisor, MaxDevirtIterations);
+  // facebook begin T64869484
+  ModuleInlinerWrapperPass MIWP(
+      IP, PerformMandatoryInliningsFirst, UseInlineAdvisor,
+      MaxDevirtIterations, !EnableCGSCCInline);
+  // facebook end T64869484
 
   // Require the GlobalsAA analysis for the module so we can query it within
   // the CGSCC pipeline.
@@ -1063,6 +1075,10 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   // no need to load the profile again in PostLink.
   bool LoadSampleProfile =
       HasSampleProfile &&
+      // facebook begin T64869484
+      !((Phase == ThinOrFullLTOPhase::FullLTOPreLink || Phase == ThinOrFullLTOPhase::ThinLTOPreLink) &&
+        !EnblePreLTOSampleLoad) &&
+      // facebook end T64869484
       !(FlattenedProfileUsed && Phase == ThinOrFullLTOPhase::ThinLTOPostLink);
 
   // During the ThinLTO backend phase we perform early indirect call promotion
@@ -1788,7 +1804,11 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
   // valuable as the inliner doesn't currently care whether it is inlining an
   // invoke or a call.
   // Run the inliner now.
-  MPM.addPass(ModuleInlinerWrapperPass(getInlineParamsFromOptLevel(Level)));
+  // facebook begin T64869484
+  MPM.addPass(ModuleInlinerWrapperPass(
+      getInlineParamsFromOptLevel(Level), true,
+      InliningAdvisorMode::Default, 0, !EnableCGSCCInline));
+  // facebook end T64869484
 
   // Optimize globals again after we ran the inliner.
   MPM.addPass(GlobalOptPass());
