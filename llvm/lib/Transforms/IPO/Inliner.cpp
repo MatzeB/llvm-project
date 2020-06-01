@@ -583,7 +583,10 @@ ModuleInlinerWrapperPass::ModuleInlinerWrapperPass(InlineParams Params,
                                                    bool MandatoryFirst,
                                                    InlineContext IC,
                                                    InliningAdvisorMode Mode,
-                                                   unsigned MaxDevirtIterations)
+                                                   unsigned MaxDevirtIterations,
+                                                   // facebook begin T64869484
+                                                   bool skipInline)
+                                                   // facebook end T64869484
     : Params(Params), IC(IC), Mode(Mode),
       MaxDevirtIterations(MaxDevirtIterations) {
   // Run the inliner first. The theory is that we are walking bottom-up and so
@@ -596,9 +599,11 @@ ModuleInlinerWrapperPass::ModuleInlinerWrapperPass(InlineParams Params,
     if (EnablePostSCCAdvisorPrinting)
       PM.addPass(InlineAdvisorAnalysisPrinterPass(dbgs()));
   }
-  PM.addPass(InlinerPass());
-  if (EnablePostSCCAdvisorPrinting)
-    PM.addPass(InlineAdvisorAnalysisPrinterPass(dbgs()));
+  if (!skipInline) { // facebook T64869484
+    PM.addPass(InlinerPass());
+    if (EnablePostSCCAdvisorPrinting)
+      PM.addPass(InlineAdvisorAnalysisPrinterPass(dbgs()));
+  }
 }
 
 PreservedAnalyses ModuleInlinerWrapperPass::run(Module &M,
