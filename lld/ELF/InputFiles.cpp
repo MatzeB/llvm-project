@@ -405,12 +405,14 @@ template <class ELFT> ArrayRef<Symbol *> ObjFile<ELFT>::getGlobalSymbols() {
   return makeArrayRef(this->symbols).slice(this->firstGlobal);
 }
 
-template <class ELFT> void ObjFile<ELFT>::parse(bool ignoreComdats) {
+// facebook begin T66645141
+template <class ELFT> void ObjFile<ELFT>::parse(bool isLTOOutput) {
+  // facebook end T66645141
   // Read a section table. justSymbols is usually false.
   if (this->justSymbols)
     initializeJustSymbols();
   else
-    initializeSections(ignoreComdats);
+    initializeSections(isLTOOutput); // facebook T66645141
 
   // Read a symbol table.
   initializeSymbols();
@@ -560,8 +562,9 @@ static void handleSectionGroup(ArrayRef<InputSectionBase *> sections,
     prev->nextInSectionGroup = head;
 }
 
-template <class ELFT>
-void ObjFile<ELFT>::initializeSections(bool ignoreComdats) {
+// facebook begin T66645141
+template <class ELFT> void ObjFile<ELFT>::initializeSections(bool isLTOOutput) {
+  // facebook end T66645141
   const ELFFile<ELFT> &obj = this->getObj();
 
   ArrayRef<Elf_Shdr> objSections = CHECK(obj.sections(), this);
@@ -618,10 +621,18 @@ void ObjFile<ELFT>::initializeSections(bool ignoreComdats) {
       if (flag && flag != GRP_COMDAT)
         fatal(toString(this) + ": unsupported SHT_GROUP format");
 
+      // facebook begin T66645141,T92808916
+      // If this is an lto output file, ignore already processed comdat groups.
+      // Else, check all comdat groups.
       bool keepGroup =
-          (flag & GRP_COMDAT) == 0 || ignoreComdats ||
-          symtab->comdatGroups.try_emplace(CachedHashStringRef(signature), this)
-              .second;
+          (flag & GRP_COMDAT) == 0 ||
+          (isLTOOutput ? symtab->ltoOutputComdatGroups
+                             .try_emplace(CachedHashStringRef(signature), this)
+                             .second
+                       : symtab->comdatGroups
+                             .try_emplace(CachedHashStringRef(signature), this)
+                             .second);
+      // facebook end T66645141,T92808916
       if (keepGroup) {
         if (config->relocatable)
           this->sections[i] = createInputSection(sec);

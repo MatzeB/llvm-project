@@ -205,7 +205,7 @@ public:
     this->archiveName = std::string(archiveName);
   }
 
-  void parse(bool ignoreComdats = false);
+  void parse(bool isLTOOutput = false); // facebook T66645141
 
   StringRef getShtGroupSignature(ArrayRef<Elf_Shdr> sections,
                                  const Elf_Shdr &sec);
@@ -256,7 +256,7 @@ public:
   DWARFCache *getDwarf();
 
 private:
-  void initializeSections(bool ignoreComdats);
+  void initializeSections(bool isLTOOutput); // facebook T66645141
   void initializeSymbols();
   void initializeJustSymbols();
 

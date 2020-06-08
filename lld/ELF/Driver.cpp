@@ -2086,7 +2086,7 @@ template <class ELFT> void LinkerDriver::compileBitcodeFiles() {
 
   for (InputFile *file : lto->compile()) {
     auto *obj = cast<ObjFile<ELFT>>(file);
-    obj->parse(/*ignoreComdats=*/true);
+    obj->parse(/*isLTOOutput=*/true);
 
     // Parse '@' in symbol names for non-relocatable output.
     if (!config->relocatable)
