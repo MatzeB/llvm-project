@@ -59,6 +59,14 @@ public:
   // is used to uniquify them.
   llvm::DenseMap<llvm::CachedHashStringRef, const InputFile *> comdatGroups;
 
+  // facebook begin T66645141
+  // We link twice in thinlto.  Define a separate map of comdat groups for
+  // bitcode files to make sure the symbols are distinct fromt the ones found
+  // in object files
+  llvm::DenseMap<llvm::CachedHashStringRef, const InputFile *>
+      ltoOutputComdatGroups;
+  // facebook end T66645141
+
 private:
   SmallVector<Symbol *, 0> findByVersion(SymbolVersion ver);
   SmallVector<Symbol *, 0> findAllByVersion(SymbolVersion ver,

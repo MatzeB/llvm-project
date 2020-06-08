@@ -550,8 +550,14 @@ static std::string maybeReportDiscarded(Undefined &sym) {
 
   // If the discarded section is a COMDAT.
   StringRef signature = file->getShtGroupSignature(objSections, elfSec);
-  if (const InputFile *prevailing =
-          symtab->comdatGroups.lookup(CachedHashStringRef(signature))) {
+  // facebook begin T66645141
+  const InputFile *prevailing =
+      symtab->comdatGroups.lookup(CachedHashStringRef(signature));
+  if (!prevailing)
+    prevailing =
+        symtab->ltoOutputComdatGroups.lookup(CachedHashStringRef(signature));
+  if (prevailing) {
+    // facebook end T66645141
     msg += "\n>>> section group signature: " + signature.str() +
            "\n>>> prevailing definition is in " + toString(prevailing);
     if (sym.nonPrevailing) {
