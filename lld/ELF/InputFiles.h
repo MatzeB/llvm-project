@@ -236,7 +236,7 @@ public:
     this->archiveName = archiveName;
   }
 
-  void parse(bool ignoreComdats = false);
+  void parse(bool isLTOOutput = false); // facebook T66645141
   void parseLazy();
 
   StringRef getShtGroupSignature(ArrayRef<Elf_Shdr> sections,
@@ -292,7 +292,7 @@ public:
   void redirectCmseSymbols();
 
 private:
-  void initializeSections(bool ignoreComdats,
+  void initializeSections(bool isLTOOutput, // facebook T66645141
                           const llvm::object::ELFFile<ELFT> &obj);
   void initializeSymbols(const llvm::object::ELFFile<ELFT> &obj);
   void initializeJustSymbols();
