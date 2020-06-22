@@ -239,6 +239,12 @@ static cl::opt<bool> AllowRecursiveInline(
     cl::init(false),
     cl::desc("Allow sample loader inliner to inline recursive calls."));
 
+// facebook begin T64869484
+static cl::opt<bool> EnableSampleProfileInline(
+    "enable-sample-profile-inline", cl::Hidden, cl::init(true),
+    cl::desc("Enable Inlining from sample profile loader."));
+// facebook end T64869484
+
 static cl::opt<std::string> ProfileInlineReplayFile(
     "sample-profile-inline-replay", cl::init(""), cl::value_desc("filename"),
     cl::desc(
