@@ -1,0 +1,26 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density=true --profile %S/Inputs/samples1.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=DENSITY1  --match-full-lines --strict-whitespace
+; DENSITY1:AutoFDO is estimated to optimize better with 393.0x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; DENSITY1:Minimum profile density for hot functions with top 99.0% total samples: 2.5
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density=true --hot-function-density-threshold=0.1 --profile %S/Inputs/samples2.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=DENSITY2  --match-full-lines --strict-whitespace
+; DENSITY2-NOT:AutoFDO is estimated to optimize better with 2561.9x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; DENSITY2:Minimum profile density for hot functions with top 99.0% total samples: 0.4
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --profile %S/Inputs/samples3.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=DENSITY3  --match-full-lines --strict-whitespace
+; DENSITY3:AutoFDO is estimated to optimize better with 782.7x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; DENSITY3-NOT:Minimum profile density for hot functions with top 99.0% total samples: 1.3
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --hot-function-density-threshold=0.5 --profile %S/Inputs/samples4.txt --profiler text --format text --binary %S/Inputs/find --out %t2 &> %t3
+; RUN: count 0 < %t3
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density=true --hot-function-cutoff=0 --profile %S/Inputs/samples5.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=DENSITY5  --match-full-lines --strict-whitespace
+; DENSITY5:The --hot-function-cutoff option may be set too low. Please check your command.
+; DENSITY5:Minimum profile density for hot functions with top 0.0% total samples: 0.0
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density=true --hot-function-density-threshold=100 --profile %S/Inputs/samples7.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=DENSITY7  --match-full-lines --strict-whitespace
+; DENSITY7:AutoFDO is estimated to optimize better with 202.5x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; DENSITY7:Minimum profile density for hot functions with top 99.0% total samples: 0.5
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density=true --hot-function-cutoff=50 --profile %S/Inputs/samples8.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=DENSITY8  --match-full-lines --strict-whitespace
+; DENSITY8:AutoFDO is estimated to optimize better with 813.4x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; DENSITY8:Minimum profile density for hot functions with top 50.0% total samples: 1.2

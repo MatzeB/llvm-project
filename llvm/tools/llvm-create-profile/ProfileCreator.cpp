@@ -15,6 +15,7 @@
 // Create AutoFDO Profile.
 // facebook T26943842
 
+#include <float.h>
 #include <memory>
 
 #include "InstructionSymbolizer.h"
@@ -23,6 +24,11 @@
 #include "ProfileWriter.h"
 #include "SampleReader.h"
 #include "SymbolMap.h"
+#include "llvm/Support/raw_os_ostream.h"
+
+extern llvm::cl::opt<double> HotFunctionCutoff;
+extern llvm::cl::opt<double> HotFunctionDensityThreshold;
+extern llvm::cl::opt<bool> ShowDensity;
 
 namespace autofdo {
 using namespace std;
@@ -35,6 +41,85 @@ cl::opt<bool> AddEmptyRanges ("fill-missing-addresses-with-zero",
 cl::opt<bool> AddEmptyBinary ("fill-missing-binaries-with-zero",
                               cl::desc("When a binary doesn't have sample hits, attributes to all address in it a count of zero"),
                               cl::init(false));
+
+// FuncStatMap loads function statistics such as total samples and function
+// sizes from a SymbolMap object into maps for fast retrieval. A FuncStatMap
+// object must be initialized with a SymbolMap object and initialized after
+// SymbolMap::MergeSplitFunctions() is called.
+struct FuncStatMap {
+  // Map of function name and their total samples in descending order of total
+  // samples.
+  std::multimap<uint64_t, std::string, std::greater<uint64_t>>
+      FunctionTotalSampleMap;
+  // Map of function name to the function size in bytes.
+  StringMap<size_t> FunctionSizeMap;
+  // Sum of total samples of all functions in the profile.
+  uint64_t ProfileTotalSample;
+
+  FuncStatMap() = delete;
+
+  // Load function size and total samples from SymbMap to
+  // FunctionTotalSampleMap and FunctionSizeMap. Also calculate
+  // ProfileTotalSample as the total samples of the profile.
+  FuncStatMap(const SymbolMap &SymbMap);
+};
+
+FuncStatMap::FuncStatMap(const SymbolMap &SymbMap) {
+  ProfileTotalSample = 0;
+  for (const auto &G : SymbMap.getSymbolGroups()) {
+    for (const auto &S : G) {
+      Symbol *SymbProfile = SymbMap.FindSymbol(S.StartAddress);
+      if (SymbProfile && !FunctionSizeMap.count(S.Name)) {
+        FunctionTotalSampleMap.emplace(SymbProfile->total_count, S.Name);
+        FunctionSizeMap.try_emplace(StringRef(S.Name), S.MergedSize);
+        ProfileTotalSample += SymbProfile->total_count;
+      }
+    }
+  }
+}
+
+static double calculateDensity(const FuncStatMap &FuncStat) {
+  assert(FuncStat.ProfileTotalSample > 0 && "The profile should not be empty");
+  // Profile density of functions will be computed until the total samples of
+  // functions processed accumulate to TotalSampleThreshold.
+  uint64_t TotalSampleThreshold =
+      std::ceil(HotFunctionCutoff / 100 * FuncStat.ProfileTotalSample);
+  if (TotalSampleThreshold == 0)
+    return 0.0;
+
+  uint64_t AccumulatedSample = 0;
+  double Density = DBL_MAX;
+  for (const auto &FuncSample : FuncStat.FunctionTotalSampleMap) {
+    if (AccumulatedSample >= TotalSampleThreshold)
+      break;
+
+    assert(FuncStat.FunctionSizeMap.count(FuncSample.second) &&
+           "Size of functions in FuncStat.FunctionTotalSampleMap should "
+           "have been loaded in FuncStat.FunctionSizeMap");
+    size_t FuncSize = FuncStat.FunctionSizeMap.lookup(FuncSample.second);
+    assert(FuncSize > 0 && "Function size should not be zero");
+    Density =
+        std::min(Density, static_cast<double>(FuncSample.first) / FuncSize);
+    AccumulatedSample += FuncSample.first;
+  }
+  return Density;
+}
+
+static void printDensitySuggestion(double Density, raw_os_ostream &OS) {
+  if (Density == 0.0)
+    OS << "The --hot-function-cutoff option may be set too low. Please "
+          "check your command.\n";
+  else if (Density < HotFunctionDensityThreshold)
+    OS << "AutoFDO is estimated to optimize better with "
+       << format("%.1f", HotFunctionDensityThreshold / Density)
+       << "x more samples. Please consider increasing sampling rate or "
+          "profiling for longer duration to get more samples.\n";
+
+  if (ShowDensity)
+    OS << "Minimum profile density for hot functions with top "
+       << format("%.1f", HotFunctionCutoff.getValue())
+       << "% total samples: " << format("%.1f", Density) << "\n";
+}
 
 bool ProfileCreator::CreateProfile(const string &input_profile_name,
                                    const string &profiler,
@@ -115,6 +200,16 @@ bool ProfileCreator::CreateProfileFromSample(ProfileWriter *writer,
   symbol_map.set_use_discriminator_encoding(use_discriminator_encoding_);
   if (!ComputeProfile(symbol_map))
     return false;
+
+  FuncStatMap FuncStat(symbol_map);
+  if (FuncStat.ProfileTotalSample != 0) {
+    double Density = calculateHotFunctionStatAndDensity(FuncStat);
+    raw_os_ostream OS(std::cout);
+    printDensitySuggestion(Density, OS);
+  } else {
+    llvm::errs() << "This profile is empty. Please check your input for "
+                    "hotness and density analysis.\n";
+  }
 
   writer->setSymbolMap(&symbol_map);
   bool ret = writer->WriteToFile(output_name);

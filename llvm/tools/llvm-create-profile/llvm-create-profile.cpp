@@ -53,6 +53,20 @@ llvm::cl::opt<double>
                        llvm::cl::desc("stop after the <n>  events"),
                        llvm::cl::Optional);
 
+llvm::cl::opt<double> HotFunctionCutoff(
+    "hot-function-cutoff", llvm::cl::init(99),
+    llvm::cl::desc("specify hot functions to be functions whose total "
+                   "samples are within top <n> percent (default: 99)"),
+    llvm::cl::Optional);
+llvm::cl::opt<double> HotFunctionDensityThreshold(
+    "hot-function-density-threshold", llvm::cl::init(1000),
+    llvm::cl::desc(
+        "specify density threshold for hot functions (default: 1000)"),
+    llvm::cl::Optional);
+llvm::cl::opt<bool> ShowDensity("show-density", llvm::cl::init(false),
+                                llvm::cl::desc("show profile density details"),
+                                llvm::cl::Optional);
+
 #define PROG_USAGE                                                             \
   "\nConverts a sample profile collected with Perf "                           \
   "(https://perf.wiki.kernel.org/)\n"                                          \

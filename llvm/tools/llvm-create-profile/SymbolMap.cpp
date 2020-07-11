@@ -144,34 +144,36 @@ void Symbol::Merge(const Symbol *other) {
 }
 
 void SymbolMap::MergeSplitFunctions() {
-  for (const auto &group : symbol_groups_) {
+  for (auto &group : symbol_groups_) {
     if (group.size() <= 1)
       continue;
     // Merge all ranges into the master range which is the first range seen to
     // have a non-null profile.
-#ifndef NDEBUG
-    int masterIdx = 0;
-#endif
+    uint64_t MasterIdx = 0;
+    // Keep the sum of sizes of all ranges.
+    uint64_t SizeSum = group[0].Size;
     auto masterProfile = FindSymbol(group[0].StartAddress);
     for (unsigned i = 1; i < group.size(); i++) {
+      SizeSum += group[i].Size;
       auto profile = FindSymbol(group[i].StartAddress);
       if (!profile)
         continue;
       if (masterProfile) {
-#ifndef NDEBUG
-        assert(group[i].Name == group[masterIdx].Name);
+        assert(group[i].Name == group[MasterIdx].Name);
         LLVM_DEBUG(std::cout << " Merging Profile : " << group[i].Name << " "
-                             << group[masterIdx].StartAddress << " "
+                             << group[MasterIdx].StartAddress << " "
                              << group[i].StartAddress << std::endl);
-#endif
         assert(profile->head_count == 0);
         masterProfile->Merge(profile);
         RemoveSymbol(group[i].StartAddress);
       } else {
         masterProfile = profile;
-        LLVM_DEBUG(masterIdx = i);
+        MasterIdx = i;
       }
     }
+    // Update the merged size of the master range to be the total size of all
+    // ranges.
+    group[MasterIdx].MergedSize = SizeSum;
   }
 }
 

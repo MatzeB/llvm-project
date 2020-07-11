@@ -203,6 +203,8 @@ public:
 
   LocationSymbolMap &map() { return map_; }
 
+  const SymbolGroups &getSymbolGroups() const { return symbol_groups_; }
+
   // Merges symbols with the same name.
   void MergeSplitFunctions();
 
