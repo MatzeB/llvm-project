@@ -9,6 +9,9 @@
 ; RUN: llvm-mc %t1 -filetype=obj -o %t3
 ; RUN: llvm-objdump --section-headers  %t3 | FileCheck %s --check-prefix=CHECK-OBJ
 
+; RUN: opt < %s -passes=pseudo-probe -pseudo-probe-encode-cfg=1 -S -o %t4
+; RUN: llc %t4 -pseudo-probe-for-profiling -filetype=asm -o - | FileCheck %s --check-prefix=CHECK-CFG
+
 ;; Check the generation of pseudoprobe intrinsic call.
 
 @a = dso_local global i32 0, align 4
@@ -90,6 +93,28 @@ entry:
 
 ; CHECK-OBJ-COUNT-2: .pseudo_probe_desc
 ; CHECK-OBJ-COUNT-2: .pseudo_probe
+
+; Check the generation of .pseudo_probe_desc section with CFG encoding.
+; CHECK-CFG: .section	.pseudo_probe_desc,"",@progbits
+; CHECK-CFG-NEXT: .quad [[#GUID:]]
+; CHECK-CFG-NEXT: .quad [[#HASH:]]
+; CHECK-CFG-NEXT: .byte  3
+; CHECK-CFG-NEXT: .ascii	"foo"
+; CHECK-CFG-NEXT: .byte 4
+; CHECK-CFG-NEXT: .byte 2
+; CHECK-CFG-NEXT: .byte 2
+; CHECK-CFG-NEXT: .byte 3
+; CHECK-CFG-NEXT: .byte 1
+; CHECK-CFG-NEXT: .byte 4
+; CHECK-CFG-NEXT: .byte 1
+; CHECK-CFG-NEXT: .byte 4
+; CHECK-CFG-NEXT: .byte 0
+; CHECK-CFG-NEXT: .quad [[#GUID2:]]
+; CHECK-CFG-NEXT: .quad [[#HASH2:]]
+; CHECK-CFG-NEXT: .byte 4
+; CHECK-CFG-NEXT: .ascii	"foo2"
+; CHECK-CFG-NEXT: .byte 1
+; CHECK-CFG-NEXT: .byte 0
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!9, !10}
