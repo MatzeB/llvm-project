@@ -334,13 +334,29 @@ MDNode *MDBuilder::createIrrLoopHeaderWeight(uint64_t Weight) {
   };
   return MDNode::get(Context, Vals);
 }
-
-MDNode *MDBuilder::createPseudoProbeDesc(uint64_t GUID, uint64_t Hash,
-                                         Function *F) {
+// facebook begin T62536913
+MDNode *
+MDBuilder::createPseudoProbeDesc(uint64_t GUID, uint64_t Hash, Function *F,
+                                 ArrayRef<SmallVector<uint32_t, 2>> Edges) {
+  auto *Int32Ty = Type::getInt32Ty(Context);
   auto *Int64Ty = Type::getInt64Ty(Context);
-  SmallVector<Metadata *, 3> Ops(3);
+  SmallVector<Metadata *, 4> Ops(4);
+
   Ops[0] = createConstant(ConstantInt::get(Int64Ty, GUID));
   Ops[1] = createConstant(ConstantInt::get(Int64Ty, Hash));
   Ops[2] = createString(F->getName());
+
+  if (Edges.size()) {
+    SmallVector<Metadata *, 4> CfgOps(Edges.size());
+    for (unsigned I = 0; I < Edges.size(); ++I) {
+      SmallVector<Metadata *, 2> EdgeMD(Edges[I].size());
+      for (unsigned J = 0; J < Edges[I].size(); ++J)
+        EdgeMD[J] = createConstant(ConstantInt::get(Int32Ty, Edges[I][J]));
+      CfgOps[I] = MDNode::get(Context, EdgeMD);
+    }
+
+    Ops[3] = MDNode::get(Context, CfgOps);
+  }
+
   return MDNode::get(Context, Ops);
 }

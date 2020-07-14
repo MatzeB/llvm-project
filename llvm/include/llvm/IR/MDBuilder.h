@@ -77,8 +77,10 @@ public:
   /// Return metadata containing the section prefix for a function.
   MDNode *createFunctionSectionPrefix(StringRef Prefix);
 
-  /// Return metadata containing the pseudo probe descriptor for a function.
-  MDNode *createPseudoProbeDesc(uint64_t GUID, uint64_t Hash, Function *F);
+  // facebook begin T64580802
+  MDNode *createPseudoProbeDesc(uint64_t GUID, uint64_t Hash, Function *F,
+                                ArrayRef<SmallVector<uint32_t, 2>> Edges);
+  // facebook end T64580802
 
   //===------------------------------------------------------------------===//
   // Range metadata.

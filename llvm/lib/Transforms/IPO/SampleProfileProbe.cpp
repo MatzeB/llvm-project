@@ -38,6 +38,10 @@ STATISTIC(ArtificialDbgLine,
           "Number of probes that have an artificial debug line");
 
 static cl::opt<bool>
+    PseudoProbeEncodeCFG("pseudo-probe-encode-cfg", cl::init(false), cl::Hidden,
+                         cl::desc("Encode CFG into the pseudo probe metadata"));
+                         
+static cl::opt<bool>
     VerifyPseudoProbe("verify-pseudo-probe", cl::init(false), cl::Hidden,
                       cl::desc("Do pseudo probe verification"));
 
@@ -367,8 +371,24 @@ void SampleProfileProber::instrumentOneFunc(Function &F, TargetMachine *TM) {
   // - FunctionGUID
   // - FunctionHash.
   // - FunctionName
+  // - FunctionCFG (optional)
+
+  std::vector<SmallVector<uint32_t, 2>> Edges;
+  if (PseudoProbeEncodeCFG) {
+    // Encode CFG in the form of outgoing edges for each block.
+    assert(BlockProbeIds.size());
+    Edges.resize(BlockProbeIds.size());
+    uint32_t EntryProbeId = (uint32_t)PseudoProbeReservedId::Last + 1;
+    for (auto &I : BlockProbeIds) {
+      auto BB = I.first;
+      auto Index = I.second - EntryProbeId;
+      for (succ_iterator SI = succ_begin(BB), SE = succ_end(BB); SI != SE; ++SI)
+        Edges[Index].push_back(BlockProbeIds[*SI]);
+    }
+  }
+
   auto Hash = getFunctionHash();
-  auto *MD = MDB.createPseudoProbeDesc(Guid, Hash, &F);
+  auto *MD = MDB.createPseudoProbeDesc(Guid, Hash, &F, Edges);
   auto *NMD = M->getNamedMetadata(PseudoProbeDescMetadataName);
   assert(NMD && "llvm.pseudo_probe_desc should be pre-created");
   NMD->addOperand(MD);

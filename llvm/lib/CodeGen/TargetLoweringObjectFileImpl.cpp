@@ -355,6 +355,25 @@ void TargetLoweringObjectFileELF::emitModuleMetadata(MCStreamer &Streamer,
       Streamer.emitInt64(Hash->getZExtValue());
       Streamer.emitULEB128IntValue(Name->getString().size());
       Streamer.emitBytes(Name->getString());
+
+      // Encode CFG in form of outgoing edges for each block.
+      if (MD->getOperand(3)) {
+        auto CfgMD = cast<MDNode>(MD->getOperand(3));
+        // Encode number of blocks.
+        Streamer.emitULEB128IntValue(CfgMD->getNumOperands());
+        // Encode each block.
+        for (unsigned I = 0; I < CfgMD->getNumOperands(); ++I) {
+          auto *Edges = cast<MDNode>((CfgMD->getOperand(I)));
+          // Encode number of outgoing edges.
+          Streamer.emitULEB128IntValue(Edges->getNumOperands());
+          // Encode each outgoing edge.
+          for (unsigned J = 0; J < Edges->getNumOperands(); ++J) {
+            auto ProbeId =
+                mdconst::dyn_extract<ConstantInt>(Edges->getOperand(J));
+            Streamer.emitULEB128IntValue(ProbeId->getZExtValue());
+          }
+        }
+      }
     }
   }
 
