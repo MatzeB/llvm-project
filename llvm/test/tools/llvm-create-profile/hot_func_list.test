@@ -1,0 +1,60 @@
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density --list-hot-functions --profile %S/Inputs/samples10.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=CHECK1  --match-full-lines --strict-whitespace
+; CHECK1:AutoFDO is estimated to optimize better with 2404.91x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; CHECK1:Minimum profile density for hot functions with top 99.00% total samples: 0.42
+; CHECK1:5 out of 485 functions (1.03%) are considered hot functions.
+; CHECK1:1863 out of 1863 samples (100.00%) are from hot functions.
+; CHECK1:Total sample (%)    Entry sample   Function Size    Sample density   Function Name
+; CHECK1:793 (42.57%)        0              645              1.23             hash_insert_if_absent
+; CHECK1:382 (20.50%)        0              299              1.28             find_parser
+; CHECK1:322 (17.28%)        0              81               3.98             hash_insert
+; CHECK1:203 (10.90%)        0              411              0.49             parse_group
+; CHECK1:163 (8.75%)         0              392              0.42             sharefile_fopen
+
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --list-hot-functions --profile %S/Inputs/samples10.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=CHECK2  --match-full-lines --strict-whitespace
+; CHECK2:AutoFDO is estimated to optimize better with 2404.91x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; CHECK2:5 out of 485 functions (1.03%) are considered hot functions.
+; CHECK2:1863 out of 1863 samples (100.00%) are from hot functions.
+; CHECK2:Total sample (%)    Entry sample   Function Size     Function Name
+; CHECK2:793 (42.57%)        0              645               hash_insert_if_absent
+; CHECK2:382 (20.50%)        0              299               find_parser
+; CHECK2:322 (17.28%)        0              81                hash_insert
+; CHECK2:203 (10.90%)        0              411               parse_group
+; CHECK2:163 (8.75%)         0              392               sharefile_fopen
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density --list-hot-functions --hot-function-cutoff=70 --profile %S/Inputs/samples10.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=CHECK3  --match-full-lines --strict-whitespace
+; CHECK3:AutoFDO is estimated to optimize better with 813.37x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; CHECK3:Minimum profile density for hot functions with top 70.00% total samples: 1.23
+; CHECK3:3 out of 485 functions (0.62%) are considered hot functions.
+; CHECK3:1497 out of 1863 samples (80.35%) are from hot functions.
+; CHECK3:Total sample (%)    Entry sample   Function Size    Sample density   Function Name
+; CHECK3:793 (42.57%)        0              645              1.23             hash_insert_if_absent
+; CHECK3:382 (20.50%)        0              299              1.28             find_parser
+; CHECK3:322 (17.28%)        0              81               3.98             hash_insert
+
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density --list-hot-functions --hot-function-cutoff=0 --profile %S/Inputs/samples10.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=CHECK4  --match-full-lines --strict-whitespace
+; CHECK4:--hot-function-cutoff needs to be within (0, 100]. User specified value is ignored and default value 99.00 is used.
+; CHECK4:AutoFDO is estimated to optimize better with 2404.91x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; CHECK4:Minimum profile density for hot functions with top 99.00% total samples: 0.42
+; CHECK4:5 out of 485 functions (1.03%) are considered hot functions.
+; CHECK4:1863 out of 1863 samples (100.00%) are from hot functions.
+; CHECK4:Total sample (%)    Entry sample   Function Size    Sample density   Function Name
+; CHECK4:793 (42.57%)        0              645              1.23             hash_insert_if_absent
+; CHECK4:382 (20.50%)        0              299              1.28             find_parser
+; CHECK4:322 (17.28%)        0              81               3.98             hash_insert
+; CHECK4:203 (10.90%)        0              411              0.49             parse_group
+; CHECK4:163 (8.75%)         0              392              0.42             sharefile_fopen
+
+; RUN: llvm-create-profile --sample_threshold_frac=0 --show-density --list-hot-functions --hot-function-cutoff=101 --profile %S/Inputs/samples10.txt --profiler text --format text --binary %S/Inputs/find --out %t2 | FileCheck %s --check-prefix=CHECK5  --match-full-lines --strict-whitespace
+; CHECK5:--hot-function-cutoff needs to be within (0, 100]. User specified value is ignored and default value 99.00 is used.
+; CHECK5:AutoFDO is estimated to optimize better with 2404.91x more samples. Please consider increasing sampling rate or profiling for longer duration to get more samples.
+; CHECK5:Minimum profile density for hot functions with top 99.00% total samples: 0.42
+; CHECK5:5 out of 485 functions (1.03%) are considered hot functions.
+; CHECK5:1863 out of 1863 samples (100.00%) are from hot functions.
+; CHECK5:Total sample (%)    Entry sample   Function Size    Sample density   Function Name
+; CHECK5:793 (42.57%)        0              645              1.23             hash_insert_if_absent
+; CHECK5:382 (20.50%)        0              299              1.28             find_parser
+; CHECK5:322 (17.28%)        0              81               3.98             hash_insert
+; CHECK5:203 (10.90%)        0              411              0.49             parse_group
+; CHECK5:163 (8.75%)         0              392              0.42             sharefile_fopen

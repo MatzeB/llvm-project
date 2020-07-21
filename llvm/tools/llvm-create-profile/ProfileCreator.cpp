@@ -24,11 +24,15 @@
 #include "ProfileWriter.h"
 #include "SampleReader.h"
 #include "SymbolMap.h"
+#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/raw_os_ostream.h"
 
 extern llvm::cl::opt<double> HotFunctionCutoff;
 extern llvm::cl::opt<double> HotFunctionDensityThreshold;
 extern llvm::cl::opt<bool> ShowDensity;
+extern llvm::cl::opt<bool> ListHotFunction;
+extern const double DefaultHotFunctionCutoff;
+extern const double DefaultHotFunctionDensityThreshold;
 
 namespace autofdo {
 using namespace std;
@@ -42,6 +46,22 @@ cl::opt<bool> AddEmptyBinary ("fill-missing-binaries-with-zero",
                               cl::desc("When a binary doesn't have sample hits, attributes to all address in it a count of zero"),
                               cl::init(false));
 
+struct FuncInfo {
+  size_t FuncSize;
+  uint64_t TotalSample;
+  uint64_t EntrySample;
+  double FuncDensity;
+  bool IsHot;
+
+  FuncInfo()
+      : FuncSize(0), TotalSample(0), EntrySample(0), FuncDensity(0.0),
+        IsHot(false) {}
+
+  FuncInfo(size_t FuncSize, uint64_t TotalSample, uint64_t EntrySample)
+      : FuncSize(FuncSize), TotalSample(TotalSample), EntrySample(EntrySample),
+        FuncDensity(0.0), IsHot(false) {}
+};
+
 // FuncStatMap loads function statistics such as total samples and function
 // sizes from a SymbolMap object into maps for fast retrieval. A FuncStatMap
 // object must be initialized with a SymbolMap object and initialized after
@@ -52,73 +72,188 @@ struct FuncStatMap {
   std::multimap<uint64_t, std::string, std::greater<uint64_t>>
       FunctionTotalSampleMap;
   // Map of function name to the function size in bytes.
-  StringMap<size_t> FunctionSizeMap;
+  StringMap<FuncInfo> FunctionInfoMap;
   // Sum of total samples of all functions in the profile.
   uint64_t ProfileTotalSample;
+  // Sum of total samples of all hot functions in the profile.
+  uint64_t HotFuncTotalSample;
+  // Number of hot functions.
+  uint64_t HotFuncCount;
 
   FuncStatMap() = delete;
 
   // Load function size and total samples from SymbMap to
-  // FunctionTotalSampleMap and FunctionSizeMap. Also calculate
-  // ProfileTotalSample as the total samples of the profile.
+  // FunctionTotalSampleMap and FunctionInfoMap. It also calculates
+  // ProfileTotalSample as the total samples of the profile. Note that
+  // HotFuncTotalSample and HotFuncCount are initialize to 0 after construction
+  // and need additional computation.
   FuncStatMap(const SymbolMap &SymbMap);
 };
 
 FuncStatMap::FuncStatMap(const SymbolMap &SymbMap) {
   ProfileTotalSample = 0;
+  HotFuncTotalSample = 0;
+  HotFuncCount = 0;
   for (const auto &G : SymbMap.getSymbolGroups()) {
     for (const auto &S : G) {
       Symbol *SymbProfile = SymbMap.FindSymbol(S.StartAddress);
-      if (SymbProfile && !FunctionSizeMap.count(S.Name)) {
+      if (SymbProfile && !FunctionInfoMap.count(S.Name)) {
         FunctionTotalSampleMap.emplace(SymbProfile->total_count, S.Name);
-        FunctionSizeMap.try_emplace(StringRef(S.Name), S.MergedSize);
+        FunctionInfoMap.try_emplace(StringRef(S.Name),
+                                    FuncInfo(S.MergedSize, SymbProfile->total_count,
+                                             SymbProfile->head_count));
         ProfileTotalSample += SymbProfile->total_count;
       }
     }
   }
 }
 
-static double calculateDensity(const FuncStatMap &FuncStat) {
-  assert(FuncStat.ProfileTotalSample > 0 && "The profile should not be empty");
+// This function calculates function densities of hot functions specified by
+// HotFunctionCutoff. For hot functions, the FuncInfo::FuncDensity field in
+// FuncStat.FunctionInfoMap is updated with the computed density and the
+// FuncInfo::IsHot field is marked true after the call. This function also
+// calculates FuncStat.HotFuncTotalSample and FuncStat.HotFuncCount.
+static double calculateHotFunctionStatAndDensity(FuncStatMap &FuncStat) {
   // Profile density of functions will be computed until the total samples of
   // functions processed accumulate to TotalSampleThreshold.
   uint64_t TotalSampleThreshold =
       std::ceil(HotFunctionCutoff / 100 * FuncStat.ProfileTotalSample);
-  if (TotalSampleThreshold == 0)
-    return 0.0;
+  assert(TotalSampleThreshold > 0 &&
+         "TotalSampleThreshold should be positive because HotFunctionCutoff "
+         "and FuncStat.ProfileTotalSample should both be positive");
 
-  uint64_t AccumulatedSample = 0;
-  double Density = DBL_MAX;
+  double ProfileDensity = DBL_MAX;
   for (const auto &FuncSample : FuncStat.FunctionTotalSampleMap) {
-    if (AccumulatedSample >= TotalSampleThreshold)
+    if (FuncStat.HotFuncTotalSample >= TotalSampleThreshold)
       break;
 
-    assert(FuncStat.FunctionSizeMap.count(FuncSample.second) &&
-           "Size of functions in FuncStat.FunctionTotalSampleMap should "
-           "have been loaded in FuncStat.FunctionSizeMap");
-    size_t FuncSize = FuncStat.FunctionSizeMap.lookup(FuncSample.second);
+    assert(FuncStat.FunctionInfoMap.count(FuncSample.second) &&
+           "Information of functions in FuncStat.FunctionTotalSampleMap should "
+           "have been loaded in FuncStat.FunctionInfoMap");
+    size_t FuncSize = FuncStat.FunctionInfoMap[FuncSample.second].FuncSize;
     assert(FuncSize > 0 && "Function size should not be zero");
-    Density =
-        std::min(Density, static_cast<double>(FuncSample.first) / FuncSize);
-    AccumulatedSample += FuncSample.first;
+    double FuncDensity = static_cast<double>(FuncSample.first) / FuncSize;
+    FuncStat.FunctionInfoMap[FuncSample.second].FuncDensity = FuncDensity;
+    ProfileDensity = std::min(ProfileDensity, FuncDensity);
+
+    FuncStat.FunctionInfoMap[FuncSample.second].IsHot = true;
+    ++FuncStat.HotFuncCount;
+    FuncStat.HotFuncTotalSample += FuncSample.first;
   }
-  return Density;
+  return ProfileDensity;
 }
 
+// This function should be called after calculateHotFunctionStatAndDensity() so
+// that the profile density is already known.
 static void printDensitySuggestion(double Density, raw_os_ostream &OS) {
-  if (Density == 0.0)
-    OS << "The --hot-function-cutoff option may be set too low. Please "
-          "check your command.\n";
-  else if (Density < HotFunctionDensityThreshold)
+  assert(Density > 0.0 &&
+         "Profile density should be non-zero because all hot functions should "
+         "have non-zero total samples and thus non-zero densities");
+  assert(HotFunctionDensityThreshold > 0.0 &&
+         "Zero and negative density threshold should be ignored and replaced "
+         "with default value");
+
+  if (Density < HotFunctionDensityThreshold)
     OS << "AutoFDO is estimated to optimize better with "
-       << format("%.1f", HotFunctionDensityThreshold / Density)
+       << format("%.2f", HotFunctionDensityThreshold / Density)
        << "x more samples. Please consider increasing sampling rate or "
           "profiling for longer duration to get more samples.\n";
 
   if (ShowDensity)
     OS << "Minimum profile density for hot functions with top "
-       << format("%.1f", HotFunctionCutoff.getValue())
-       << "% total samples: " << format("%.1f", Density) << "\n";
+       << format("%.2f", HotFunctionCutoff.getValue())
+       << "% total samples: " << format("%.2f", Density) << "\n";
+}
+
+// This function should be called after calculateHotFunctionStatAndDensity() so
+// that statistics such as function densities, the number of hot functions, and
+// their total samples are already known.
+static void printHotFunctionList(FuncStatMap &FuncStat, raw_os_ostream &OS) {
+  assert(FuncStat.HotFuncCount > 0 &&
+         "There should be at least one hot function because HotFunctionCutoff "
+         "should be non-zero");
+  assert(FuncStat.ProfileTotalSample > 0 && "The profile should not be empty");
+  double HotFuncCountPercent = static_cast<double>(FuncStat.HotFuncCount) /
+                               FuncStat.FunctionInfoMap.size() * 100;
+  double HotFuncSamplePercent =
+      static_cast<double>(FuncStat.HotFuncTotalSample) /
+      FuncStat.ProfileTotalSample * 100;
+
+  formatted_raw_ostream FOS(OS);
+  FOS << FuncStat.HotFuncCount << " out of " << FuncStat.FunctionInfoMap.size()
+      << " functions (" << format("%.2f%%", HotFuncCountPercent)
+      << ") are considered hot functions.\n";
+  FOS << FuncStat.HotFuncTotalSample << " out of "
+      << FuncStat.ProfileTotalSample << " samples ("
+      << format("%.2f%%", HotFuncSamplePercent)
+      << ") are from hot functions.\n";
+
+  // Width taken by each column.
+  const int TotalSampleWidth = 20;
+  const int EntrySampleWidth = 15;
+  const int FuncSizeWidth = 17;
+  const int DensityWidth = 17;
+  // Keeps the current column offset from beginning of a line.
+  int ColumnOffset = 0;
+
+  FOS << "Total sample (%)";
+  ColumnOffset += TotalSampleWidth;
+
+  FOS.PadToColumn(ColumnOffset);
+  FOS << "Entry sample";
+  ColumnOffset += EntrySampleWidth;
+
+  FOS.PadToColumn(ColumnOffset);
+  FOS << "Function Size";
+  ColumnOffset += FuncSizeWidth;
+
+  FOS.PadToColumn(ColumnOffset);
+  if (ShowDensity) {
+    FOS << "Sample density";
+    ColumnOffset += DensityWidth;
+  }
+
+  FOS.PadToColumn(ColumnOffset);
+  FOS << "Function Name\n";
+
+  for (const auto &FuncSample : FuncStat.FunctionTotalSampleMap) {
+    assert(FuncStat.FunctionInfoMap.count(FuncSample.second) &&
+           "Information of functions in FuncStat.FunctionTotalSampleMap should "
+           "have been loaded in FuncStat.FunctionInfoMap");
+    const auto &Func = FuncStat.FunctionInfoMap[FuncSample.second];
+    // The IsHot field is initialized to false and marked true only for hot
+    // functions in calculateHotFunctionStatAndDensity(). Because
+    // FuncStat.FunctionTotalSampleMap is sorted in descending order of total
+    // samples, once we see a cold function, we know all functions after it are
+    // also cold.
+    if (!Func.IsHot)
+      break;
+
+    ColumnOffset = 0;
+    double FuncSamplePercent = static_cast<double>(FuncSample.first) /
+                               FuncStat.ProfileTotalSample * 100;
+    FOS << FuncSample.first << format(" (%.2f%%)", FuncSamplePercent);
+    ColumnOffset += TotalSampleWidth;
+
+    FOS.PadToColumn(ColumnOffset);
+    FOS << Func.EntrySample;
+    ColumnOffset += EntrySampleWidth;
+
+    FOS.PadToColumn(ColumnOffset);
+    FOS << Func.FuncSize;
+    ColumnOffset += FuncSizeWidth;
+
+    FOS.PadToColumn(ColumnOffset);
+    if (ShowDensity) {
+      assert(Func.FuncDensity > 0.0 &&
+             "Sample density of hot functions should be non-zero");
+      FOS << format("%.2f", Func.FuncDensity);
+      ColumnOffset += DensityWidth;
+    }
+
+    FOS.PadToColumn(ColumnOffset);
+    FOS << FuncSample.second << "\n";
+  }
 }
 
 bool ProfileCreator::CreateProfile(const string &input_profile_name,
@@ -203,9 +338,24 @@ bool ProfileCreator::CreateProfileFromSample(ProfileWriter *writer,
 
   FuncStatMap FuncStat(symbol_map);
   if (FuncStat.ProfileTotalSample != 0) {
-    double Density = calculateHotFunctionStatAndDensity(FuncStat);
     raw_os_ostream OS(std::cout);
+    if (HotFunctionCutoff <= 0 || HotFunctionCutoff > 100) {
+      OS << "--hot-function-cutoff needs to be within (0, 100]. User specified "
+            "value is ignored and default value "
+         << format("%.2f", DefaultHotFunctionCutoff) << " is used.\n";
+      HotFunctionCutoff = DefaultHotFunctionCutoff;
+    }
+    if (HotFunctionDensityThreshold <= 0) {
+      OS << "--hot-function-density-threshold needs to be positive. User "
+            "specified value is ignored and default value "
+         << format("%.2f", DefaultHotFunctionDensityThreshold) << " is used.\n";
+      HotFunctionDensityThreshold = DefaultHotFunctionDensityThreshold;
+    }
+
+    double Density = calculateHotFunctionStatAndDensity(FuncStat);
     printDensitySuggestion(Density, OS);
+    if (ListHotFunction)
+      printHotFunctionList(FuncStat, OS);
   } else {
     llvm::errs() << "This profile is empty. Please check your input for "
                     "hotness and density analysis.\n";
