@@ -607,8 +607,10 @@ private:
 
   void addRequiredLTOPreLinkPasses(ModulePassManager &MPM);
 
+  // facebook begin T69760777
   void addVectorPasses(OptimizationLevel Level, FunctionPassManager &FPM,
-                       bool IsFullLTO);
+                       bool IsFullLTO, bool LTOPreLink);
+  // facebook end T69760777
 
   static std::optional<std::vector<PipelineElement>>
   parsePipelineText(StringRef Text);
