@@ -277,6 +277,20 @@ static cl::opt<bool> EnblePreLTOSampleLoad(
 static cl::opt<bool> EnableMemProfiler("enable-mem-prof", cl::init(false),
                                        cl::Hidden, cl::ZeroOrMore,
                                        cl::desc("Enable memory profiler"));
+// facebook begin T69760777
+static cl::opt<bool> EnablePreLTOLoopUnroll(
+    "enable-prelto-loop-unroll", cl::init(true), cl::Hidden,
+    cl::desc("Disable loop unroll for LTO pre-link pipeline, works for both "
+             "thinLTO and LTO"));
+static cl::opt<bool> EnableLTOAggressiveLoopPasses(
+    "enable-lto-agressive-loop-opts", cl::init(false), cl::Hidden,
+    cl::desc("Enable loop optimizations including unroll and "
+             "vectorization for LTO post-link pipeline, only "
+             "works with fullLTO"));
+static cl::opt<bool> EnableLoopRotate("enable-loop-rotate", cl::init(true),
+                                      cl::Hidden,
+                                      cl::desc("Disable loop rotate"));
+// facebook end T69760777
 
 static cl::opt<bool> PerformMandatoryInliningsFirst(
     "mandatory-inlining-first", cl::init(true), cl::Hidden, cl::ZeroOrMore,
@@ -770,10 +784,12 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   // TODO: Investigate promotion cap for O1.
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap));
 
+  // facebook begin T69760777
   // Disable header duplication in loop rotation at -Oz.
-  LPM1.addPass(
-      LoopRotatePass(Level != OptimizationLevel::Oz, isLTOPreLink(Phase)));
+  LPM1.addPass(LoopRotatePass(
+      EnableLoopRotate && Level != OptimizationLevel::Oz, isLTOPreLink(Phase)));
   // TODO: Investigate promotion cap for O1.
+  // facebook end T69760777
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap));
   LPM1.addPass(
       SimpleLoopUnswitchPass(/* NonTrivial */ Level == OptimizationLevel::O3 &&
@@ -1228,8 +1244,10 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
 }
 
 /// TODO: Should LTO cause any differences to this set of passes?
+// facebook begin T69760777
 void PassBuilder::addVectorPasses(OptimizationLevel Level,
-                                  FunctionPassManager &FPM, bool IsFullLTO) {
+                                  FunctionPassManager &FPM, bool IsFullLTO, bool LTOPreLink) {
+// facebook end T69760777
   FPM.addPass(LoopVectorizePass(
       LoopVectorizeOptions(!PTO.LoopInterleaving, !PTO.LoopVectorization)));
 
@@ -1317,19 +1335,29 @@ void PassBuilder::addVectorPasses(OptimizationLevel Level,
   if (!IsFullLTO) {
     FPM.addPass(InstCombinePass());
     // Unroll small loops to hide loop backedge latency and saturate any
+    // facebook begin T69760777
+    // Enable unrolling in PreLink LTO phase under the switch
+    // EnablePreLTOLoopUnroll for LTO preLink pipeline. Turning it off could
+    // benefit sample PGO because it changes IR to makes profile annotation in
+    // back compile inaccurate.
+    bool DoLoopUnrolling =
+      (!LTOPreLink || EnablePreLTOLoopUnroll) && PTO.LoopUnrolling;
+    // The vectorizer may have significantly shortened a loop body; unroll
+    // again. Unroll small loops to hide loop backedge latency and saturate any
     // parallel execution resources of an out-of-order processor. We also then
     // need to clean up redundancies and loop invariant code.
     // FIXME: It would be really good to use a loop-integrated instruction
     // combiner for cleanup here so that the unrolling and LICM can be pipelined
     // across the loop nests.
     // We do UnrollAndJam in a separate LPM to ensure it happens before unroll
-    if (EnableUnrollAndJam && PTO.LoopUnrolling) {
+    if (EnableUnrollAndJam && DoLoopUnrolling) {
       FPM.addPass(createFunctionToLoopPassAdaptor(
           LoopUnrollAndJamPass(Level.getSpeedupLevel())));
     }
     FPM.addPass(LoopUnrollPass(LoopUnrollOptions(
-        Level.getSpeedupLevel(), /*OnlyWhenForced=*/!PTO.LoopUnrolling,
+        Level.getSpeedupLevel(), /*OnlyWhenForced=*/!DoLoopUnrolling,
         PTO.ForgetAllSCEVInLoopUnroll)));
+    // facebook end T69760777
     FPM.addPass(WarnMissedTransformationsPass());
     FPM.addPass(InstCombinePass());
     FPM.addPass(
@@ -1424,11 +1452,15 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   for (auto &C : VectorizerStartEPCallbacks)
     C(OptimizePM, Level);
 
+  // facebook begin T69760777
   // First rotate loops that may have been un-rotated by prior passes.
   // Disable header duplication at -Oz.
   OptimizePM.addPass(createFunctionToLoopPassAdaptor(
-      LoopRotatePass(Level != OptimizationLevel::Oz, LTOPreLink),
-      /*UseMemorySSA=*/false, /*UseBlockFrequencyInfo=*/false));
+      LoopRotatePass(Level != OptimizationLevel::Oz && EnableLoopRotate,
+                     LTOPreLink),
+      /*UseMemorySSA=*/false,
+      /*UseBlockFrequencyInfo=*/false));
+  // facebook end T69760777
 
   // Distribute loops to allow partial vectorization.  I.e. isolate dependences
   // into separate loop that would otherwise inhibit vectorization.  This is
@@ -1440,7 +1472,7 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
   // from the TargetLibraryInfo.
   OptimizePM.addPass(InjectTLIMappings());
 
-  addVectorPasses(Level, OptimizePM, /* IsFullLTO */ false);
+  addVectorPasses(Level, OptimizePM, /* IsFullLTO */ false, /* LTOPreLink */ LTOPreLink);
 
   // Split out cold code. Splitting is done late to avoid hiding context from
   // other optimizations and inadvertently regressing performance. The tradeoff
@@ -1840,6 +1872,71 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
                         PGOOpt->ProfileRemappingFile);
   }
 
+  // facebook begin T69760777
+  // Enable LTO-time loop passes under EnableLTOAggressiveLoopPasses.
+  // Ideally we want to shift loop passes from preLTO to LTO, just like
+  // ThinLTO pipeline. The flag enables loop passes like vectorizer and
+  // unrolling. Note that in order for LTO-time vectorizer to be effective
+  // preLTO loop unrolling also need to be turned off.
+  if (EnableLTOAggressiveLoopPasses) {
+    // First rotate loops that may have been un-rotated by prior passes.
+    FPM.addPass(createFunctionToLoopPassAdaptor(
+        LoopRotatePass(), /*UseMemorySSA=*/false));
+
+    // Distribute loops to allow partial vectorization.  I.e. isolate
+    // dependences into separate loop that would otherwise inhibit
+    // vectorization.  This is currently only performed for loops marked with
+    // the metadata llvm.loop.distribute=true or when -enable-loop-distribute is
+    // specified.
+    FPM.addPass(LoopDistributePass());
+
+    // Populates the VFABI attribute with the scalar-to-vector mappings
+    // from the TargetLibraryInfo.
+    FPM.addPass(InjectTLIMappings());
+
+    // Now run the core loop vectorizer.
+    FPM.addPass(LoopVectorizePass(
+        LoopVectorizeOptions(!PTO.LoopInterleaving, !PTO.LoopVectorization)));
+
+    // Eliminate loads by forwarding stores from the previous iteration to loads
+    // of the current iteration.
+    FPM.addPass(LoopLoadEliminationPass());
+
+    // Cleanup after the loop optimization passes.
+    FPM.addPass(InstCombinePass());
+
+    // Now that we've formed fast to execute loop structures, we do further
+    // optimizations. These are run afterward as they might block doing complex
+    // analyses and transforms such as what are needed for loop vectorization.
+
+    // Cleanup after loop vectorization, etc. Simplification passes like CVP and
+    // GVN, loop transforms, and others have already run, so it's now better to
+    // convert to more optimized IR using more aggressive simplify CFG options.
+    // The extra sinking transform can create larger basic blocks, so do this
+    // before SLP vectorization.
+    FPM.addPass(SimplifyCFGPass(SimplifyCFGOptions()
+                                    .forwardSwitchCondToPhi(true)
+                                    .convertSwitchToLookupTable(true)
+                                    .needCanonicalLoops(false)
+                                    .sinkCommonInsts(true)));
+
+    // Optimize parallel scalar instruction chains into SIMD instructions.
+    if (PTO.SLPVectorization)
+      FPM.addPass(SLPVectorizerPass());
+
+    // Enhance/cleanup vector code.
+    FPM.addPass(VectorCombinePass());
+    FPM.addPass(InstCombinePass());
+
+    if (EnableUnrollAndJam && PTO.LoopUnrolling)
+      FPM.addPass(createFunctionToLoopPassAdaptor(
+        LoopUnrollAndJamPass(Level.getSpeedupLevel())));
+    FPM.addPass(LoopUnrollPass(LoopUnrollOptions(
+        Level.getSpeedupLevel(), /*OnlyWhenForced=*/!PTO.LoopUnrolling,
+        PTO.ForgetAllSCEVInLoopUnroll)));
+  }
+  // facebook end T69760777
+
   // Break up allocas
   FPM.addPass(SROA());
 
@@ -1901,7 +1998,7 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
 
   MainFPM.addPass(LoopDistributePass());
 
-  addVectorPasses(Level, MainFPM, /* IsFullLTO */ true);
+  addVectorPasses(Level, MainFPM, /* IsFullLTO */ true, /* LTOPreLink */ false);
 
   invokePeepholeEPCallbacks(MainFPM, Level);
   MainFPM.addPass(JumpThreadingPass(/*InsertFreezeWhenUnfoldingSelect*/ true));
