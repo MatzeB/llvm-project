@@ -1,0 +1,26 @@
+;; facebook T69412785
+; RUN: llvm-profdata merge --sample --gen-flattened-profile --text %S/Inputs/sample-flatten-profile.proftext -o - | FileCheck %s  --match-full-lines --strict-whitespace
+; RUN: llvm-profdata merge --sample --binary %S/Inputs/sample-flatten-profile.proftext -o %t1 && llvm-profdata merge --sample --gen-flattened-profile --text %t1 -o - | FileCheck %s  --match-full-lines --strict-whitespace
+; RUN: llvm-profdata merge --sample --extbinary %S/Inputs/sample-flatten-profile.proftext -o %t2 && llvm-profdata merge --sample --gen-flattened-profile --text %t2 -o - | FileCheck %s  --match-full-lines --strict-whitespace
+; CHECK:main:180019:0
+; CHECK-NEXT: 4: 534
+; CHECK-NEXT: 4.2: 534
+; CHECK-NEXT: 5: 1075
+; CHECK-NEXT: 5.1: 1075
+; CHECK-NEXT: 6: 2080
+; CHECK-NEXT: 7: 534
+; CHECK-NEXT: 9: 2064 _Z3bari:1471 _Z3fooi:631
+; CHECK-NEXT:_Z3bari:21001:1437
+; CHECK-NEXT: 1: 1937
+; CHECK-NEXT: 2: 0
+; CHECK-NEXT:_Z3bazi:19201:1000
+; CHECK-NEXT: 1: 1500
+; CHECK-NEXT: 3: 2000
+; CHECK-NEXT:_Z3fooi:8211:610
+; CHECK-NEXT: 1: 1060
+; CHECK-NEXT: 3: 1000
+; CHECK-NEXT: 5: 2000
+; CHECK-NEXT:inline2:2400:0
+; CHECK-NEXT: 1: 1600
+; CHECK-NEXT:inline1:1500:0
+; CHECK-NEXT: 1: 1000
