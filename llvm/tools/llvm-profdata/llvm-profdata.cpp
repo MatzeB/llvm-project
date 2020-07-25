@@ -852,13 +852,112 @@ static void handleExtBinaryWriter(sampleprof::SampleProfileWriter &Writer,
   }
 }
 
+// facebook begin T69412785
+/// Insert a new FunctionSamples object that has the same function name and
+/// GUIDToFuncNameMap fields with FuncProf into FuncProfMap, and return a
+/// pointer to this new slot.
+static sampleprof::FunctionSamples *
+insertNewFuncProfile(const sampleprof::FunctionSamples &FuncProf,
+                     SampleProfileMap &FuncProfMap) {
+  using namespace sampleprof;
+
+  FunctionSamples FuncSample;
+  FuncSample.setName(FuncProf.getName());
+  FuncSample.GUIDToFuncNameMap = FuncProf.GUIDToFuncNameMap;
+  SampleContext &Context = FuncProf.getContext();
+  auto Ret = FuncProfMap.emplace(Context, std::move(FuncSample));
+  return &(Ret.first->second);
+}
+
+/// Move samples inside FuncProf to the corresponding top-level function
+/// profiles in ProfileMap. If the corresponding top-level function does not
+/// exist in ProfileMap, create a new function profile in AdditionalProf to be
+/// merged into ProfileMap later. Note that we do not remove inlinees from
+/// FuncProf in this function because flattenProfile() will remove all inlinees
+/// in top-level functions.
+static void
+flattenFunctionProfile(const sampleprof::FunctionSamples &FuncProf,
+                                   SampleProfileMap &ProfileMap,
+                                   SampleProfileMap &AdditionalProf) {
+  using namespace sampleprof;
+
+  uint64_t CalleeTotalSample = 0;
+  for (const auto &Callsite : FuncProf.getCallsiteSamples()) {
+    for (const auto &Callee : Callsite.second) {
+      CalleeTotalSample += Callee.second.getTotalSamples();
+      flattenFunctionProfile(Callee.second, ProfileMap, AdditionalProf);
+    }
+  }
+
+  // Find the corresponding top-level function profile in ProfileMap or create a
+  // new function profile in AdditionalProf.
+  FunctionSamples *TopLevelFunction = nullptr;
+  SampleContext &Context = FuncProf.getContext();
+  auto TargetIter = ProfileMap.find(Context);
+  if (TargetIter != ProfileMap.end()) {
+    TopLevelFunction = &(TargetIter->second);
+  } else {
+    TargetIter = AdditionalProf.find(Context);
+    if (TargetIter != AdditionalProf.end())
+      TopLevelFunction = &(TargetIter->second);
+    else
+      TopLevelFunction = insertNewFuncProfile(FuncProf, AdditionalProf);
+  }
+  assert(TopLevelFunction != nullptr && "TopLevelFunction should point to a "
+                                        "slot in ProfileMap or AdditionalProf");
+
+  for (const auto &Line : FuncProf.getBodySamples())
+    TopLevelFunction->addBodySamples(Line.first.LineOffset,
+                                     Line.first.Discriminator,
+                                     Line.second.getSamples());
+
+  TopLevelFunction->addHeadSamples(FuncProf.getHeadSamples());
+  TopLevelFunction->addTotalSamples(FuncProf.getTotalSamples() -
+                                    CalleeTotalSample);
+}
+
+static void flattenProfile(SampleProfileMap &ProfileMap) {
+  using namespace sampleprof;
+
+  // Hold additional top-level function profiles to add during profile
+  // flattening.
+  SampleProfileMap AdditionalProf;
+  for (auto &Func : ProfileMap) {
+    uint64_t CalleeTotalSample = 0;
+    for (const auto &Callsite : Func.second.getCallsiteSamples()) {
+      for (const auto &Callee : Callsite.second) {
+        CalleeTotalSample += Callee.second.getTotalSamples();
+        flattenFunctionProfile(Callee.second, ProfileMap, AdditionalProf);
+      }
+    }
+
+    // Clean up callsites and update total samples. Note that by clearing the
+    // callsite map of a top-level function profile here, we actually remove all
+    // inlinees in this top-level function recursively.
+    Func.second.setTotalSamples(Func.second.getTotalSamples() -
+                                CalleeTotalSample);
+    auto &CallsiteMap =
+        const_cast<CallsiteSampleMap &>(Func.second.getCallsiteSamples());
+    CallsiteMap.clear();
+  }
+
+  for (auto &Func : AdditionalProf) {
+    assert(!ProfileMap.count(Func.first) &&
+           "Functions in AdditionalProf should not exist in ProfileMap");
+    ProfileMap.emplace(Func.first, std::move(Func.second));
+  }
+}
+// facebook end T69412785
+
+// facebook begin T69412785
 static void
 mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
                    StringRef OutputFilename, ProfileFormat OutputFormat,
                    StringRef ProfileSymbolListFile, bool CompressAllSections,
                    bool UseMD5, bool GenPartialProfile, bool GenCSNestedProfile,
-                   bool SampleMergeColdContext, bool SampleTrimColdContext,
-                   bool SampleColdContextFrameDepth, FailureMode FailMode) {
+                   bool GenFlattenedProfile, bool SampleMergeColdContext,
+                   bool SampleTrimColdContext, bool SampleColdContextFrameDepth,
+                   FailureMode FailMode) {
   using namespace sampleprof;
   SampleProfileMap ProfileMap;
   SmallVector<std::unique_ptr<sampleprof::SampleProfileReader>, 5> Readers;
@@ -910,6 +1009,11 @@ mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
                                FContext.toString());
       }
     }
+
+    // facebook begin T69412785
+    if (GenFlattenedProfile)
+      flattenProfile(ProfileMap);
+    // facebook end T69412785
 
     std::unique_ptr<sampleprof::ProfileSymbolList> ReaderList =
         Reader->getProfileSymbolList();
@@ -1127,6 +1231,12 @@ static int merge_main(int argc, const char *argv[]) {
       "profiled-binary", cl::init(""),
       cl::desc("Path to binary from which the profile was collected."));
 
+  // facebook begin T69412785
+  cl::opt<bool> GenFlattenedProfile(
+      "gen-flattened-profile", cl::init(false),
+      cl::desc("Generate a profile with nested inlinees flattened out"));
+  // facebook end T69412785
+
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data merger\n");
 
   WeightedFileVector WeightedInputs;
@@ -1170,11 +1280,13 @@ static int merge_main(int argc, const char *argv[]) {
                       OutputFilename, OutputFormat, OutputSparse, NumThreads,
                       FailureMode, ProfiledBinary);
   else
+    // facebook begin T69412785
     mergeSampleProfile(WeightedInputs, Remapper.get(), OutputFilename,
                        OutputFormat, ProfileSymbolListFile, CompressAllSections,
                        UseMD5, GenPartialProfile, GenCSNestedProfile,
-                       SampleMergeColdContext, SampleTrimColdContext,
-                       SampleColdContextFrameDepth, FailureMode);
+                       GenFlattenedProfile, SampleMergeColdContext,
+                       SampleTrimColdContext, SampleColdContextFrameDepth,
+                       FailureMode);
   return 0;
 }
 
