@@ -369,6 +369,14 @@ defm relax: BB<"relax",
   "Enable target-specific relaxations if supported (default)",
   "Disable target-specific relaxations">;
 
+// facebook begin T71528069
+defm reorder_sections_by_relocation_addend_threshold
+    : Eq<"reorder-sections-by-relocation-addend-threshold",
+         "Absolute value of addend which triggers reordering of .text sections "
+         "to avoid relocation underflow/overflow. Default: 0 (reordering disabled).">,
+      MetaVarName<"<value>">;
+// facebook end T71528069
+
 defm reproduce:
   EEq<"reproduce",
      "Write tar file containing inputs and command to reproduce link">;
@@ -426,7 +434,7 @@ defm target2:
   MetaVarName<"<type>">;
 
 // facebook begin T37628453
-// Separate '--threads=' from '--threads' for downwards compatibilty. 
+// Separate '--threads=' from '--threads' for downwards compatibilty.
 def threads
    : J<"threads=">,
         HelpText<"Number of threads. '1' disables multi-threading. By default all "

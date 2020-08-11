@@ -226,6 +226,7 @@ struct Configuration {
   bool relrGlibc = false;
   bool relrPackDynRelocs = false;
   llvm::DenseSet<llvm::StringRef> saveTempsArgs;
+  int64_t reorderSectionsByRelocationAddendThreshold; // facebook T71528069
   llvm::SmallVector<std::pair<llvm::GlobPattern, uint32_t>, 0> shuffleSections;
   bool singleRoRx;
   bool shared;

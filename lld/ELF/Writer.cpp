@@ -70,6 +70,7 @@ private:
   void resolveShfLinkOrder();
   void finalizeAddressDependentContent();
   void optimizeBasicBlockJumps();
+  void reorderSectionByRelocationAddend(); // facebook T71528069
   void sortInputSections();
   void finalizeSections();
   void checkExecuteOnly();
@@ -1677,9 +1678,84 @@ static void sortSection(OutputSection &osec,
   }
 }
 
+// facebook begin T71528069
+template <class ELFT> void Writer<ELFT>::reorderSectionByRelocationAddend() {
+  // Workaround to simplify linking code with huge relocation addends.
+  //
+  // Context:
+  // - Some compilers emit 32-bit PC-relative lea (Load Effective Address)
+  //   instructions with huge addends.
+  // - The addresses are not dereferenced unsafely, but still have to be
+  //   relocated.
+  // - 32 bit PC-relative are signed so the relocation must be in [-2GB, 2GB].
+  // - If .text / .rodata / .data sections are already large (hundreds of MB)
+  //   a huge addend can easily underflow -2GB or overflow 2GB.
+  // Workaround:
+  // - Partition .text sections by their PC-relative addends:
+  //   - sections with huge negative addends go towards the top of .text
+  //   - sections with huge positive addends go towards the bottom of .text
+  //   - all other sections in between.
+  // NOTE:
+  // - We could optimize and reorder all .rodata/.text/.data/.bss sections to
+  //   minimize the final relocations, but that will likely have a negative
+  //   performance impact because instruction/data locality will be broken
+  //   (e.g. dcache/icache, dTLB/iTLB hit rate will drop).
+  // - We partition by huge relocation addends first and then
+  //   apply --symbol-ordering-file, --call-graph-ordering-file or
+  //   linker scripts: all of these flags maintain the relative order of
+  //   unmentioned sections -- thus maintaining the heuristic we apply here.
+  // Limitation:
+  // - If a section has both large positive and negative addends moving it
+  //   to the top/bottom could actually increase the likelihood of relocation
+  //   failures. AFAICT we don't have that problem in fbcode.
+  const int64_t kMaxAddend = config->reorderSectionsByRelocationAddendThreshold;
+  if (kMaxAddend == 0) {
+    return;
+  }
+
+  for (auto *base : script->sectionCommands) {
+    auto *sec = dyn_cast<OutputDesc>(base);
+    if (!sec || sec->osec.name != ".text")
+      continue;
+    for (auto *b : sec->osec.commands) {
+      auto *isd = dyn_cast<InputSectionDescription>(b);
+      if (!isd)
+        continue;
+      // Sections with huge pc-rel negative addend go towards the top.
+      std::stable_partition(isd->sections.begin(), isd->sections.end(),
+                            [&](const InputSection *s) {
+                              for (const auto &rel : s->relocations) {
+                                if ((rel.expr == R_PC || rel.expr == R_PLT_PC ||
+                                     rel.expr == R_GOT_PC) &&
+                                    rel.addend < -kMaxAddend) {
+                                  return true;
+                                }
+                              }
+                              return false;
+                            });
+      // Sections with huge pc-rel negative addend go towards the bottom.
+      std::stable_partition(isd->sections.begin(), isd->sections.end(),
+                            [&](const InputSection *s) {
+                              for (const auto &rel : s->relocations) {
+                                if ((rel.expr == R_PC || rel.expr == R_PLT_PC ||
+                                     rel.expr == R_GOT_PC) &&
+                                    rel.addend > kMaxAddend) {
+                                  return false;
+                                }
+                              }
+                              return true;
+                            });
+    }
+  }
+}
+// facebook end T71528069
+
 // If no layout was provided by linker script, we want to apply default
 // sorting for special input sections. This also handles --symbol-ordering-file.
 template <class ELFT> void Writer<ELFT>::sortInputSections() {
+  // facebook begin T71528069
+  reorderSectionByRelocationAddend();
+  // facebook end T71528069
   // Build the order once since it is expensive.
   DenseMap<const InputSectionBase *, int> order = buildSectionOrder();
   maybeShuffle(order);
