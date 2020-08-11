@@ -1177,6 +1177,14 @@ static void readConfigs(opt::InputArgList &args) {
   config->printArchiveStats = args.getLastArgValue(OPT_print_archive_stats);
   config->printSymbolOrder =
       args.getLastArgValue(OPT_print_symbol_order);
+  // facebook begin T71528069
+  config->reorderSectionsByRelocationAddendThreshold = args::getInteger(
+      args, OPT_reorder_sections_by_relocation_addend_threshold,
+      // NOTE: this should be 0 when launched, but in fbcode it's currently
+      // not easy to pass LLD-specific flags so just default it to a high value.
+      536870912 // 512MiB
+  );
+  // facebook end T71528069
   config->rpath = getRpath(args);
   config->relocatable = args.hasArg(OPT_relocatable);
   config->saveTemps = args.hasArg(OPT_save_temps);
@@ -2538,7 +2546,7 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
     inputSections.push_back(make<HotTextPlaceholderSection>(false));
   }
   // facebook end T62621959
-  
+
   // Since we now have a complete set of input files, we can create
   // a .d file to record build dependencies.
   if (!config->dependencyFile.empty())

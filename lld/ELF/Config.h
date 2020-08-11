@@ -213,6 +213,7 @@ struct Configuration {
   bool printIcfSections;
   bool relocatable;
   bool relrPackDynRelocs;
+  int64_t reorderSectionsByRelocationAddendThreshold; // facebook T71528069
   bool saveTemps;
   std::vector<std::pair<llvm::GlobPattern, uint32_t>> shuffleSections;
   bool singleRoRx;
