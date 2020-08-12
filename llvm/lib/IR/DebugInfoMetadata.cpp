@@ -105,6 +105,20 @@ const DILocation *DILocation::getMergedLocation(const DILocation *LocA,
   if (LocA == LocB)
     return LocA;
 
+  // facebook begin T70955850
+  // If the discriminator is used for pseudo probe (refer to comments above) and
+  // the two locations refer to one callsite probe, we intentionally select the
+  // first one as the merged location. Also here we only consider the callsite
+  // sharing the same parent scope(i.e., non-inline callsite) since we don't
+  // know the hotness of the branch in the inlined location, giving the wrong
+  // line number will mislead the context sensitive inliner.
+  if (isPseudoProbeDiscriminator(LocA->getDiscriminator()) &&
+      !LocA->getInlinedAt() &&
+      isPseudoProbeDiscriminator(LocB->getDiscriminator()) &&
+      !LocB->getInlinedAt())
+    return LocA;
+  // facebook end
+
   SmallPtrSet<DILocation *, 5> InlinedLocationsA;
   for (DILocation *L = LocA->getInlinedAt(); L; L = L->getInlinedAt())
     InlinedLocationsA.insert(L);
