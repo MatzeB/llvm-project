@@ -1242,6 +1242,14 @@ bool SampleProfileLoader::inlineHotFunctions(
 
 bool SampleProfileLoader::tryInlineCandidate(
     InlineCandidate &Candidate, SmallVector<CallBase *, 8> *InlinedCallSites) {
+  // facebook begin T64869484
+  // Disable only the inlining part of sample profile loader, and still
+  // perform profile annotation. This can be useful for pre-LTO pipeline
+  // tuning. Note that to preserve context profile from previous inline,
+  // ProfileMergeInlinee and ProfileTopDownLoad will also be needed.
+  if (!EnableSampleProfileInline)
+    return false;
+  // facebook end T64869484
 
   CallBase &CB = *Candidate.CallInstr;
   Function *CalledFunction = CB.getCalledFunction();
@@ -1414,6 +1422,18 @@ bool SampleProfileLoader::inlineHotFunctionsWithPriority(
            !F.hasFnAttribute("profile-sample-accurate"))) &&
          "ProfAccForSymsInList should be false when profile-sample-accurate "
          "is enabled");
+
+  // facebook begin T64869484
+  // Disable only the inlining part of sample profile loader, and still
+  // perform profile annotation. This can be useful for pre-LTO pipeline
+  // tuning. Note that to preserve context profile from previous inline,
+  // ProfileMergeInlinee and ProfileTopDownLoad will also be needed.
+  // For ThinLTO PreLink, we needed to collect InlinedGUIDs, so don't
+  // bail out just yet.
+  if (!EnableSampleProfileInline &&
+      !(LTOPhase == ThinOrFullLTOPhase::ThinLTOPreLink))
+    return false;
+  // facebook end T64869484
 
   // Populating worklist with initial call sites from root inliner, along
   // with call site weights.
