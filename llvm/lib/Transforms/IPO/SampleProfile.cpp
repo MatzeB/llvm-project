@@ -80,6 +80,7 @@
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/ProfiledCallGraph.h"
 #include "llvm/Transforms/IPO/SampleContextTracker.h"
+#include "llvm/Transforms/IPO/SampleProfileInference.h" // facebook T68973288
 #include "llvm/Transforms/IPO/SampleProfileProbe.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Utils/CallPromotionUtils.h"
@@ -1664,9 +1665,17 @@ void SampleProfileLoader::generateMDProfMetadata(Function &F) {
         LLVM_DEBUG(dbgs() << " (saturated due to uint32_t overflow)");
         Weight = std::numeric_limits<uint32_t>::max();
       }
-      // Weight is added by one to avoid propagation errors introduced by
-      // 0 weights.
-      Weights.push_back(static_cast<uint32_t>(Weight + 1));
+      // facebook begin T68973288
+      if (!SampleProfileUseMCF) {
+        // Weight is added by one to avoid propagation errors introduced by
+        // 0 weights.
+        Weights.push_back(static_cast<uint32_t>(Weight + 1));
+      } else {
+        // MCF creates proper weights that do not require adjustments except for
+        // isolated islands.
+        Weights.push_back(static_cast<uint32_t>(Weight ? Weight : 1));
+      }
+      // facebook end T68973288
       if (Weight != 0) {
         if (Weight > MaxWeight) {
           MaxWeight = Weight;
@@ -1951,6 +1960,9 @@ bool SampleProfileLoader::doInitialization(Module &M,
     // Enable iterative-BFI by default for CSSPGO.
     if (!UseIterativeBFIInference.getNumOccurrences())
       UseIterativeBFIInference = true;
+    // Enable MCF inference by default for CSSPGO.
+    if (!SampleProfileUseMCF.getNumOccurrences())
+      SampleProfileUseMCF = true;
 
     // Tracker for profiles under different context
     ContextTracker = std::make_unique<SampleContextTracker>(

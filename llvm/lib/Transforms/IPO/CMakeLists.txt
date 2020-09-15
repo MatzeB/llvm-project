@@ -35,6 +35,7 @@ add_llvm_component_library(LLVMipo
   PruneEH.cpp
   SampleContextTracker.cpp
   SampleProfile.cpp
+  SampleProfileInference.cpp # facebook T68973288
   SampleProfileProbe.cpp
   SCCP.cpp
   StripDeadPrototypes.cpp

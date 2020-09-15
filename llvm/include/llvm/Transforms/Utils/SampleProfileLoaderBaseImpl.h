@@ -81,6 +81,10 @@ extern cl::opt<bool> NoWarnSampleUnused;
 // facebook T46352508
 extern cl::opt<unsigned> SampleProfileBlockCoverage;
 // facebook end
+// facebook begin T68973288
+extern cl::opt<bool> SampleProfileUseMCF;
+extern cl::opt<bool> SampleProfileMcfRebalanceDangling;
+// facebook end T68973288
 
 template <typename BT> class SampleProfileLoaderBaseImpl {
 public:
@@ -769,20 +773,6 @@ void SampleProfileLoaderBaseImpl<BT>::propagateWeights(FunctionT &F) {
   bool Changed = true;
   unsigned I = 0;
 
-  // If BB weight is larger than its corresponding loop's header BB weight,
-  // use the BB weight to replace the loop header BB weight.
-  for (auto &BI : F) {
-    BasicBlockT *BB = &BI;
-    LoopT *L = LI->getLoopFor(BB);
-    if (!L) {
-      continue;
-    }
-    BasicBlockT *Header = L->getHeader();
-    if (Header && BlockWeights[BB] > BlockWeights[Header]) {
-      BlockWeights[Header] = BlockWeights[BB];
-    }
-  }
-
   // Before propagation starts, build, for each block, a list of
   // unique predecessors and successors. This is necessary to handle
   // identical edges in multiway branches. Since we visit all blocks and all
@@ -790,25 +780,56 @@ void SampleProfileLoaderBaseImpl<BT>::propagateWeights(FunctionT &F) {
   // of the pass.
   buildEdges(F);
 
-  // Propagate until we converge or we go past the iteration limit.
-  while (Changed && I++ < SampleProfileMaxPropagateIterations) {
-    Changed = propagateThroughEdges(F, false);
-  }
+  // facebook begin T68973288
+  if (SampleProfileUseMCF) {
+    static_assert(std::is_same<BT, BasicBlock>::value,
+                  "MCF only usable with BasicBlock instantiation of "
+                  "SampleProfileLoaderBaseImpl");
+    // Fill in BlockWeights and EdgeWeights using an inference algorithm
+    BlockWeightMap SampleBlockWeights;
+    for (const auto &BI : F) {
+      ErrorOr<uint64_t> Weight = getBlockWeight(&BI);
+      if (Weight)
+        SampleBlockWeights[&BI] = Weight.get();
+    }
+    auto Infer = SampleProfileInference(F, Successors, SampleBlockWeights);
+    Infer.apply(BlockWeights, EdgeWeights);
+  } else {
+    // facebook end T68973288
+    // If BB weight is larger than its corresponding loop's header BB weight,
+    // use the BB weight to replace the loop header BB weight.
+    for (auto &BI : F) {
+      BasicBlockT *BB = &BI;
+      LoopT *L = LI->getLoopFor(BB);
+      if (!L) {
+        continue;
+      }
+      BasicBlockT *Header = L->getHeader();
+      if (Header && BlockWeights[BB] > BlockWeights[Header]) {
+        BlockWeights[Header] = BlockWeights[BB];
+      }
+    }
 
-  // The first propagation propagates BB counts from annotated BBs to unknown
-  // BBs. The 2nd propagation pass resets edges weights, and use all BB weights
-  // to propagate edge weights.
-  VisitedEdges.clear();
-  Changed = true;
-  while (Changed && I++ < SampleProfileMaxPropagateIterations) {
-    Changed = propagateThroughEdges(F, false);
-  }
+    // Propagate until we converge or we go past the iteration limit.
+    while (Changed && I++ < SampleProfileMaxPropagateIterations) {
+      Changed = propagateThroughEdges(F, false);
+    }
 
-  // The 3rd propagation pass allows adjust annotated BB weights that are
-  // obviously wrong.
-  Changed = true;
-  while (Changed && I++ < SampleProfileMaxPropagateIterations) {
-    Changed = propagateThroughEdges(F, true);
+    // The first propagation propagates BB counts from annotated BBs to unknown
+    // BBs. The 2nd propagation pass resets edges weights, and use all BB
+    // weights to propagate edge weights.
+    VisitedEdges.clear();
+    Changed = true;
+    while (Changed && I++ < SampleProfileMaxPropagateIterations) {
+      Changed = propagateThroughEdges(F, false);
+    }
+
+    // The 3rd propagation pass allows adjust annotated BB weights that are
+    // obviously wrong.
+    Changed = true;
+    while (Changed && I++ < SampleProfileMaxPropagateIterations) {
+      Changed = propagateThroughEdges(F, true);
+    }
   }
 }
 

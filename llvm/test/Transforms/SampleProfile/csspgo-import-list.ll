@@ -33,7 +33,7 @@ for.body:                                         ; preds = %for.body, %entry
 
 ; Make sure the ImportGUID stays with entry count metadata for ThinLTO-PreLink
 ; CHECK: distinct !DISubprogram(name: "main"
-; CHECK: !{!"function_entry_count", i64 3, i64 446061515086924981, i64 3815895320998406042, i64 7102633082150537521, i64 -2862076748587597320}
+; CHECK: !{!"function_entry_count", i64 1, i64 446061515086924981, i64 3815895320998406042, i64 7102633082150537521, i64 -2862076748587597320}
 
 ; CHECK-ORDERED: FuncOffsetTableSection {{.*}} {ordered}
 

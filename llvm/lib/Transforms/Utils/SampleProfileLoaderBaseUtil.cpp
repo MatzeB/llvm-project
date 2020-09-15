@@ -48,6 +48,17 @@ cl::opt<unsigned> SampleProfileBlockCoverage(
              "from input profile."));
 // facebook end
 
+// facebook begin T68973288
+cl::opt<bool>
+    SampleProfileUseMCF("sample-profile-use-mcf", cl::init(false), cl::Hidden,
+    cl::ZeroOrMore, cl::desc("Use MCF to infer block and edge counts."));
+
+cl::opt<bool> SampleProfileMcfRebalanceDangling(
+    "sample-profile-mcf-rebalance-dangling", cl::init(true), cl::Hidden,
+    cl::desc("Rebalance the flow going through dangling "
+             "constructs. This is a post-process of MCF inference."));
+// facebook end T68973288
+
 cl::opt<bool> NoWarnSampleUnused(
     "no-warn-sample-unused", cl::init(false), cl::Hidden,
     cl::desc("Use this option to turn off/on warnings about function with "
