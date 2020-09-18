@@ -248,6 +248,12 @@ static cl::opt<bool> AllowRecursiveInline(
 
     cl::desc("Allow sample loader inliner to inline recursive calls."));
 
+// facebook begin T76090635
+static cl::opt<bool> RemoveProbeAfterProfileAnnotation(
+    "sample-profile-remove-probe", cl::Hidden, cl::init(false),
+    cl::desc("Remove pseudo-probe after sample profile annotation."));
+// facebook end T76090635
+
 static cl::opt<std::string> ProfileInlineReplayFile(
     "sample-profile-inline-replay", cl::init(""), cl::value_desc("filename"),
     cl::desc(
@@ -2145,6 +2151,23 @@ bool SampleProfileLoader::runOnModule(Module &M, ModuleAnalysisManager *AM,
     for (const std::pair<Function *, NotInlinedProfileInfo> &pair :
          notInlinedCallInfo)
       updateProfileCallee(pair.first, pair.second.entryCount);
+
+  // facebook begin T76090635
+  if (RemoveProbeAfterProfileAnnotation && FunctionSamples::ProfileIsProbeBased) {
+    for (Function &F : M) {
+      std::vector<Instruction *> InstrToDel;
+      for (auto &BB : F) {
+        for (auto &I : BB.getInstList()) {
+          if (isa<PseudoProbeInst>(&I))
+            InstrToDel.push_back(&I);
+        }
+      }
+      for (auto I : InstrToDel)
+        I->eraseFromParent();
+      InstrToDel.clear();
+    }
+  }
+  // facebook end T76090635
 
   return retval;
 }
