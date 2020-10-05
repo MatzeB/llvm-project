@@ -29,6 +29,12 @@
 # RUN: not ld.lld -r -shared %t -o /dev/null 2>&1 | FileCheck -check-prefix=ERR2 %s
 # ERR2: -r and -shared may not be used together
 
+## facebook begin T77027571
+## Attempt to use -r and --gc-sections together
+# RUN: ld.lld -r --gc-sections %t -o %tfail 2>&1 | FileCheck -check-prefix=WARN %s
+# WARN: warning: -r and --gc-sections may not be used together
+## facebook end T77027571
+
 ## Attempt to use -r and --gdb-index together
 # RUN: not ld.lld -r --gdb-index %t -o /dev/null 2>&1 | FileCheck -check-prefix=ERR4 %s
 # ERR4: -r and --gdb-index may not be used together
