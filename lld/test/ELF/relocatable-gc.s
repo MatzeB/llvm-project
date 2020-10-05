@@ -1,3 +1,6 @@
+## facebook begin T77027571	
+# UNSUPPORTED: true
+## facebook end T77027571	
 # REQUIRES: x86
 ## Test -r --gc-sections.
 

@@ -347,6 +347,13 @@ static void checkOptions() {
   if (config->relocatable) {
     if (config->shared)
       error("-r and -shared may not be used together");
+    // facebook begin T77027571
+    if (config->gcSections) {
+      config->gcSections = false;
+      warn("-r and --gc-sections may not be used together,"
+           "ignoring --gc-sections");
+    }
+    // facebook end T77027571
     if (config->gdbIndex)
       error("-r and --gdb-index may not be used together");
     if (config->icf != ICFLevel::None)
