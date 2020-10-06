@@ -1671,9 +1671,8 @@ void SampleProfileLoader::generateMDProfMetadata(Function &F) {
         // 0 weights.
         Weights.push_back(static_cast<uint32_t>(Weight + 1));
       } else {
-        // MCF creates proper weights that do not require adjustments except for
-        // isolated islands.
-        Weights.push_back(static_cast<uint32_t>(Weight ? Weight : 1));
+        // MCF creates proper weights that do not require adjustments.
+        Weights.push_back(static_cast<uint32_t>(Weight));
       }
       // facebook end T68973288
       if (Weight != 0) {

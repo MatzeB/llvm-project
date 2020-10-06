@@ -20,11 +20,17 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/Debug.h"
 #include <queue>
+#include <set>
 
 using namespace llvm;
 #define DEBUG_TYPE "sample-profile-inference"
 
 namespace {
+
+/// A value indicating an infinite flow/capacity/weight of a block/edge.
+/// Not using numeric_limits<int64_t>::max(), as the values can be summed up
+/// during the execution.
+static constexpr int64_t INF = ((int64_t)1) << 40;
 
 /// A wrapper of a binary basic block.
 struct FlowBlock {
@@ -34,6 +40,12 @@ struct FlowBlock {
   uint64_t InDegree{0};
   uint64_t OutDegree{0};
   bool HasSelfEdge{false};
+
+  /// Check if it is the entry block in the function.
+  bool isEntry() const { return InDegree == 0; }
+
+  /// Check if it is an exit block in the function.
+  bool isExit() const { return OutDegree == 0; }
 };
 
 /// A wrapper of a jump between two basic blocks.
@@ -47,6 +59,8 @@ struct FlowJump {
 struct FlowFunction {
   std::vector<FlowBlock> Blocks;
   std::vector<FlowJump> Jumps;
+  /// The index of the entry block.
+  uint64_t Entry;
 };
 
 /// Minimum-cost maximum flow algorithm.
@@ -220,11 +234,6 @@ private:
     }
   }
 
-  /// A value indicating an infinite flow/capacity of an edge.
-  /// Not using numeric_limits<int64_t>::max(), as the values can be summed up
-  /// during the execution.
-  static constexpr int64_t INF = ((int64_t)1) << 40;
-
   /// An node in a flow network.
   struct Node {
     /// The cost of the cheapest path from the source to the current node.
@@ -260,6 +269,177 @@ private:
   uint64_t Target;
 };
 
+/// A post-processing adjustment of control flow.
+///
+/// The object is responsible for adjusting control flow in a function so as
+/// to remove all "isolated" components with positive flow that are unreachable
+/// from the entry block. For every such component, we find the shortest path
+/// from the entry to an exit passing through the component, and increase the
+/// flow by one unit along the path.
+class FlowAdjuster {
+public:
+  FlowAdjuster(FlowFunction &Func) : Func(Func) {
+    assert(Func.Blocks[Func.Entry].isEntry() &&
+           "incorrect index of the entry block");
+
+    AdjJumps = std::vector<std::vector<FlowJump *>>(NumBlocks());
+    for (auto &Jump : Func.Jumps) {
+      AdjJumps[Jump.Source].push_back(&Jump);
+    }
+  }
+
+  // Run the algorithm.
+  void run() {
+    // Find blocks that are reachable from the source
+    auto Visited = std::vector<bool>(NumBlocks(), false);
+    findReachable(Func.Entry, Visited);
+
+    // Iterate over all non-reachable blocks and adjust their weights
+    for (uint64_t I = 0; I < NumBlocks(); I++) {
+      auto &Block = Func.Blocks[I];
+      if (Block.Weight > 0 && !Visited[I]) {
+        // Find a path from the entry to an exit passing through the block I
+        auto Path = findShortestPath(I);
+        // Increase the flow along the path
+        assert(Path.size() > 0 && Path[0]->Source == Func.Entry &&
+               "incorrectly computed path adjusting control flow");
+        Func.Blocks[Func.Entry].Flow += 1;
+        for (auto &Jump : Path) {
+          Jump->Flow += 1;
+          Func.Blocks[Jump->Target].Flow += 1;
+          // Update reachability
+          findReachable(Jump->Target, Visited);
+        }
+      }
+    }
+  }
+
+private:
+  /// Run bfs from a given block along the jumps with a positive flow and mark
+  /// all reachable blocks.
+  void findReachable(uint64_t Src, std::vector<bool> &Visited) {
+    if (Visited[Src])
+      return;
+    std::queue<uint64_t> Queue;
+    Queue.push(Src);
+    Visited[Src] = true;
+    while (!Queue.empty()) {
+      Src = Queue.front();
+      Queue.pop();
+      for (auto Jump : AdjJumps[Src]) {
+        uint64_t Dst = Jump->Target;
+        if (Jump->Flow > 0 && !Visited[Dst]) {
+          Queue.push(Dst);
+          Visited[Dst] = true;
+        }
+      }
+    }
+  }
+
+  /// Find the shortest path from the entry block to an exit block passing
+  /// through a given block.
+  std::vector<FlowJump *> findShortestPath(uint64_t BlockIdx) {
+    // A path from the entry block to BlockIdx
+    auto ForwardPath = findShortestPath(Func.Entry, BlockIdx);
+    // A path from BlockIdx to an exit block
+    auto BackwardPath = findShortestPath(BlockIdx, AnyExitBlock);
+
+    // Concatenate the two paths
+    std::vector<FlowJump *> Result;
+    Result.insert(Result.end(), ForwardPath.begin(), ForwardPath.end());
+    Result.insert(Result.end(), BackwardPath.begin(), BackwardPath.end());
+    return Result;
+  }
+
+  /// Apply the dijkstra algorithm to find the shortest path from a given
+  /// Source to a given Target block.
+  /// If Target == -1, then the path ends at an exit block.
+  std::vector<FlowJump *> findShortestPath(uint64_t Source, uint64_t Target) {
+    // Quit early, if possible
+    if (Source == Target)
+      return std::vector<FlowJump *>();
+    if (Func.Blocks[Source].isExit() && Target == AnyExitBlock)
+      return std::vector<FlowJump *>();
+
+    // Initialize data structures
+    auto Distance = std::vector<int64_t>(NumBlocks(), INF);
+    auto Parent = std::vector<FlowJump *>(NumBlocks(), nullptr);
+    Distance[Source] = 0;
+    std::set<std::pair<uint64_t, uint64_t>> Queue;
+    Queue.insert(std::make_pair(Distance[Source], Source));
+
+    // Run the dijkstra algorithm
+    while (!Queue.empty()) {
+      uint64_t Src = Queue.begin()->second;
+      Queue.erase(Queue.begin());
+      // If we found a solution, quit early
+      if (Src == Target ||
+          (Func.Blocks[Src].isExit() && Target == AnyExitBlock))
+        break;
+
+      for (auto Jump : AdjJumps[Src]) {
+        uint64_t Dst = Jump->Target;
+        int64_t JumpDist = jumpDistance(Jump);
+        if (Distance[Dst] > Distance[Src] + JumpDist) {
+          Queue.erase(std::make_pair(Distance[Dst], Dst));
+
+          Distance[Dst] = Distance[Src] + JumpDist;
+          Parent[Dst] = Jump;
+
+          Queue.insert(std::make_pair(Distance[Dst], Dst));
+        }
+      }
+    }
+    // If Target is not provided, find the closest exit block
+    if (Target == AnyExitBlock) {
+      for (uint64_t I = 0; I < NumBlocks(); I++) {
+        if (Func.Blocks[I].isExit() && Parent[I] != nullptr) {
+          if (Target == AnyExitBlock || Distance[Target] > Distance[I]) {
+            Target = I;
+          }
+        }
+      }
+    }
+    assert(Parent[Target] != nullptr && "a path does not exist");
+
+    // Extract the constructed path
+    std::vector<FlowJump *> Result;
+    uint64_t Now = Target;
+    while (Now != Source) {
+      assert(Now == Parent[Now]->Target && "incorrect parent jump");
+      Result.push_back(Parent[Now]);
+      Now = Parent[Now]->Source;
+    }
+    // Reverse the path, since it is extracted from Target to Source
+    std::reverse(Result.begin(), Result.end());
+    return Result;
+  }
+
+  /// A distance of a path for a given jump.
+  /// In order to incite the path to use blocks/jumps with positive flow, set
+  /// the distance as follows:
+  ///   if Jump.Flow > 0, then distance = 0
+  ///   if Block.Weight > 0, then distance = 1
+  ///   otherwise distance >> 1
+  int64_t jumpDistance(FlowJump *Jump) const {
+    if (Jump->Flow > 0)
+      return 0;
+    if (Func.Blocks[Jump->Target].Weight > 0)
+      return 1;
+    return NumBlocks() + 1;
+  };
+
+  uint64_t NumBlocks() const { return Func.Blocks.size(); }
+
+  /// A constant indicating an aribtrary exit block of a function.
+  static constexpr uint64_t AnyExitBlock = uint64_t(-1);
+
+  /// The function.
+  FlowFunction &Func;
+  /// The jumps adjacent to each block.
+  std::vector<std::vector<FlowJump *>> AdjJumps;
+};
+
 /// Initializing flow network for a given function.
 ///
 /// Every block is split into three nodes that are responsible for (i) an
@@ -270,11 +450,9 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
   assert(NumBlocks > 1 && "Too few blocks in a function");
 
   // Pre-process data: make sure the entry weight is at least 1
-  for (uint64_t B = 0; B < NumBlocks; B++) {
-    if (Func.Blocks[B].InDegree == 0 && Func.Blocks[B].Weight == 0)
-      Func.Blocks[B].Weight = 1;
+  if (Func.Blocks[Func.Entry].Weight == 0) {
+    Func.Blocks[Func.Entry].Weight = 1;
   }
-
   // Introducing dummy source/sink pairs to allow flow circulation.
   // The nodes corresponding to blocks of Func have indicies in the range
   // [0..3 * NumBlocks); the dummy nodes are indexed by the next four values.
@@ -288,9 +466,7 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
   // Create three nodes for every block of the function
   for (uint64_t B = 0; B < NumBlocks; B++) {
     auto &Block = Func.Blocks[B];
-    bool IsEntry = Block.InDegree == 0;
-    bool IsExit = Block.OutDegree == 0;
-    assert((!Block.Dangling || Block.Weight == 0 || IsEntry) &&
+    assert((!Block.Dangling || Block.Weight == 0 || Block.isEntry()) &&
            "non-zero weight of a dangling block except for a dangling entry");
 
     // Split every block into two nodes
@@ -302,14 +478,18 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
     }
 
     // Edges from S and to T
-    assert((!IsEntry || !IsExit) && "a block cannot be an entry and an exit");
-    if (IsEntry) {
+    assert((!Block.isEntry() || !Block.isExit()) &&
+           "a block cannot be an entry and an exit");
+    if (Block.isEntry()) {
       Network.addEdge(S, Bin, 0);
-    } else if (IsExit) {
+    } else if (Block.isExit()) {
       Network.addEdge(Bout, T, 0);
     }
 
-    // An auxiliary node to allow increase/reduction of block counts
+    // An auxiliary node to allow increase/reduction of block counts:
+    // We assume that decreasing block counts is more expensive than increasing,
+    // and thus, setting separate costs here. In the future we may want to tune
+    // the relative costs so as to maximize the quality of generated profiles.
     uint64_t Baux = 3 * B + 2;
     int64_t AuxCostInc = MinCostFlow::AuxCostInc;
     int64_t AuxCostDec = MinCostFlow::AuxCostDec;
@@ -319,7 +499,7 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
       AuxCostDec = 0;
     }
     // Decreasing the weight of entry blocks is expensive
-    if (IsEntry) {
+    if (Block.isEntry()) {
       AuxCostDec = MinCostFlow::AuxCostDecEntry;
     }
     // For blocks with self-edges, do not penalize a reduction of the weight,
@@ -392,7 +572,7 @@ void extractWeights(MinCostFlow &Network, FlowFunction &Func) {
 #ifndef NDEBUG
 /// Verify that the computed flow values satisfy flow conservation rules
 void verifyWeights(const FlowFunction &Func) {
-  uint64_t NumBlocks = Func.Blocks.size();
+  const uint64_t NumBlocks = Func.Blocks.size();
   auto InFlow = std::vector<uint64_t>(NumBlocks, 0);
   auto OutFlow = std::vector<uint64_t>(NumBlocks, 0);
   for (auto &Jump : Func.Jumps) {
@@ -404,18 +584,51 @@ void verifyWeights(const FlowFunction &Func) {
   uint64_t TotalOutFlow = 0;
   for (uint64_t I = 0; I < NumBlocks; I++) {
     auto &Block = Func.Blocks[I];
-    if (Block.InDegree == 0) {
+    if (Block.isEntry()) {
       TotalInFlow += Block.Flow;
-      assert(Block.Flow == OutFlow[I] && "incorrectly computed flow");
-    } else if (Block.OutDegree == 0) {
+      assert(Block.Flow == OutFlow[I] && "incorrectly computed control flow");
+    } else if (Block.isExit()) {
       TotalOutFlow += Block.Flow;
-      assert(Block.Flow == InFlow[I] && "incorrectly computed flow");
+      assert(Block.Flow == InFlow[I] && "incorrectly computed control flow");
     } else {
-      assert(Block.Flow == OutFlow[I] && "incorrectly computed flow");
-      assert(Block.Flow == InFlow[I] && "incorrectly computed flow");
+      assert(Block.Flow == OutFlow[I] && "incorrectly computed control flow");
+      assert(Block.Flow == InFlow[I] && "incorrectly computed control flow");
     }
   }
-  assert(TotalInFlow == TotalOutFlow && "incorrectly computed flow");
+  assert(TotalInFlow == TotalOutFlow && "incorrectly computed control flow");
+
+  // Verify that there are no isolated flow components
+  // One could modify FlowFunction to hold edges indexed by the sources, which
+  // will avoid a creation of the object
+  auto PositiveFlowEdges = std::vector<std::vector<uint64_t>>(NumBlocks);
+  for (auto &Jump : Func.Jumps) {
+    if (Jump.Flow > 0) {
+      PositiveFlowEdges[Jump.Source].push_back(Jump.Target);
+    }
+  }
+
+  // Run bfs from the source along edges with positive flow
+  std::queue<uint64_t> Queue;
+  auto Visited = std::vector<bool>(NumBlocks, false);
+  Queue.push(Func.Entry);
+  Visited[Func.Entry] = true;
+  while (!Queue.empty()) {
+    uint64_t Src = Queue.front();
+    Queue.pop();
+    for (uint64_t Dst : PositiveFlowEdges[Src]) {
+      if (!Visited[Dst]) {
+        Queue.push(Dst);
+        Visited[Dst] = true;
+      }
+    }
+  }
+
+  // Verify that every block that has a positive flow is reached from the source
+  // along edges with a positive flow
+  for (uint64_t I = 0; I < NumBlocks; I++) {
+    auto &Block = Func.Blocks[I];
+    assert((Visited[I] || Block.Flow == 0) && "an isolated flow component");
+  }
 }
 #endif
 
@@ -447,14 +660,14 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
   // Create necessary objects
   FlowFunction Func;
   DenseMap<const BasicBlock *, uint64_t> BlockIndex;
-  std::vector<const BasicBlock *> AllBlocks;
+  std::vector<const BasicBlock *> BasicBlocks;
   BlockIndex.reserve(Reachable.size());
-  AllBlocks.reserve(Reachable.size());
+  BasicBlocks.reserve(Reachable.size());
   Func.Blocks.reserve(Reachable.size());
   // Process blocks
   for (const auto *BB : Reachable) {
-    BlockIndex[BB] = AllBlocks.size();
-    AllBlocks.push_back(BB);
+    BlockIndex[BB] = BasicBlocks.size();
+    BasicBlocks.push_back(BB);
     FlowBlock Block;
     if (SampleBlockWeights.find(BB) != SampleBlockWeights.end()) {
       Block.Dangling = false;
@@ -479,27 +692,40 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
       }
     }
   }
+  // Find the entry block
+  for (size_t I = 0; I < Func.Blocks.size(); I++) {
+    if (Func.Blocks[I].isEntry()) {
+      Func.Entry = I;
+      break;
+    }
+  }
 
-  // Create inference network model
+  // Create and apply an inference network model
   auto InferenceNetwork = MinCostFlow();
   initializeNetwork(InferenceNetwork, Func);
-
-  // Run the inference algorithm
   InferenceNetwork.run();
 
-  // Verify the result and extract flow values
+  // Extract flow values for every block and every edge
   extractWeights(InferenceNetwork, Func);
+
+  // Adjust flow to get rid of isolated flow components
+  auto Adjuster = FlowAdjuster(Func);
+  Adjuster.run();
+
 #ifndef NDEBUG
+  // Verify the result
   verifyWeights(Func);
 #endif
 
-  // Extract the resulting weights
+  // Extract the resulting weights from the control flow
+  // All weights are increased by one to avoid propagation errors introduced by
+  // zero weights.
   for (const auto *BB : Reachable) {
-    BlockWeights[BB] = Func.Blocks[BlockIndex[BB]].Flow;
+    BlockWeights[BB] = Func.Blocks[BlockIndex[BB]].Flow + 1;
   }
   for (auto &Jump : Func.Jumps) {
-    Edge E = std::make_pair(AllBlocks[Jump.Source], AllBlocks[Jump.Target]);
-    EdgeWeights[E] = Jump.Flow;
+    Edge E = std::make_pair(BasicBlocks[Jump.Source], BasicBlocks[Jump.Target]);
+    EdgeWeights[E] = Jump.Flow + 1;
   }
 
 #ifndef NDEBUG
