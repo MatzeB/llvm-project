@@ -15,6 +15,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/IPO/SampleProfileInference.h"
+#include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/GraphTraits.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/Support/Debug.h"
 #include <queue>
 
@@ -421,18 +424,23 @@ void verifyWeights(const FlowFunction &Func) {
 /// Apply the profile inference algorithm for a given function
 void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
                                    EdgeWeightMap &EdgeWeights) {
+  // Find all reachable blocks which the inference algorithm will be applied on.
+  df_iterator_default_set<const BasicBlock *> Reachable;
+  for (auto *BB : depth_first_ext(&F, Reachable))
+    (void)BB /* Mark all reachable blocks */;
+
   BlockWeights.clear();
   EdgeWeights.clear();
   bool HasSamples = false;
-  for (const auto &BI : F) {
-    auto It = SampleBlockWeights.find(&BI);
+  for (const auto *BB : Reachable) {
+    auto It = SampleBlockWeights.find(BB);
     if (It != SampleBlockWeights.end() && It->second > 0) {
       HasSamples = true;
-      BlockWeights[&BI] = It->second;
+      BlockWeights[BB] = It->second;
     }
   }
   // Quit early for functions with a single block or ones w/o samples
-  if (F.size() <= 1 || !HasSamples) {
+  if (Reachable.size() <= 1 || !HasSamples) {
     return;
   }
 
@@ -440,12 +448,11 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
   FlowFunction Func;
   DenseMap<const BasicBlock *, uint64_t> BlockIndex;
   std::vector<const BasicBlock *> AllBlocks;
-  BlockIndex.reserve(F.size());
-  AllBlocks.reserve(F.size());
-  Func.Blocks.reserve(F.size());
+  BlockIndex.reserve(Reachable.size());
+  AllBlocks.reserve(Reachable.size());
+  Func.Blocks.reserve(Reachable.size());
   // Process blocks
-  for (const auto &BI : F) {
-    const BasicBlock *BB = &BI;
+  for (const auto *BB : Reachable) {
     BlockIndex[BB] = AllBlocks.size();
     AllBlocks.push_back(BB);
     FlowBlock Block;
@@ -459,8 +466,7 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
     Func.Blocks.push_back(Block);
   }
   // Process edges
-  for (const auto &BI : F) {
-    const BasicBlock *BB = &BI;
+  for (const auto *BB : Reachable) {
     for (auto *Succ : Successors[BB]) {
       FlowJump Jump;
       Jump.Source = BlockIndex[BB];
@@ -488,12 +494,20 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
 #endif
 
   // Extract the resulting weights
-  for (const auto &BI : F) {
-    const BasicBlock *BB = &BI;
+  for (const auto *BB : Reachable) {
     BlockWeights[BB] = Func.Blocks[BlockIndex[BB]].Flow;
   }
   for (auto &Jump : Func.Jumps) {
     Edge E = std::make_pair(AllBlocks[Jump.Source], AllBlocks[Jump.Target]);
     EdgeWeights[E] = Jump.Flow;
   }
+
+#ifndef NDEBUG
+  // Unreachable blocks and edges should not have a weight.
+  for (auto &I : BlockWeights)
+    assert(Reachable.contains(I.first));
+  for (auto &I : EdgeWeights)
+    assert(Reachable.contains(I.first.first) &&
+           Reachable.contains(I.first.second));
+#endif
 }
