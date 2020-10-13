@@ -2589,7 +2589,7 @@ void LinkerDriver::link(opt::InputArgList &args) {
   // Handle -u/--undefined before input files. If both a.a and b.so define foo,
   // -u foo a.a b.so will extract a.a.
   for (StringRef name : config->undefined)
-    addUnusedUndefined(name)->referenced = true;
+    addUnusedUndefined(name); // facebook T77383981
 
   // Add all files to the symbol table. This will add almost all
   // symbols that we need to the symbol table. This process might
