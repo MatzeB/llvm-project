@@ -2924,7 +2924,7 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
   // Handle -u/--undefined before input files. If both a.a and b.so define foo,
   // -u foo a.a b.so will extract a.a.
   for (StringRef name : config->undefined)
-    symtab.addUnusedUndefined(name)->referenced = true;
+    symtab.addUnusedUndefined(name); // facebook T77383981
 
   parseFiles(files, armCmseImpLib);
 
