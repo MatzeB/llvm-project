@@ -268,6 +268,11 @@ void MCDecodedPseudoProbe::print(raw_ostream &OS,
   }
   OS << "Index: " << Index << "  ";
   OS << "Type: " << PseudoProbeTypeStr[static_cast<uint8_t>(Type)] << "  ";
+  // facebook begin T63349601
+  if (isTailCall()) {
+    OS << "TailCall  ";
+  }
+  // facebook end
   std::string InlineContextStr = getInlineContextStr(GUID2FuncMAP);
   if (InlineContextStr.size()) {
     OS << "Inlined: @ ";

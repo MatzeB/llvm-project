@@ -114,6 +114,12 @@ public:
 
   bool isEntry() const { return Index == PseudoProbeFirstId; }
 
+  // facebook begin T63349601
+  bool isTailCall() const {
+    return Attributes & static_cast<uint8_t>(PseudoProbeAttributes::TailCall);
+  }
+  // facebook end
+
   uint64_t getGuid() const { return Guid; }
 
   uint64_t getIndex() const { return Index; }

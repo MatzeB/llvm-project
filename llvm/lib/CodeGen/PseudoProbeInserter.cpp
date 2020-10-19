@@ -61,14 +61,22 @@ public:
           if (DILocation *DL = MI.getDebugLoc()) {
             auto Value = DL->getDiscriminator();
             if (DILocation::isPseudoProbeDiscriminator(Value)) {
+              // facebook begin T63349601
+              auto Attr =
+                  PseudoProbeDwarfDiscriminator::extractProbeAttributes(Value);
+              // isTerminator tells if this instruction terminates a block while
+              // isReturn indicates the instruction terminates the function.
+              // They together should identify a tail call.
+              if (MI.isTerminator() && MI.isReturn())
+                Attr |= (uint32_t)PseudoProbeAttributes::TailCall;
               BuildMI(MBB, MI, DL, TII->get(TargetOpcode::PSEUDO_PROBE))
                   .addImm(getFuncGUID(MF.getFunction().getParent(), DL))
                   .addImm(
                       PseudoProbeDwarfDiscriminator::extractProbeIndex(Value))
                   .addImm(
                       PseudoProbeDwarfDiscriminator::extractProbeType(Value))
-                  .addImm(PseudoProbeDwarfDiscriminator::extractProbeAttributes(
-                      Value));
+                  .addImm(Attr);
+              // facebook end
               Changed = true;
             }
           }

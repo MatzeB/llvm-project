@@ -26,6 +26,12 @@ constexpr const char *PseudoProbeDescMetadataName = "llvm.pseudo_probe_desc";
 
 enum class PseudoProbeType { Block = 0, IndirectCall, DirectCall };
 
+// facebook begin T63349601
+enum class PseudoProbeAttributes {
+  TailCall = 0x1, // The probe is for a tail call.
+};
+// facebook end
+
 // The saturated distrution factor representing 100% for block probes.
 constexpr static uint64_t PseudoProbeFullDistributionFactor =
     std::numeric_limits<uint64_t>::max();
