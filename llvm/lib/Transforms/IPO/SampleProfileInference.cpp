@@ -638,9 +638,16 @@ void verifyWeights(const FlowFunction &Func) {
 void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
                                    EdgeWeightMap &EdgeWeights) {
   // Find all reachable blocks which the inference algorithm will be applied on.
-  df_iterator_default_set<const BasicBlock *> Reachable;
-  for (auto *BB : depth_first_ext(&F, Reachable))
+  df_iterator_default_set<const BasicBlock *> ReachableS;
+  for (auto *BB : depth_first_ext(&F, ReachableS))
     (void)BB /* Mark all reachable blocks */;
+
+  // Keep a stable order for reachable blocks
+  std::vector<const BasicBlock *> Reachable;
+  for (auto &BB : F) {
+    if (ReachableS.count(&BB))
+      Reachable.push_back(&BB);
+  }
 
   BlockWeights.clear();
   EdgeWeights.clear();
@@ -731,9 +738,9 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
 #ifndef NDEBUG
   // Unreachable blocks and edges should not have a weight.
   for (auto &I : BlockWeights)
-    assert(Reachable.contains(I.first));
+    assert(ReachableS.contains(I.first));
   for (auto &I : EdgeWeights)
-    assert(Reachable.contains(I.first.first) &&
-           Reachable.contains(I.first.second));
+    assert(ReachableS.contains(I.first.first) &&
+           ReachableS.contains(I.first.second));
 #endif
 }
