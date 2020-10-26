@@ -61,8 +61,8 @@ b9:                                                ; preds = %b31, %b2
   %11 = load i32, i32* %3, align 4, !dbg !39, !tbaa !27
   %12 = icmp sle i32 %10, %11, !dbg !40
   br i1 %12, label %b15, label %b13, !dbg !41
-; CHECK:  edge b9 -> b15 probability is 0x7ff51177 / 0x80000000 = 99.97%
-; CHECK:  edge b9 -> b13 probability is 0x000aee89 / 0x80000000 = 0.03%
+; CHECK:  edge b9 -> b15 probability is 0x7ffa8844 / 0x80000000 = 99.98%
+; CHECK:  edge b9 -> b13 probability is 0x000577bc / 0x80000000 = 0.02%
 
 b13:                                               ; preds = %b9
   %13 = alloca i32, align 4
@@ -80,8 +80,8 @@ b15:                                               ; preds = %b9
   %18 = srem i32 %16, %17, !dbg !47
   %19 = icmp ne i32 %18, 0, !dbg !47
   br i1 %19, label %b20, label %b26, !dbg !48
-; CHECK:  edge b15 -> b20 probability is 0x7ffa8880 / 0x80000000 = 99.98%
-; CHECK:  edge b15 -> b26 probability is 0x00057780 / 0x80000000 = 0.02%
+; CHECK:  edge b15 -> b20 probability is 0x80000000 / 0x80000000 = 100.00%
+; CHECK:  edge b15 -> b26 probability is 0x00000000 / 0x80000000 = 0.00%
 
 b20:                                               ; preds = %b15
   %20 = alloca i32, align 4

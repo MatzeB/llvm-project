@@ -18,6 +18,7 @@
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/GraphTraits.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/Debug.h"
 #include <queue>
 #include <set>
@@ -40,6 +41,7 @@ struct FlowBlock {
   uint64_t InDegree{0};
   uint64_t OutDegree{0};
   bool HasSelfEdge{false};
+  bool HasUnreachableInst{false};
 
   /// Check if it is the entry block in the function.
   bool isEntry() const { return InDegree == 0; }
@@ -164,6 +166,8 @@ public:
   static constexpr int64_t AuxCostDec = 2;
   /// A cost of decreasing the entry block's count by one.
   static constexpr int64_t AuxCostDecEntry = ((int64_t)1) << 20;
+  /// A cost of increasing the count of blocks with UnreachanbleInst.
+  static constexpr int64_t AuxCostIncUnreachable = ((int64_t)1) << 20;
 
 private:
   /// Check for existence of an augmenting path with a positive capacity.
@@ -424,6 +428,8 @@ private:
   int64_t jumpDistance(FlowJump *Jump) const {
     if (Jump->Flow > 0)
       return 0;
+    if (Func.Blocks[Jump->Target].HasUnreachableInst)
+      return MinCostFlow::AuxCostIncUnreachable;
     if (Func.Blocks[Jump->Target].Weight > 0)
       return 1;
     return NumBlocks() + 1;
@@ -506,6 +512,10 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
     // as all of the weight can be attributed to the self-edge
     if (Block.HasSelfEdge) {
       AuxCostDec = 0;
+    }
+    // Blocks with UnreachableInst should not have any extra counts
+    if (Block.Weight == 0 && Block.HasUnreachableInst) {
+      AuxCostInc = MinCostFlow::AuxCostIncUnreachable;
     }
 
     Network.addEdge(Bin, Baux, AuxCostInc);
@@ -683,6 +693,13 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
       Block.Dangling = true;
       Block.Weight = 0;
     }
+    // Check if the block contains UnreachableInst
+    const Instruction *TI = BB->getTerminator();
+    if (TI->getNumSuccessors() == 0) {
+      if (isa<UnreachableInst>(TI)) {
+        Block.HasUnreachableInst = true;
+      }
+    }
     Func.Blocks.push_back(Block);
   }
   // Process edges
@@ -728,11 +745,11 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
   // All weights are increased by one to avoid propagation errors introduced by
   // zero weights.
   for (const auto *BB : Reachable) {
-    BlockWeights[BB] = Func.Blocks[BlockIndex[BB]].Flow + 1;
+    BlockWeights[BB] = Func.Blocks[BlockIndex[BB]].Flow;
   }
   for (auto &Jump : Func.Jumps) {
     Edge E = std::make_pair(BasicBlocks[Jump.Source], BasicBlocks[Jump.Target]);
-    EdgeWeights[E] = Jump.Flow + 1;
+    EdgeWeights[E] = Jump.Flow;
   }
 
 #ifndef NDEBUG
