@@ -513,8 +513,8 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
     if (Block.HasSelfEdge) {
       AuxCostDec = 0;
     }
-    // Blocks with UnreachableInst should not have any extra counts
-    if (Block.Weight == 0 && Block.HasUnreachableInst) {
+    // Blocks with UnreachableInst should not have many extra counts
+    if (Block.HasUnreachableInst) {
       AuxCostInc = MinCostFlow::AuxCostIncUnreachable;
     }
 
