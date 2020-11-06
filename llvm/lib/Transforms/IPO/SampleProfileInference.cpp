@@ -41,7 +41,6 @@ struct FlowBlock {
   uint64_t InDegree{0};
   uint64_t OutDegree{0};
   bool HasSelfEdge{false};
-  bool HasUnreachableInst{false};
 
   /// Check if it is the entry block in the function.
   bool isEntry() const { return InDegree == 0; }
@@ -55,6 +54,7 @@ struct FlowJump {
   uint64_t Source;
   uint64_t Target;
   uint64_t Flow{0};
+  bool IsUnlikely{false};
 };
 
 /// A wrapper of binary function with basic blocks and jumps.
@@ -166,8 +166,8 @@ public:
   static constexpr int64_t AuxCostDec = 2;
   /// A cost of decreasing the entry block's count by one.
   static constexpr int64_t AuxCostDecEntry = ((int64_t)1) << 20;
-  /// A cost of increasing the count of blocks with UnreachanbleInst.
-  static constexpr int64_t AuxCostIncUnreachable = ((int64_t)1) << 20;
+  /// A cost of taking an unlikely jump.
+  static constexpr int64_t AuxCostUnlikely = ((int64_t)1) << 20;
 
 private:
   /// Check for existence of an augmenting path with a positive capacity.
@@ -426,10 +426,10 @@ private:
   ///   if Block.Weight > 0, then distance = 1
   ///   otherwise distance >> 1
   int64_t jumpDistance(FlowJump *Jump) const {
+    if (Jump->IsUnlikely)
+      return MinCostFlow::AuxCostUnlikely;
     if (Jump->Flow > 0)
       return 0;
-    if (Func.Blocks[Jump->Target].HasUnreachableInst)
-      return MinCostFlow::AuxCostIncUnreachable;
     if (Func.Blocks[Jump->Target].Weight > 0)
       return 1;
     return NumBlocks() + 1;
@@ -513,10 +513,6 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
     if (Block.HasSelfEdge) {
       AuxCostDec = 0;
     }
-    // Blocks with UnreachableInst should not have many extra counts
-    if (Block.HasUnreachableInst) {
-      AuxCostInc = MinCostFlow::AuxCostIncUnreachable;
-    }
 
     Network.addEdge(Bin, Baux, AuxCostInc);
     Network.addEdge(Baux, Bout, AuxCostInc);
@@ -531,12 +527,39 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
     if (Src != Dst) {
       uint64_t SrcOut = 3 * Src + 1;
       uint64_t DstIn = 3 * Dst;
-      Network.addEdge(SrcOut, DstIn, 0);
+      uint64_t Cost = Jump.IsUnlikely ? MinCostFlow::AuxCostUnlikely : 0;
+      Network.addEdge(SrcOut, DstIn, Cost);
     }
   }
 
   // Make sure we have a valid flow circulation
   Network.addEdge(T, S, 0);
+}
+
+/// Try to infer branch probabilities mimicking implementation of
+/// BranchProbabilityInfo. Unlikely taken branches are marked so that the
+/// inference algorithm can avoid sending flow along corresponding edges.
+void findUnlikelyJumps(const std::vector<const BasicBlock *> &BasicBlocks,
+                       BlockEdgeMap &Successors, FlowFunction &Func) {
+  for (auto &Jump : Func.Jumps) {
+    const auto *BB = BasicBlocks[Jump.Source];
+    const auto *Succ = BasicBlocks[Jump.Target];
+    const Instruction *TI = BB->getTerminator();
+    // Check if a block ends with InvokeInst and mark non-taken branch unlikely.
+    // In that case block Succ should be a landing pad
+    if (Successors[BB].size() == 2 && Successors[BB].back() == Succ) {
+      if (isa<InvokeInst>(TI)) {
+        Jump.IsUnlikely = true;
+      }
+    }
+    const Instruction *SuccTI = Succ->getTerminator();
+    // Check if the target block contains UnreachableInst and mark it unlikely
+    if (SuccTI->getNumSuccessors() == 0) {
+      if (isa<UnreachableInst>(SuccTI)) {
+        Jump.IsUnlikely = true;
+      }
+    }
+  }
 }
 
 /// Extract resulting block and edge counts from the flow network.
@@ -648,21 +671,26 @@ void verifyWeights(const FlowFunction &Func) {
 void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
                                    EdgeWeightMap &EdgeWeights) {
   // Find all reachable blocks which the inference algorithm will be applied on.
-  df_iterator_default_set<const BasicBlock *> ReachableS;
-  for (auto *BB : depth_first_ext(&F, ReachableS))
+  df_iterator_default_set<const BasicBlock *> Reachable;
+  for (auto *BB : depth_first_ext(&F, Reachable))
     (void)BB /* Mark all reachable blocks */;
 
   // Keep a stable order for reachable blocks
-  std::vector<const BasicBlock *> Reachable;
-  for (auto &BB : F) {
-    if (ReachableS.count(&BB))
-      Reachable.push_back(&BB);
+  DenseMap<const BasicBlock *, uint64_t> BlockIndex;
+  std::vector<const BasicBlock *> BasicBlocks;
+  BlockIndex.reserve(Reachable.size());
+  BasicBlocks.reserve(Reachable.size());
+  for (const auto &BB : F) {
+    if (Reachable.count(&BB)) {
+      BlockIndex[&BB] = BasicBlocks.size();
+      BasicBlocks.push_back(&BB);
+    }
   }
 
   BlockWeights.clear();
   EdgeWeights.clear();
   bool HasSamples = false;
-  for (const auto *BB : Reachable) {
+  for (const auto *BB : BasicBlocks) {
     auto It = SampleBlockWeights.find(BB);
     if (It != SampleBlockWeights.end() && It->second > 0) {
       HasSamples = true;
@@ -670,21 +698,15 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
     }
   }
   // Quit early for functions with a single block or ones w/o samples
-  if (Reachable.size() <= 1 || !HasSamples) {
+  if (BasicBlocks.size() <= 1 || !HasSamples) {
     return;
   }
 
   // Create necessary objects
   FlowFunction Func;
-  DenseMap<const BasicBlock *, uint64_t> BlockIndex;
-  std::vector<const BasicBlock *> BasicBlocks;
-  BlockIndex.reserve(Reachable.size());
-  BasicBlocks.reserve(Reachable.size());
-  Func.Blocks.reserve(Reachable.size());
-  // Process blocks
-  for (const auto *BB : Reachable) {
-    BlockIndex[BB] = BasicBlocks.size();
-    BasicBlocks.push_back(BB);
+  Func.Blocks.reserve(BasicBlocks.size());
+  // Create FlowBlocks
+  for (const auto *BB : BasicBlocks) {
     FlowBlock Block;
     if (SampleBlockWeights.find(BB) != SampleBlockWeights.end()) {
       Block.Dangling = false;
@@ -693,17 +715,10 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
       Block.Dangling = true;
       Block.Weight = 0;
     }
-    // Check if the block contains UnreachableInst
-    const Instruction *TI = BB->getTerminator();
-    if (TI->getNumSuccessors() == 0) {
-      if (isa<UnreachableInst>(TI)) {
-        Block.HasUnreachableInst = true;
-      }
-    }
     Func.Blocks.push_back(Block);
   }
-  // Process edges
-  for (const auto *BB : Reachable) {
+  // Create FlowEdges
+  for (const auto *BB : BasicBlocks) {
     for (auto *Succ : Successors[BB]) {
       FlowJump Jump;
       Jump.Source = BlockIndex[BB];
@@ -716,6 +731,10 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
       }
     }
   }
+
+  // Try to infer probabilities of jumps based on the content of basic block
+  findUnlikelyJumps(BasicBlocks, Successors, Func);
+
   // Find the entry block
   for (size_t I = 0; I < Func.Blocks.size(); I++) {
     if (Func.Blocks[I].isEntry()) {
@@ -744,7 +763,7 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
   // Extract the resulting weights from the control flow
   // All weights are increased by one to avoid propagation errors introduced by
   // zero weights.
-  for (const auto *BB : Reachable) {
+  for (const auto *BB : BasicBlocks) {
     BlockWeights[BB] = Func.Blocks[BlockIndex[BB]].Flow;
   }
   for (auto &Jump : Func.Jumps) {
@@ -755,9 +774,9 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
 #ifndef NDEBUG
   // Unreachable blocks and edges should not have a weight.
   for (auto &I : BlockWeights)
-    assert(ReachableS.contains(I.first));
+    assert(Reachable.contains(I.first));
   for (auto &I : EdgeWeights)
-    assert(ReachableS.contains(I.first.first) &&
-           ReachableS.contains(I.first.second));
+    assert(Reachable.contains(I.first.first) &&
+           Reachable.contains(I.first.second));
 #endif
 }
