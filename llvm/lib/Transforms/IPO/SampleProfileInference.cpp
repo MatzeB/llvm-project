@@ -301,7 +301,7 @@ public:
     // Iterate over all non-reachable blocks and adjust their weights
     for (uint64_t I = 0; I < NumBlocks(); I++) {
       auto &Block = Func.Blocks[I];
-      if (Block.Weight > 0 && !Visited[I]) {
+      if (Block.Flow > 0 && !Visited[I]) {
         // Find a path from the entry to an exit passing through the block I
         auto Path = findShortestPath(I);
         // Increase the flow along the path
@@ -420,19 +420,21 @@ private:
   }
 
   /// A distance of a path for a given jump.
-  /// In order to incite the path to use blocks/jumps with positive flow, set
-  /// the distance as follows:
-  ///   if Jump.Flow > 0, then distance = 0
+  /// In order to incite the path to use blocks/jumps with large positive flow,
+  /// and avoid changing branch probabiliy of outging edges drastically,
+  /// set the distance as follows:
+  ///   if Jump.Flow > 0, then distance = max(100 - Jump->Flow, 0)
   ///   if Block.Weight > 0, then distance = 1
   ///   otherwise distance >> 1
   int64_t jumpDistance(FlowJump *Jump) const {
+    int64_t BaseDistance = 100;
     if (Jump->IsUnlikely)
       return MinCostFlow::AuxCostUnlikely;
     if (Jump->Flow > 0)
-      return 0;
+      return std::max(BaseDistance - (int64_t)Jump->Flow, (int64_t)0);
     if (Func.Blocks[Jump->Target].Weight > 0)
-      return 1;
-    return NumBlocks() + 1;
+      return BaseDistance;
+    return BaseDistance * (NumBlocks() + 1);
   };
 
   uint64_t NumBlocks() const { return Func.Blocks.size(); }
