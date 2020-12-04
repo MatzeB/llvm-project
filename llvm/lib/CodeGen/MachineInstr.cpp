@@ -1368,6 +1368,12 @@ bool MachineInstr::hasOrderedMemoryRef() const {
       !hasUnmodeledSideEffects())
     return false;
 
+  // facebook begin T76090635
+  // A pseudo probe instruction doesn't really have a memory volatile access.
+  if (isPseudoProbe())
+    return false;
+  // facebook end T76090635
+
   // Otherwise, if the instruction has no memory reference information,
   // conservatively assume it wasn't preserved.
   if (memoperands_empty())
