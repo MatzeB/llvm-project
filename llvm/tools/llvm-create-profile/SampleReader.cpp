@@ -17,12 +17,15 @@
 
 #include "SampleReader.h"
 #include "SymbolLoader.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include <inttypes.h>
 #include <string>
 #include <utility>
 #define DEBUG_TYPE "autofdo_text_sample"
+
+extern llvm::cl::opt<bool> SkipAddressFixup;
 
 namespace autofdo {
 
@@ -42,7 +45,12 @@ uint64_t TextSampleReaderWriter::GetTotalSampleCount() const {
 }
 
 bool TextSampleReaderWriter::readProfile() {
-  uint64_t base = SymbolLoader::preferedBasedAddress(objectFile);
+  uint64_t base = 0;
+
+  // Only add base address if input address is offset wrt to preferred load
+  // address, otherwise use input address directly.
+  if (!SkipAddressFixup)
+    base = SymbolLoader::preferedBasedAddress(objectFile);
 
   FILE *fp = fopen(profileFile.c_str(), "r");
   if (fp == NULL) {

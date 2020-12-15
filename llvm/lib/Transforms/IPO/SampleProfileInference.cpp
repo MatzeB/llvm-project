@@ -273,16 +273,11 @@ private:
   uint64_t Target;
 };
 
-/// A post-processing adjustment of control flow.
-///
-/// The object is responsible for adjusting control flow in a function so as
-/// to remove all "isolated" components with positive flow that are unreachable
-/// from the entry block. For every such component, we find the shortest path
-/// from the entry to an exit passing through the component, and increase the
-/// flow by one unit along the path.
+/// Post-processing adjustment of the control flow.
 class FlowAdjuster {
 public:
-  FlowAdjuster(FlowFunction &Func) : Func(Func) {
+  FlowAdjuster(FlowFunction &Func, const bool RebalanceDangling)
+      : Func(Func), RebalanceDangling(RebalanceDangling) {
     assert(Func.Blocks[Func.Entry].isEntry() &&
            "incorrect index of the entry block");
 
@@ -292,8 +287,32 @@ public:
     }
   }
 
-  // Run the algorithm.
+  // Run the algorithms
   void run() {
+    /// We adjust the control flow in a function so as to remove all
+    /// "isolated" components with positive flow that are unreachable
+    /// from the entry block. For every such component, we find the shortest
+    /// path from the entry to an exit passing through the component, and
+    /// increase the flow by one unit along the path.
+    joinIsolatedComponents();
+
+    /// A dangling construct comprises two nodes u and v such that:
+    ///   - u dominates v and u is not dangling;
+    ///   - v post-dominates u; and
+    ///   - All inner-nodes of all (u,v)-paths are dangling
+    /// This processor rebalances the flow that goes through the constructs.
+    /// At the moment, however, we only treat diamond and triangle constructs.
+    if (RebalanceDangling)
+      rebalanceDanglingConstructs();
+  }
+
+  /// For dangling triangles, how much is the share of the dangling node
+  static constexpr double DanglingSuccShareInTriangles = 0.5;
+  /// For dangling diamonds, how much is the share of the primary child
+  static constexpr double FirstSuccShareInDiamonds = 0.5;
+
+private:
+  void joinIsolatedComponents() {
     // Find blocks that are reachable from the source
     auto Visited = std::vector<bool>(NumBlocks(), false);
     findReachable(Func.Entry, Visited);
@@ -318,7 +337,6 @@ public:
     }
   }
 
-private:
   /// Run bfs from a given block along the jumps with a positive flow and mark
   /// all reachable blocks.
   void findReachable(uint64_t Src, std::vector<bool> &Visited) {
@@ -439,6 +457,79 @@ private:
 
   uint64_t NumBlocks() const { return Func.Blocks.size(); }
 
+  struct SuccInfo {
+    SuccInfo(FlowFunction &Func, FlowJump *Jump)
+        : Jump(Jump), Index(Jump->Target), Block(Func.Blocks.at(Jump->Target)) {
+    }
+    FlowJump *Jump;
+    const uint64_t Index;
+    FlowBlock &Block;
+  };
+
+  bool isProperDangling(const FlowBlock &B) const {
+    return B.Dangling && B.InDegree == 1 && B.OutDegree == 1;
+  }
+
+  void rebalanceDanglingConstructs() {
+    /// ** For now we treat only diamonds and triangles **
+    /// A dangling diamond comprises two dangling nodes with one and
+    /// the same incoming node and one and the same outgoing node.
+    /// The outgoing degree of the parent should be exactly 2.
+    /// A dangling triangle comprises a dangling node with one incoming
+    /// node and one outgoing node such that the outgoing node is also the
+    /// only other outgoing node of the parent of the dangling node.
+    assert(DanglingSuccShareInTriangles >= 0.0 &&
+           DanglingSuccShareInTriangles <= 1.0 &&
+           "the share of the dangling successor should be between 0 and 1");
+    assert(FirstSuccShareInDiamonds >= 0.0 && FirstSuccShareInDiamonds <= 1.0 &&
+           "the share of the first successor should be between 0 and 1");
+    for (uint64_t I = 0; I < Func.Blocks.size(); I++) {
+      const auto &AdjEdges = AdjJumps.at(I);
+      if (Func.Blocks.at(I).Dangling || AdjEdges.size() != 2) {
+        continue;
+      }
+
+      SuccInfo FirstSucc(Func, AdjEdges.at(0));
+      const auto IsFirstPD = isProperDangling(FirstSucc.Block);
+      SuccInfo SecondSucc(Func, AdjEdges.at(1));
+      const auto IsSecondPD = isProperDangling(SecondSucc.Block);
+      if (IsFirstPD && IsSecondPD) {
+        if (AdjJumps.at(FirstSucc.Index).at(0)->Target ==
+            AdjJumps.at(SecondSucc.Index).at(0)->Target) {
+          // Danglig Diamond
+          const auto TotalFlow = FirstSucc.Block.Flow + SecondSucc.Block.Flow;
+          const auto FirstFlow = uint64_t(TotalFlow * FirstSuccShareInDiamonds);
+          const auto SecondFlow = TotalFlow - FirstFlow;
+
+          FirstSucc.Jump->Flow = FirstFlow;
+          FirstSucc.Block.Flow = FirstFlow;
+          AdjJumps.at(FirstSucc.Index).at(0)->Flow = FirstFlow;
+
+          SecondSucc.Jump->Flow = SecondFlow;
+          SecondSucc.Block.Flow = SecondFlow;
+          AdjJumps.at(SecondSucc.Index).at(0)->Flow = SecondFlow;
+        }
+      } else if (IsFirstPD != IsSecondPD) {
+        SuccInfo &PdSucc = IsFirstPD ? FirstSucc : SecondSucc;
+        SuccInfo &AltSucc = IsFirstPD ? SecondSucc : FirstSucc;
+
+        if (AdjJumps.at(PdSucc.Index).at(0)->Target == AltSucc.Index) {
+          // Danglig Triangle
+          const auto TotalFlow = PdSucc.Jump->Flow + AltSucc.Jump->Flow;
+          const auto PdFlow =
+              uint64_t(TotalFlow * DanglingSuccShareInTriangles);
+          const auto AltFlow = TotalFlow - PdFlow;
+
+          PdSucc.Jump->Flow = PdFlow;
+          PdSucc.Block.Flow = PdFlow;
+          AdjJumps.at(PdSucc.Index).at(0)->Flow = PdFlow;
+
+          AltSucc.Jump->Flow = AltFlow;
+        }
+      }
+    }
+  }
+
   /// A constant indicating an aribtrary exit block of a function.
   static constexpr uint64_t AnyExitBlock = uint64_t(-1);
 
@@ -446,6 +537,9 @@ private:
   FlowFunction &Func;
   /// The jumps adjacent to each block.
   std::vector<std::vector<FlowJump *>> AdjJumps;
+
+  /// If true, rebalance the flow going through dangling constructs.
+  const bool RebalanceDangling;
 };
 
 /// Initializing flow network for a given function.
@@ -672,10 +766,22 @@ void verifyWeights(const FlowFunction &Func) {
 /// Apply the profile inference algorithm for a given function
 void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
                                    EdgeWeightMap &EdgeWeights) {
-  // Find all reachable blocks which the inference algorithm will be applied on.
+  // Find all forwards reachable blocks which the inference algorithm will be
+  // applied on.
   df_iterator_default_set<const BasicBlock *> Reachable;
   for (auto *BB : depth_first_ext(&F, Reachable))
     (void)BB /* Mark all reachable blocks */;
+
+  // Find all backwards reachable blocks which the inference algorithm will be
+  // applied on.
+  df_iterator_default_set<const BasicBlock *> InverseReachable;
+  for (const auto &BB : F) {
+    // An exit block is a block without any successors.
+    if (succ_empty(&BB)) {
+      for (auto *RBB : inverse_depth_first_ext(&BB, InverseReachable))
+        (void)RBB;
+    }
+  }
 
   // Keep a stable order for reachable blocks
   DenseMap<const BasicBlock *, uint64_t> BlockIndex;
@@ -683,7 +789,7 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
   BlockIndex.reserve(Reachable.size());
   BasicBlocks.reserve(Reachable.size());
   for (const auto &BB : F) {
-    if (Reachable.count(&BB)) {
+    if (Reachable.count(&BB) && InverseReachable.count(&BB)) {
       BlockIndex[&BB] = BasicBlocks.size();
       BasicBlocks.push_back(&BB);
     }
@@ -722,6 +828,8 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
   // Create FlowEdges
   for (const auto *BB : BasicBlocks) {
     for (auto *Succ : Successors[BB]) {
+      if (!BlockIndex.count(Succ))
+        continue;
       FlowJump Jump;
       Jump.Source = BlockIndex[BB];
       Jump.Target = BlockIndex[Succ];
@@ -753,8 +861,8 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
   // Extract flow values for every block and every edge
   extractWeights(InferenceNetwork, Func);
 
-  // Adjust flow to get rid of isolated flow components
-  auto Adjuster = FlowAdjuster(Func);
+  // Post-MCF Adjustments to the flow
+  auto Adjuster = FlowAdjuster(Func, RebalanceDanglingAfterMCF);
   Adjuster.run();
 
 #ifndef NDEBUG
@@ -775,10 +883,15 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
 
 #ifndef NDEBUG
   // Unreachable blocks and edges should not have a weight.
-  for (auto &I : BlockWeights)
+  for (auto &I : BlockWeights) {
     assert(Reachable.contains(I.first));
-  for (auto &I : EdgeWeights)
+    assert(InverseReachable.contains(I.first));
+  }
+  for (auto &I : EdgeWeights) {
     assert(Reachable.contains(I.first.first) &&
            Reachable.contains(I.first.second));
+    assert(InverseReachable.contains(I.first.first) &&
+           InverseReachable.contains(I.first.second));
+  }
 #endif
 }

@@ -74,6 +74,12 @@ llvm::cl::opt<bool>
                     llvm::cl::desc("show a list of hot function details"),
                     llvm::cl::Optional);
 
+llvm::cl::opt<bool> SkipAddressFixup(
+    "skip-address-fixup", llvm::cl::init(false),
+    llvm::cl::desc("Skip address fixup. Use when input address is"
+                   " already adjusted based on the preferred load address."),
+    llvm::cl::Optional);
+
 #define PROG_USAGE                                                             \
   "\nConverts a sample profile collected with Perf "                           \
   "(https://perf.wiki.kernel.org/)\n"                                          \

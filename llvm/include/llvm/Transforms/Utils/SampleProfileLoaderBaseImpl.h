@@ -38,6 +38,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/GenericDomTree.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/IPO/SampleProfileInference.h" // facebook T68973288
 #include "llvm/Transforms/Utils/SampleProfileLoaderBaseUtil.h"
 
 namespace llvm {
@@ -158,6 +159,12 @@ protected:
   void buildEdges(FunctionT &F);
   bool propagateThroughEdges(FunctionT &F, bool UpdateBlockCount);
   void clearFunctionData(bool ResetDT = true);
+  // facebook T68973288
+  inline void runPROFI(Function &F, BlockEdgeMap &Successors,
+                       BlockWeightMap &SampleBlockWeights,
+                       BlockWeightMap &BlockWeights,
+                       EdgeWeightMap &EdgeWeights);
+  // facebook end T68973288
   void computeDominanceAndLoopInfo(FunctionT &F);
   bool
   computeAndPropagateWeights(FunctionT &F,
@@ -222,6 +229,22 @@ protected:
   /// Optimization Remark Emitter used to emit diagnostic remarks.
   OptRemarkEmitterT *ORE = nullptr;
 };
+
+// facebook T68973288
+template <typename BT>
+inline void SampleProfileLoaderBaseImpl<BT>::runPROFI(
+    Function &F, BlockEdgeMap &Successors, BlockWeightMap &SampleBlockWeights,
+    BlockWeightMap &BlockWeights, EdgeWeightMap &EdgeWeights) {}
+
+template <>
+inline void SampleProfileLoaderBaseImpl<BasicBlock>::runPROFI(
+    Function &F, BlockEdgeMap &Successors, BlockWeightMap &SampleBlockWeights,
+    BlockWeightMap &BlockWeights, EdgeWeightMap &EdgeWeights) {
+  auto Infer = SampleProfileInference(F, Successors, SampleBlockWeights,
+                                      SampleProfileMcfRebalanceDangling);
+  Infer.apply(BlockWeights, EdgeWeights);
+}
+// facebook end T68973288
 
 /// Clear all the per-function data used to load samples and propagate weights.
 template <typename BT>
@@ -781,10 +804,9 @@ void SampleProfileLoaderBaseImpl<BT>::propagateWeights(FunctionT &F) {
   buildEdges(F);
 
   // facebook begin T68973288
-  if (SampleProfileUseMCF) {
-    static_assert(std::is_same<BT, BasicBlock>::value,
-                  "MCF only usable with BasicBlock instantiation of "
-                  "SampleProfileLoaderBaseImpl");
+  // MCF only usable with BasicBlock instantiation of
+  // SampleProfileLoaderBaseImpl.
+  if (SampleProfileUseMCF && std::is_same<BT, BasicBlock>::value) {
     // Fill in BlockWeights and EdgeWeights using an inference algorithm
     BlockWeightMap SampleBlockWeights;
     for (const auto &BI : F) {
@@ -792,8 +814,8 @@ void SampleProfileLoaderBaseImpl<BT>::propagateWeights(FunctionT &F) {
       if (Weight)
         SampleBlockWeights[&BI] = Weight.get();
     }
-    auto Infer = SampleProfileInference(F, Successors, SampleBlockWeights);
-    Infer.apply(BlockWeights, EdgeWeights);
+    runPROFI(getFunction(F), Successors, SampleBlockWeights, BlockWeights,
+             EdgeWeights);
   } else {
     // facebook end T68973288
     // If BB weight is larger than its corresponding loop's header BB weight,

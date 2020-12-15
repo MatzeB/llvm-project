@@ -31,8 +31,10 @@ using BlockEdgeMap =
 class SampleProfileInference {
 public:
   SampleProfileInference(Function &F, BlockEdgeMap &Successors,
-                         BlockWeightMap &SampleBlockWeights)
-      : F(F), Successors(Successors), SampleBlockWeights(SampleBlockWeights) {}
+                         BlockWeightMap &SampleBlockWeights,
+                         const bool RebalanceDanglingAfterMCF)
+      : F(F), Successors(Successors), SampleBlockWeights(SampleBlockWeights),
+        RebalanceDanglingAfterMCF(RebalanceDanglingAfterMCF) {}
 
   void apply(BlockWeightMap &BlockWeights, EdgeWeightMap &EdgeWeights);
 
@@ -45,6 +47,9 @@ private:
 
   /// Map basic blocks to their sampled weights.
   BlockWeightMap &SampleBlockWeights;
+
+  /// If true, rebalance the flow going through dangling constructs, after MCF.
+  const bool RebalanceDanglingAfterMCF;
 };
 
 } // end namespace llvm
