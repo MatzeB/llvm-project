@@ -45,13 +45,6 @@ llvm::cl::opt<uint64_t> SampleThresholdAbsl(
         " less than threshold are not included in the final profile"),
     llvm::cl::init(10));
 
-
-llvm::cl::opt<bool> LoadSymbolFromDebugSection(
-    "load_symbol_from_debug_section",
-    llvm::cl::desc(
-        "Parse the debug info section (if present) for function symbols"),
-    llvm::cl::init(true));
-
 namespace {
 using namespace std;
 
@@ -210,6 +203,14 @@ bool SymbolMap::IsCrossFunctionBranch(const Branch &branch) const {
   return TargetSym == &Group[0];
 }
 
+bool SymbolMap::IsCallToCoroutineResume(
+    const InstructionLocation &target) const {
+  auto itr = symtable_address_symbol_map_.find(target);
+  if (itr == symtable_address_symbol_map_.end())
+    return false;
+  return itr->second.Name.find(".resume") != std::string::npos;
+}
+
 void SymbolMap::CalculateThresholdFromTotalCount() {
   uint64_t total_count = 0;
   for (const auto &symbol : map_) {
@@ -221,17 +222,12 @@ void SymbolMap::CalculateThresholdFromTotalCount() {
                        << "threshold : " << count_threshold_ << std::endl);
 }
 
-void SymbolMap::BuildSymbolMap(const std::string &binary) {
-  if (LoadSymbolFromDebugSection){
-    SymbolLoader::loadSymbolFromDebugTable(binary, symbol_groups_);
-  } else {
-    SymbolLoader::loadSymbolFromSymbolTable(binary, symbol_groups_);
-  }
-
-  for (auto &group : symbol_groups_) {
+static void BuildSymbolMapHelper(SymbolGroups &sym_groups,
+                                 AddressSymbolMap &sym_map) {
+  for (auto &group : sym_groups) {
     for (auto &symb : group) {
       std::pair<AddressSymbolMap::iterator, bool> ret =
-          address_symbol_map_.insert({symb.StartAddress, symb});
+          sym_map.insert({symb.StartAddress, symb});
       if (!ret.second) {
         ElfSymbol &prior = ret.first->second;
         if (prior.Name == symb.Name)
@@ -242,6 +238,14 @@ void SymbolMap::BuildSymbolMap(const std::string &binary) {
       }
     }
   }
+}
+
+void SymbolMap::BuildSymbolMap(const std::string &binary) {
+  SymbolLoader::loadSymbolFromDebugTable(binary, symbol_groups_);
+  BuildSymbolMapHelper(symbol_groups_, address_symbol_map_);
+
+  SymbolLoader::loadSymbolFromSymbolTable(binary, symtable_symbol_groups_);
+  BuildSymbolMapHelper(symtable_symbol_groups_, symtable_address_symbol_map_);
 }
 
 void SymbolMap::AddSymbolEntryCount(const InstructionLocation &symb_location,

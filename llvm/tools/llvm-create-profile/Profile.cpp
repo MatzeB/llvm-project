@@ -127,6 +127,13 @@ void Profile::ComputeProfile(const RangeCountMap &range_map,
     if (!symbol_map_.IsCrossFunctionBranch(branch))
       continue;
 
+    // If the call target is a coroutine .resume function, in the debug info
+    // this function is mapped to the ramp function. We don't want the
+    // calling stats to be merged into the ramp function, to avoid confusing
+    // the inliner.
+    if (symbol_map_.IsCallToCoroutineResume(branch.target))
+      continue;
+
     // If the target is a known function, add to its head_count
     symbol_map_.AddSymbolEntryCount(branch_count.first.target,
                                     branch_count.second);
