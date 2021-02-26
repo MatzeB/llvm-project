@@ -919,14 +919,33 @@ bool SampleProfileLoaderBaseImpl<BT>::computeAndPropagateWeights(
         ProfileCount(Samples->getHeadSamples() + 1, Function::PCT_Real),
         &InlinedGUIDs);
 
-    // Compute dominance and loop info needed for propagation.
-    computeDominanceAndLoopInfo(F);
+    if (!SampleProfileUseMCF) { // facebook T68973288
+        // Compute dominance and loop info needed for propagation.
+        computeDominanceAndLoopInfo(F);
 
-    // Find equivalence classes.
-    findEquivalenceClasses(F);
+        // Find equivalence classes.
+        findEquivalenceClasses(F);
+    } // facebook T68973288
 
     // Propagate weights to all edges.
     propagateWeights(F);
+
+    // facebook begin T68973288
+    // If we utilize MCF-based count inference, then we trust the computed
+    // counts and set the entry count as computed by the algorithm. This is
+    // primarily done to sync the counts produced by MCF and BFI inference,
+    // which uses the entry count for mass propagation.
+    // If MCF produces a zero-value for the entry count, we fallback to
+    // Samples->getHeadSamples() + 1 to avoid functions with zero count.
+    if (SampleProfileUseMCF) {
+      const BasicBlockT *EntryBB = getEntryBB(&F);
+      if (BlockWeights[EntryBB] > 0) {
+        getFunction(F).setEntryCount(
+            ProfileCount(BlockWeights[EntryBB], Function::PCT_Real),
+            &InlinedGUIDs);
+      }
+    }
+    // facebook end T68973288
   }
 
   return Changed;

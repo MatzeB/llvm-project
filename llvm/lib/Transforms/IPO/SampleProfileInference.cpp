@@ -164,6 +164,8 @@ public:
   static constexpr int64_t AuxCostInc = 1;
   /// A cost of decreasing a block's count by one.
   static constexpr int64_t AuxCostDec = 2;
+  /// A cost of increasing the entry block's count by one.
+  static constexpr int64_t AuxCostIncEntry = ((int64_t)1) << 20;
   /// A cost of decreasing the entry block's count by one.
   static constexpr int64_t AuxCostDecEntry = ((int64_t)1) << 20;
   /// A cost of taking an unlikely jump.
@@ -600,9 +602,10 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
       AuxCostInc = 0;
       AuxCostDec = 0;
     }
-    // Decreasing the weight of entry blocks is expensive
-    if (Block.isEntry()) {
+    // Modifying the weight of the entry block is expensive unless it's dangling
+    if (Block.isEntry() && !Block.Dangling) {
       AuxCostDec = MinCostFlow::AuxCostDecEntry;
+      AuxCostInc = MinCostFlow::AuxCostIncEntry;
     }
     // For blocks with self-edges, do not penalize a reduction of the weight,
     // as all of the weight can be attributed to the self-edge
