@@ -33,20 +33,29 @@ namespace {
 /// during the execution.
 static constexpr int64_t INF = ((int64_t)1) << 40;
 
+struct FlowJump;
+
 /// A wrapper of a binary basic block.
 struct FlowBlock {
+  uint64_t Index;
   uint64_t Weight{0};
   bool Dangling{false};
   uint64_t Flow{0};
-  uint64_t InDegree{0};
-  uint64_t OutDegree{0};
   bool HasSelfEdge{false};
+  std::vector<FlowJump *> SuccJumps;
+  std::vector<FlowJump *> PredJumps;
+
+  /// In-degree of the block.
+  size_t InDegree() const { return PredJumps.size(); }
+
+  /// Out-degree of the block.
+  size_t OutDegree() const { return SuccJumps.size(); }
 
   /// Check if it is the entry block in the function.
-  bool isEntry() const { return InDegree == 0; }
+  bool isEntry() const { return PredJumps.empty(); }
 
   /// Check if it is an exit block in the function.
-  bool isExit() const { return OutDegree == 0; }
+  bool isExit() const { return SuccJumps.empty(); }
 };
 
 /// A wrapper of a jump between two basic blocks.
@@ -282,11 +291,6 @@ public:
       : Func(Func), RebalanceDangling(RebalanceDangling) {
     assert(Func.Blocks[Func.Entry].isEntry() &&
            "incorrect index of the entry block");
-
-    AdjJumps = std::vector<std::vector<FlowJump *>>(NumBlocks());
-    for (auto &Jump : Func.Jumps) {
-      AdjJumps[Jump.Source].push_back(&Jump);
-    }
   }
 
   // Run the algorithms
@@ -298,20 +302,17 @@ public:
     /// increase the flow by one unit along the path.
     joinIsolatedComponents();
 
-    /// A dangling construct comprises two nodes u and v such that:
+    /// A dangling subgraph comprises two nodes u and v such that:
     ///   - u dominates v and u is not dangling;
     ///   - v post-dominates u; and
     ///   - All inner-nodes of all (u,v)-paths are dangling
-    /// This processor rebalances the flow that goes through the constructs.
-    /// At the moment, however, we only treat diamond and triangle constructs.
+    /// This processor rebalances the flow that goes through the subgraphs.
     if (RebalanceDangling)
-      rebalanceDanglingConstructs();
+      rebalanceDanglingSubgraphs();
   }
 
-  /// For dangling triangles, how much is the share of the dangling node
-  static constexpr double DanglingSuccShareInTriangles = 0.5;
-  /// For dangling diamonds, how much is the share of the primary child
-  static constexpr double FirstSuccShareInDiamonds = 0.5;
+  /// The probability for the first successor of a dangling subgraph
+  static constexpr double DanglingFirstSuccProbability = 0.5;
 
 private:
   void joinIsolatedComponents() {
@@ -350,7 +351,7 @@ private:
     while (!Queue.empty()) {
       Src = Queue.front();
       Queue.pop();
-      for (auto Jump : AdjJumps[Src]) {
+      for (auto Jump : Func.Blocks[Src].SuccJumps) {
         uint64_t Dst = Jump->Target;
         if (Jump->Flow > 0 && !Visited[Dst]) {
           Queue.push(Dst);
@@ -401,7 +402,7 @@ private:
           (Func.Blocks[Src].isExit() && Target == AnyExitBlock))
         break;
 
-      for (auto Jump : AdjJumps[Src]) {
+      for (auto Jump : Func.Blocks[Src].SuccJumps) {
         uint64_t Dst = Jump->Target;
         int64_t JumpDist = jumpDistance(Jump);
         if (Distance[Dst] > Distance[Src] + JumpDist) {
@@ -459,75 +460,159 @@ private:
 
   uint64_t NumBlocks() const { return Func.Blocks.size(); }
 
-  struct SuccInfo {
-    SuccInfo(FlowFunction &Func, FlowJump *Jump)
-        : Jump(Jump), Index(Jump->Target), Block(Func.Blocks.at(Jump->Target)) {
-    }
-    FlowJump *Jump;
-    const uint64_t Index;
-    FlowBlock &Block;
-  };
+  /// Rebalance dangling subgraphs so as each branch splits with probabilities
+  /// DanglingFirstSuccProbability and 1 - DanglingFirstSuccProbability
+  void rebalanceDanglingSubgraphs() {
+    assert(DanglingFirstSuccProbability >= 0.0 &&
+           DanglingFirstSuccProbability <= 1.0 &&
+           "the share of the dangling successor should be between 0 and 1");
+    // Try to find dangling subgraphs from each non-dangling block
+    for (uint64_t I = 0; I < Func.Blocks.size(); I++) {
+      auto SrcBlock = &Func.Blocks[I];
+      // Do not attempt to find dangling successors from a dangling or a
+      // zero-flow block
+      if (SrcBlock->Dangling || SrcBlock->Flow == 0)
+        continue;
 
-  bool isProperDangling(const FlowBlock &B) const {
-    return B.Dangling && B.InDegree == 1 && B.OutDegree == 1;
+      std::vector<FlowBlock *> DanglingSuccs;
+      FlowBlock *DstBlock = nullptr;
+      // Find a dangling subgraphs starting at block SrcBlock
+      if (!findDanglingSubgraph(SrcBlock, DstBlock, DanglingSuccs))
+        continue;
+      // At the moment, we do not rebalance subgraphs containing cycles among
+      // dangling blocks
+      if (!isAcyclicSubgraph(SrcBlock, DstBlock, DanglingSuccs))
+        continue;
+
+      // Rebalance the flow
+      rebalanceDanglingSubgraph(SrcBlock, DstBlock, DanglingSuccs);
+    }
   }
 
-  void rebalanceDanglingConstructs() {
-    /// ** For now we treat only diamonds and triangles **
-    /// A dangling diamond comprises two dangling nodes with one and
-    /// the same incoming node and one and the same outgoing node.
-    /// The outgoing degree of the parent should be exactly 2.
-    /// A dangling triangle comprises a dangling node with one incoming
-    /// node and one outgoing node such that the outgoing node is also the
-    /// only other outgoing node of the parent of the dangling node.
-    assert(DanglingSuccShareInTriangles >= 0.0 &&
-           DanglingSuccShareInTriangles <= 1.0 &&
-           "the share of the dangling successor should be between 0 and 1");
-    assert(FirstSuccShareInDiamonds >= 0.0 && FirstSuccShareInDiamonds <= 1.0 &&
-           "the share of the first successor should be between 0 and 1");
-    for (uint64_t I = 0; I < Func.Blocks.size(); I++) {
-      const auto &AdjEdges = AdjJumps.at(I);
-      if (Func.Blocks.at(I).Dangling || AdjEdges.size() != 2) {
-        continue;
+  /// Find a dangling subgraph starting at block SrcBlock.
+  /// If the search is successful, the method sets DstBlock and DanglingSuccs.
+  bool findDanglingSubgraph(FlowBlock *SrcBlock, FlowBlock *&DstBlock,
+                            std::vector<FlowBlock *> &DanglingSuccs) {
+    // Run BFS from SrcBlock and make sure all paths are going through dangling
+    // blocks and end at a non-dangling DstBlock
+    auto Visited = std::vector<bool>(NumBlocks(), false);
+    std::queue<uint64_t> Queue;
+    DstBlock = nullptr;
+
+    Queue.push(SrcBlock->Index);
+    Visited[SrcBlock->Index] = true;
+    while (!Queue.empty()) {
+      auto &Block = Func.Blocks[Queue.front()];
+      Queue.pop();
+      // Process blocks reachable from Block
+      for (auto Jump : Block.SuccJumps) {
+        uint64_t Dst = Jump->Target;
+        if (Visited[Dst])
+          continue;
+        Visited[Dst] = true;
+        if (!Func.Blocks[Dst].Dangling) {
+          // If we see non-unique non-dangling block reachable from SrcBlock,
+          // stop processing and skip rebalancing
+          FlowBlock *CandidateDstBlock = &Func.Blocks[Dst];
+          if (DstBlock != nullptr && DstBlock != CandidateDstBlock)
+            return false;
+          DstBlock = CandidateDstBlock;
+        } else {
+          Queue.push(Dst);
+          DanglingSuccs.push_back(&Func.Blocks[Dst]);
+        }
+      }
+    }
+
+    // If the list of dangling blocks is empty, we don't need rebalancing
+    if (DanglingSuccs.empty())
+      return false;
+    // If there is no unique non-dangling destination block, skip rebalancing
+    if (DstBlock == nullptr)
+      return false;
+    // If any of the dangling blocks is an exit block, skip rebalancing
+    for (auto Block : DanglingSuccs) {
+      if (Block->isExit())
+        return false;
+    }
+
+    return true;
+  }
+
+  /// Verify if the given dangling subgraph is acyclic, and if yes, reorder
+  /// DanglingSuccs in the topological order (so that all jumps are "forward").
+  bool isAcyclicSubgraph(FlowBlock *SrcBlock, FlowBlock *DstBlock,
+                         std::vector<FlowBlock *> &DanglingSuccs) {
+    // Extract local in-degrees in the considered subgraph
+    auto LocalInDegree = std::vector<uint64_t>(NumBlocks(), 0);
+    for (auto Jump : SrcBlock->SuccJumps) {
+      LocalInDegree[Jump->Target]++;
+    }
+    for (size_t I = 0; I < DanglingSuccs.size(); I++) {
+      for (auto Jump : DanglingSuccs[I]->SuccJumps) {
+        LocalInDegree[Jump->Target]++;
+      }
+    }
+    // A loop containing SrcBlock
+    if (LocalInDegree[SrcBlock->Index] > 0)
+      return false;
+
+    std::vector<FlowBlock *> AcyclicOrder;
+    std::queue<uint64_t> Queue;
+    Queue.push(SrcBlock->Index);
+    while (!Queue.empty()) {
+      auto &Block = Func.Blocks[Queue.front()];
+      Queue.pop();
+      // Stop propagation once we reach DstBlock
+      if (Block.Index == DstBlock->Index)
+        break;
+
+      AcyclicOrder.push_back(&Block);
+      // Add to the queue all successors with zero local in-degree
+      for (auto Jump : Block.SuccJumps) {
+        uint64_t Dst = Jump->Target;
+        LocalInDegree[Dst]--;
+        if (LocalInDegree[Dst] == 0) {
+          Queue.push(Dst);
+        }
+      }
+    }
+
+    // If there is a cycle in the subgraph, AcyclicOrder contains only a subset
+    // of all blocks
+    if (DanglingSuccs.size() + 1 != AcyclicOrder.size())
+      return false;
+    DanglingSuccs = AcyclicOrder;
+    return true;
+  }
+
+  void rebalanceDanglingSubgraph(FlowBlock *SrcBlock, FlowBlock *DstBlock,
+                                 std::vector<FlowBlock *> &DanglingSuccs) {
+    assert(SrcBlock->Flow > 0 && "zero-flow block in dangling subgraph");
+    assert(DanglingSuccs.front() == SrcBlock && "incorrect order of dangles");
+
+    for (auto Block : DanglingSuccs) {
+      // Block's flow is the sum of incoming flows
+      uint64_t TotalFlow = 0;
+      if (Block == SrcBlock) {
+        TotalFlow = Block->Flow;
+      } else {
+        for (auto Jump : Block->PredJumps) {
+          TotalFlow += Jump->Flow;
+        }
+        Block->Flow = TotalFlow;
       }
 
-      SuccInfo FirstSucc(Func, AdjEdges.at(0));
-      const auto IsFirstPD = isProperDangling(FirstSucc.Block);
-      SuccInfo SecondSucc(Func, AdjEdges.at(1));
-      const auto IsSecondPD = isProperDangling(SecondSucc.Block);
-      if (IsFirstPD && IsSecondPD) {
-        if (AdjJumps.at(FirstSucc.Index).at(0)->Target ==
-            AdjJumps.at(SecondSucc.Index).at(0)->Target) {
-          // Danglig Diamond
-          const auto TotalFlow = FirstSucc.Block.Flow + SecondSucc.Block.Flow;
-          const auto FirstFlow = uint64_t(TotalFlow * FirstSuccShareInDiamonds);
-          const auto SecondFlow = TotalFlow - FirstFlow;
-
-          FirstSucc.Jump->Flow = FirstFlow;
-          FirstSucc.Block.Flow = FirstFlow;
-          AdjJumps.at(FirstSucc.Index).at(0)->Flow = FirstFlow;
-
-          SecondSucc.Jump->Flow = SecondFlow;
-          SecondSucc.Block.Flow = SecondFlow;
-          AdjJumps.at(SecondSucc.Index).at(0)->Flow = SecondFlow;
+      // Process all successor jumps and update corresponding flow values
+      for (size_t I = 0; I < Block->SuccJumps.size(); I++) {
+        auto Jump = Block->SuccJumps[I];
+        if (I + 1 == Block->SuccJumps.size()) {
+          Jump->Flow = TotalFlow;
+          continue;
         }
-      } else if (IsFirstPD != IsSecondPD) {
-        SuccInfo &PdSucc = IsFirstPD ? FirstSucc : SecondSucc;
-        SuccInfo &AltSucc = IsFirstPD ? SecondSucc : FirstSucc;
-
-        if (AdjJumps.at(PdSucc.Index).at(0)->Target == AltSucc.Index) {
-          // Danglig Triangle
-          const auto TotalFlow = PdSucc.Jump->Flow + AltSucc.Jump->Flow;
-          const auto PdFlow =
-              uint64_t(TotalFlow * DanglingSuccShareInTriangles);
-          const auto AltFlow = TotalFlow - PdFlow;
-
-          PdSucc.Jump->Flow = PdFlow;
-          PdSucc.Block.Flow = PdFlow;
-          AdjJumps.at(PdSucc.Index).at(0)->Flow = PdFlow;
-
-          AltSucc.Jump->Flow = AltFlow;
-        }
+        uint64_t Flow = uint64_t(TotalFlow * DanglingFirstSuccProbability);
+        Jump->Flow = Flow;
+        TotalFlow -= Flow;
       }
     }
   }
@@ -537,10 +622,8 @@ private:
 
   /// The function.
   FlowFunction &Func;
-  /// The jumps adjacent to each block.
-  std::vector<std::vector<FlowJump *>> AdjJumps;
 
-  /// If true, rebalance the flow going through dangling constructs.
+  /// If true, rebalance the flow going through dangling subgraphs.
   const bool RebalanceDangling;
 };
 
@@ -826,6 +909,7 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
       Block.Dangling = true;
       Block.Weight = 0;
     }
+    Block.Index = Func.Blocks.size();
     Func.Blocks.push_back(Block);
   }
   // Create FlowEdges
@@ -837,12 +921,14 @@ void SampleProfileInference::apply(BlockWeightMap &BlockWeights,
       Jump.Source = BlockIndex[BB];
       Jump.Target = BlockIndex[Succ];
       Func.Jumps.push_back(Jump);
-      Func.Blocks[BlockIndex[BB]].OutDegree++;
-      Func.Blocks[BlockIndex[Succ]].InDegree++;
       if (BB == Succ) {
         Func.Blocks[BlockIndex[BB]].HasSelfEdge = true;
       }
     }
+  }
+  for (auto &Jump : Func.Jumps) {
+    Func.Blocks[Jump.Source].SuccJumps.push_back(&Jump);
+    Func.Blocks[Jump.Target].PredJumps.push_back(&Jump);
   }
 
   // Try to infer probabilities of jumps based on the content of basic block
