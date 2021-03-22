@@ -1,3 +1,6 @@
+; facebook begin T86926906
+; UNSUPPORTED: true
+; facebook end T86926906
 ; RUN: llc < %s -mcpu=sm_20 | FileCheck %s
 
 target triple = "nvptx64-nvidia-cuda"

@@ -1,3 +1,6 @@
+; facebook begin T86926906
+; UNSUPPORTED: true
+; facebook end T86926906
 ; facebook begin T64625594
 ; RUN: opt < %s -nvptx-lower-args -S | FileCheck %s
 ; RUN: opt < %s -nvptx-lower-args -nvptx-max-arg-size-to-lower=100 -S | FileCheck %s --check-prefix=LIMIT-ARG
