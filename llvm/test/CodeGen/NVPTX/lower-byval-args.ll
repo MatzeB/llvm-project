@@ -1,3 +1,6 @@
+; facebook begin T86926906
+; UNSUPPORTED: true
+; facebook end T86926906
 ; RUN: llc < %s -mtriple nvptx64 -mcpu=sm_20 -verify-machineinstrs | FileCheck %s --check-prefixes=CHECK,CHECK64
 ; RUN: llc < %s -mtriple nvptx -mcpu=sm_20 -verify-machineinstrs | FileCheck %s --check-prefixes=CHECK,CHECK32
 ; RUN: %if ptxas %{ llc < %s -mtriple nvptx64 -mcpu=sm_20 -verify-machineinstrs | %ptxas-verify %}
