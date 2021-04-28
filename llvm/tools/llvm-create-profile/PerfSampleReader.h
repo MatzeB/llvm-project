@@ -132,8 +132,9 @@ public:
       : profile(profile), nbDropedBranch(0), nbDropedIP(0), nbDropedRange(0),
         log(std::cout), processedEvent(0),
 
-#define HEX "[a-f0-9]+"
-#define HEXLIT "0x" HEX
+#define HEXSET "[a-f0-9]"
+#define HEXCHAR "[a-f0-9]+"
+#define HEXLIT "0x" HEXCHAR
 
 #define MAP_REGEX                                                              \
   "\\[(" HEXLIT ")\\((" HEXLIT ")\\) @ (" HEXLIT "|0)( .*)*\\]: [-a-z]+ (.*)"
@@ -142,9 +143,9 @@ public:
         reg_mmap2("PERF_RECORD_MMAP2 .*: " MAP_REGEX),
         reg_map("PERF_RECORD_MMAP .*: " MAP_REGEX),
 
-#define LBR_REG "(" HEXLIT ")/(" HEXLIT ")/[P M]/[P \\-]/[P \\-]/" HEX
+#define LBR_REG "(" HEXLIT ")/(" HEXLIT ")/[P M]/[P \\-]/[P \\-]/" HEXCHAR
         //       matches    1=from       2=to
-        lbr_reg(LBR_REG), reg_event("[ \t]+(" HEX ")(( " LBR_REG " )+)") {
+        lbr_reg(LBR_REG), reg_event("[ \t]+(" HEXSET "*)(( " LBR_REG " )+)") {
 
     for (const auto &path : paths)
       fileNames[std::string(llvm::sys::path::filename(path))] = path;
@@ -390,7 +391,7 @@ private:
         nbDropedIP += 1;
         log << "on event : " << line << std::endl;
         log << "dropping address count because could not resolve : "
-            << std::hex << event.getValue().InstructionPointer << std::dec 
+            << std::hex << event.getValue().InstructionPointer << std::dec
             << std::endl;
       }
       std::reverse(event.getValue().BranchStack.begin(),
