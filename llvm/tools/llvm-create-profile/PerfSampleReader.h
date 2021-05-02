@@ -245,8 +245,7 @@ private:
     }
 
     {
-      auto offset = (address - mapping->StartAddress) + mapping->Offset +
-                    mapping->PreferedLoadAddress;
+      auto offset = (address - mapping->StartAddress) + mapping->PreferedLoadAddress;
       InstructionLocation ret{mapping->ObjectFile, offset};
       LLVM_DEBUG(log << "absolute address : " << std::hex << address << std::dec
                      << ", resolved to " << ret << std::endl);
@@ -280,7 +279,7 @@ private:
         fileNames.find(std::string(llvm::sys::path::filename(objectFile)));
     if (filename == fileNames.end())
       return Optional<MemoryMapping>{};
-    uint64_t base = SymbolLoader::preferedBasedAddress(filename->second);
+    uint64_t base = SymbolLoader::preferedBasedTextAddress(filename->second);
     uint64_t loadAddress = stoull(results[1]);
     uint64_t length = stoull(results[2]);
     uint64_t offset = stoull(results[3]);
@@ -384,16 +383,19 @@ private:
         }
       }
 
-      if (auto resolved_ip =
-              resolveAddress(event.getValue().InstructionPointer)) {
-        ip_count_map[resolved_ip.getValue()] += 1;
-      } else {
-        nbDropedIP += 1;
-        log << "on event : " << line << std::endl;
-        log << "dropping address count because could not resolve : "
-            << std::hex << event.getValue().InstructionPointer << std::dec
-            << std::endl;
+      if (event.getValue().InstructionPointer) {
+        if (auto resolved_ip =
+                resolveAddress(event.getValue().InstructionPointer)) {
+          ip_count_map[resolved_ip.getValue()] += 1;
+        } else {
+          nbDropedIP += 1;
+          log << "on event : " << line << std::endl;
+          log << "dropping address count because could not resolve : "
+              << std::hex << event.getValue().InstructionPointer << std::dec
+              << std::endl;
+        }
       }
+
       std::reverse(event.getValue().BranchStack.begin(),
                    event.getValue().BranchStack.end());
       std::vector<std::pair<Optional<InstructionLocation>,

@@ -169,6 +169,66 @@ public:
     }
   }
 
+  template <class ELFT>
+  static uint64_t getELFImageLMAForSec(const llvm::object::ELFFile<ELFT> &Obj,
+                                      const llvm::object::ELFSectionRef &Sec,
+                                      llvm::StringRef FileName) {
+    // Search for a PT_LOAD segment containing the requested section. Return this
+    // segment's p_addr as the image load address for the section.
+    auto header = Obj.program_headers();
+    if (!header) {
+      std::cerr << "Unexpected errors " << std::endl;
+      exit(-1);
+    }
+
+    const auto &PhdrRange = std::move(*header);
+    for (const typename ELFT::Phdr &Phdr : PhdrRange)
+      if ((Phdr.p_type == llvm::ELF::PT_LOAD) && (Phdr.p_vaddr <= Sec.getAddress()) &&
+          (Phdr.p_vaddr + Phdr.p_memsz > Sec.getAddress()))
+        // Segments will always be loaded at a page boundary.
+        return Phdr.p_paddr & ~(Phdr.p_align - 1U);
+    return 0;
+  }
+
+  // Get the image load address for a specific section. Note that an image is
+  // loaded by segments (a group of sections) and segments may not be consecutive
+  // in memory.
+  static uint64_t getELFImageLMAForSec(const llvm::object::ELFSectionRef &Sec) {
+    if (const auto *ELFObj = llvm::dyn_cast<ELF32LEObjectFile>(Sec.getObject()))
+      return getELFImageLMAForSec(ELFObj->getELFFile(), Sec,
+                                  ELFObj->getFileName());
+    else if (const auto *ELFObj = llvm::dyn_cast<llvm::object::ELF32BEObjectFile>(Sec.getObject()))
+      return getELFImageLMAForSec(ELFObj->getELFFile(), Sec,
+                                  ELFObj->getFileName());
+    else if (const auto *ELFObj = llvm::dyn_cast<ELF64LEObjectFile>(Sec.getObject()))
+      return getELFImageLMAForSec(ELFObj->getELFFile(), Sec,
+                                  ELFObj->getFileName());
+    const auto *ELFObj = llvm::cast<llvm::object::ELF64BEObjectFile>(Sec.getObject());
+    return getELFImageLMAForSec(ELFObj->getELFFile(), Sec, ELFObj->getFileName());
+  }
+
+ static uint64_t preferedBasedTextAddress(const std::string &binary_path) {
+    auto binary_file = openELFFile(binary_path);
+    Binary &binary = *binary_file.getBinary();
+
+    auto *obj = llvm::dyn_cast<ELFObjectFileBase>(&binary);
+    if (!obj) {
+      std::cerr << "not a valid Elf image:" << binary_path << std::endl;
+      exit(-1);
+    }
+
+    for (llvm::object::section_iterator SI = obj->section_begin(), SE = obj->section_end();
+       SI != SE; ++SI) {
+      const llvm::object::SectionRef &Section = *SI;
+      if (Section.isText()) {
+        return getELFImageLMAForSec(Section);
+      }
+    }
+
+    std::cerr << "Unexpected errors " << std::endl;
+    exit(-1);
+  }
+
   static uint64_t preferedBasedAddress(const std::string &binary_path) {
     auto binary_file = openELFFile(binary_path);
     if (llvm::dyn_cast<ELF64LEObjectFile>(binary_file.getBinary())) {
