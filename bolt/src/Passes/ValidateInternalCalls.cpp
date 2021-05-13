@@ -9,7 +9,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "ValidateInternalCalls.h"
+#include "FrameAnalysis.h"
 #include "Passes/DataflowInfoManager.h"
+#include "llvm/MC/MCInstPrinter.h"
 
 #define DEBUG_TYPE "bolt-internalcalls"
 
@@ -91,15 +93,15 @@ public:
 
 bool ValidateInternalCalls::fixCFGForPIC(BinaryFunction &Function) const {
   const BinaryContext &BC = Function.getBinaryContext();
-  for (auto &BB : Function) {
+  for (BinaryBasicBlock &BB : Function) {
     for (auto II = BB.begin(); II != BB.end(); ++II) {
-      auto &Inst = *II;
-      auto *Target = getInternalCallTarget(Function, Inst);
+      MCInst &Inst = *II;
+      BinaryBasicBlock *Target = getInternalCallTarget(Function, Inst);
       if (!Target || BC.MIB->hasAnnotation(Inst, getProcessedICTag()))
         continue;
 
       BC.MIB->addAnnotation(Inst, getProcessedICTag(), 0U);
-      auto MovedInsts = BB.splitInstructions(&Inst);
+      std::vector<MCInst> MovedInsts = BB.splitInstructions(&Inst);
       if (!MovedInsts.empty()) {
         // Split this block at the call instruction. Create an unreachable
         // block.
@@ -170,8 +172,8 @@ bool ValidateInternalCalls::fixCFGForIC(BinaryFunction &Function) const {
   // connecting RETs to potentially unrelated internal calls. This is safe
   // and if this causes a problem to recover the stack offsets properly, we
   // will fail later.
-  for (auto &BB : Function) {
-    for (auto &Inst : BB) {
+  for (BinaryBasicBlock &BB : Function) {
+    for (MCInst &Inst : BB) {
       if (!BC.MIB->isReturn(Inst))
         continue;
 
@@ -183,8 +185,8 @@ bool ValidateInternalCalls::fixCFGForIC(BinaryFunction &Function) const {
 
 bool ValidateInternalCalls::hasTailCallsInRange(BinaryFunction &Function) const {
   const BinaryContext &BC = Function.getBinaryContext();
-  for (auto &BB : Function) {
-    for (auto &Inst : BB) {
+  for (BinaryBasicBlock &BB : Function) {
+    for (MCInst &Inst : BB) {
       if (BC.MIB->isTailCall(Inst))
         return true;
     }
@@ -202,9 +204,9 @@ bool ValidateInternalCalls::analyzeFunction(BinaryFunction &Function) const {
   RA.setConservativeStrategy(RegAnalysis::ConservativeStrategy::CLOBBERS_NONE);
   bool HasTailCalls = hasTailCallsInRange(Function);
 
-  for (auto &BB : Function) {
-    for (auto &Inst : BB) {
-      auto *Target = getInternalCallTarget(Function, Inst);
+  for (BinaryBasicBlock &BB : Function) {
+    for (MCInst &Inst : BB) {
+      BinaryBasicBlock *Target = getInternalCallTarget(Function, Inst);
       if (!Target || BC.MIB->hasAnnotation(Inst, getProcessedICTag()))
         continue;
 
@@ -219,7 +221,7 @@ bool ValidateInternalCalls::analyzeFunction(BinaryFunction &Function) const {
       MCPhysReg Reg{0};
       int64_t StackOffset{0};
       bool IsIndexed{false};
-      auto *TargetInst = ProgramPoint::getFirstPointAt(*Target).getInst();
+      MCInst *TargetInst = ProgramPoint::getFirstPointAt(*Target).getInst();
       if (!BC.MIB->isStackAccess(*TargetInst, FIE.IsLoad, FIE.IsStore,
                                  FIE.IsStoreFromReg, Reg, SrcImm,
                                  FIE.StackPtrReg, StackOffset, FIE.Size,
@@ -251,7 +253,7 @@ bool ValidateInternalCalls::analyzeFunction(BinaryFunction &Function) const {
                 E = RU.expr_end();
            I != E; ++I) {
         MCInst &Use = **I;
-        auto UsedRegs = BitVector(BC.MRI->getNumRegs(), false);
+        BitVector UsedRegs = BitVector(BC.MRI->getNumRegs(), false);
         BC.MIB->getTouchedRegs(Use, UsedRegs);
         if (!UsedRegs[Reg])
           continue;
@@ -299,8 +301,8 @@ void ValidateInternalCalls::runOnFunctions(BinaryContext &BC) {
   std::set<BinaryFunction *> NeedsValidation;
   for (auto &BFI : BC.getBinaryFunctions()) {
     BinaryFunction &Function = BFI.second;
-    for (auto &BB : Function) {
-      for (auto &Inst : BB) {
+    for (BinaryBasicBlock &BB : Function) {
+      for (MCInst &Inst : BB) {
         if (getInternalCallTarget(Function, Inst)) {
           NeedsValidation.insert(&Function);
           Function.setSimple(false);
@@ -320,7 +322,7 @@ void ValidateInternalCalls::runOnFunctions(BinaryContext &BC) {
   // value, so it is not really a call, but a jump. If we find that it's not the
   // case, we mark this function as non-simple and stop processing it.
   std::set<BinaryFunction *> Invalid;
-  for (auto *Function : NeedsValidation) {
+  for (BinaryFunction *Function : NeedsValidation) {
     LLVM_DEBUG(dbgs() << "Validating " << *Function << "\n");
     if (!analyzeFunction(*Function)) {
       Invalid.insert(Function);
@@ -331,7 +333,7 @@ void ValidateInternalCalls::runOnFunctions(BinaryContext &BC) {
   if (!Invalid.empty()) {
     errs() << "BOLT-WARNING: will skip the following function(s) as unsupported"
               " internal calls were detected:\n";
-    for (auto *Function : Invalid) {
+    for (BinaryFunction *Function : Invalid) {
       errs() << "              " << *Function << "\n";
       Function->setIgnored();
     }

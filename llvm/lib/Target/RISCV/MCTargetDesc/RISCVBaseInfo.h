@@ -56,14 +56,14 @@ enum {
   HasDummyMaskOpShift = VLMulShift + 3,
   HasDummyMaskOpMask = 1 << HasDummyMaskOpShift,
 
-  // Does this instruction only update element 0 the destination register.
-  WritesElement0Shift = HasDummyMaskOpShift + 1,
-  WritesElement0Mask = 1 << WritesElement0Shift,
+  // Force a tail agnostic policy even this instruction has a tied destination.
+  ForceTailAgnosticShift = HasDummyMaskOpShift + 1,
+  ForceTailAgnosticMask = 1 << ForceTailAgnosticShift,
 
   // Does this instruction have a merge operand that must be removed when
   // converting to MCInst. It will be the first explicit use operand. Used by
   // RVV Pseudos.
-  HasMergeOpShift = WritesElement0Shift + 1,
+  HasMergeOpShift = ForceTailAgnosticShift + 1,
   HasMergeOpMask = 1 << HasMergeOpShift,
 
   // Does this instruction have a SEW operand. It will be the last explicit
@@ -117,7 +117,11 @@ enum OperandType : unsigned {
   OPERAND_SIMM12,
   OPERAND_UIMM20,
   OPERAND_UIMMLOG2XLEN,
-  OPERAND_LAST_RISCV_IMM = OPERAND_UIMMLOG2XLEN
+  OPERAND_LAST_RISCV_IMM = OPERAND_UIMMLOG2XLEN,
+  // Operand is either a register or uimm5, this is used by V extension pseudo
+  // instructions to represent a value that be passed as AVL to either vsetvli
+  // or vsetivli.
+  OPERAND_AVL,
 };
 } // namespace RISCVOp
 

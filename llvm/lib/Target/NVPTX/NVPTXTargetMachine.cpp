@@ -13,6 +13,7 @@
 #include "NVPTXTargetMachine.h"
 #include "NVPTX.h"
 #include "NVPTXAllocaHoisting.h"
+#include "NVPTXAtomicLower.h"
 #include "NVPTXLowerAggrCopies.h"
 #include "NVPTXTargetObjectFile.h"
 #include "NVPTXTargetTransformInfo.h"
@@ -65,6 +66,7 @@ void initializeNVVMIntrRangePass(PassRegistry&);
 void initializeNVVMReflectPass(PassRegistry&);
 void initializeGenericToNVVMPass(PassRegistry&);
 void initializeNVPTXAllocaHoistingPass(PassRegistry &);
+void initializeNVPTXAtomicLowerPass(PassRegistry &);
 void initializeNVPTXAssignValidGlobalNamesPass(PassRegistry&);
 void initializeNVPTXLowerAggrCopiesPass(PassRegistry &);
 void initializeNVPTXLowerArgsPass(PassRegistry &);
@@ -86,6 +88,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeNVPTXTarget() {
   initializeGenericToNVVMPass(PR);
   initializeNVPTXAllocaHoistingPass(PR);
   initializeNVPTXAssignValidGlobalNamesPass(PR);
+  initializeNVPTXAtomicLowerPass(PR);
   initializeNVPTXLowerArgsPass(PR);
   initializeNVPTXLowerAllocaPass(PR);
   initializeNVPTXLowerAggrCopiesPass(PR);
@@ -227,7 +230,9 @@ void NVPTXTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
                                PassBuilder::OptimizationLevel Level) {
         FunctionPassManager FPM(DebugPassManager);
         FPM.addPass(NVVMReflectPass(Subtarget.getSmVersion()));
-        FPM.addPass(NVVMIntrRangePass(Subtarget.getSmVersion()));
+        // FIXME: NVVMIntrRangePass is causing numerical discrepancies,
+        // investigate and re-enable.
+        // FPM.addPass(NVVMIntrRangePass(Subtarget.getSmVersion()));
         PM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
       });
 }
@@ -250,6 +255,7 @@ void NVPTXPassConfig::addAddressSpaceInferencePasses() {
   addPass(createSROAPass());
   addPass(createNVPTXLowerAllocaPass());
   addPass(createInferAddressSpacesPass());
+  addPass(createNVPTXAtomicLowerPass());
 }
 
 void NVPTXPassConfig::addStraightLineScalarOptimizationPasses() {

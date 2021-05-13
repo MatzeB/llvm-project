@@ -823,6 +823,8 @@ Expected<const DWARFDebugFrame *> DWARFContext::getDebugFrame() {
   if (DebugFrame)
     return DebugFrame.get();
 
+  const DWARFSection &DS = DObj->getFrameSection();
+
   // There's a "bug" in the DWARFv3 standard with respect to the target address
   // size within debug frame sections. While DWARF is supposed to be independent
   // of its container, FDEs have fields with size being "target address size",
@@ -832,10 +834,11 @@ Expected<const DWARFDebugFrame *> DWARFContext::getDebugFrame() {
   // provides this information). This problem is fixed in DWARFv4
   // See this dwarf-discuss discussion for more details:
   // http://lists.dwarfstd.org/htdig.cgi/dwarf-discuss-dwarfstd.org/2011-December/001173.html
-  DWARFDataExtractor debugFrameData(*DObj, DObj->getFrameSection(),
-                                    isLittleEndian(), DObj->getAddressSize());
-  auto DF = std::make_unique<DWARFDebugFrame>(getArch(), /*IsEH=*/false);
-  if (Error E = DF->parse(debugFrameData))
+  DWARFDataExtractor DebugFrameData(*DObj, DS, isLittleEndian(),
+                                    DObj->getAddressSize());
+  auto DF =
+      std::make_unique<DWARFDebugFrame>(getArch(), /*IsEH=*/false, DS.Address);
+  if (Error E = DF->parse(DebugFrameData))
     return std::move(E);
 
   DebugFrame.swap(DF);
@@ -846,12 +849,13 @@ Expected<const DWARFDebugFrame *> DWARFContext::getEHFrame() {
   if (EHFrame)
     return EHFrame.get();
 
-  DWARFDataExtractor debugFrameData(*DObj, DObj->getEHFrameSection(),
-                                    isLittleEndian(), DObj->getAddressSize());
+  const DWARFSection &DS = DObj->getEHFrameSection();
+  DWARFDataExtractor DebugFrameData(*DObj, DS, isLittleEndian(),
+                                    DObj->getAddressSize());
 
-  auto DF = std::make_unique<DWARFDebugFrame>(getArch(), /*IsEH=*/true,
-                                              DObj->getEHFrameAddress());
-  if (Error E = DF->parse(debugFrameData))
+  auto DF =
+      std::make_unique<DWARFDebugFrame>(getArch(), /*IsEH=*/true, DS.Address);
+  if (Error E = DF->parse(DebugFrameData))
     return std::move(E);
   DebugFrame.swap(DF);
   return DebugFrame.get();
@@ -1594,7 +1598,6 @@ class DWARFObjInMemory final : public DWARFObject {
   // new decompressed sections are inserted at the end.
   std::deque<SmallString<0>> UncompressedSections;
 
-  uint64_t EHFrameAddress{0};
   bool UsesRelocs{true};
 
   StringRef *mapSectionToMember(StringRef Name) {
@@ -1726,8 +1729,9 @@ public:
         if (Name == "debug_ranges") {
           // FIXME: Use the other dwo range section when we emit it.
           RangesDWOSection.Data = Data;
-        } else if (Name == "eh_frame") {
-          EHFrameAddress = Section.getAddress();
+        } else if (Name == "debug_frame" || Name == "eh_frame") {
+          if (DWARFSection *S = mapNameToDWARFSection(Name))
+            S->Address = Section.getAddress();
         }
       } else if (InfoSectionMap *Sections =
                      StringSwitch<InfoSectionMap *>(Name)
@@ -1925,7 +1929,6 @@ public:
   const DWARFSection &getEHFrameSection() const override {
     return EHFrameSection;
   }
-  uint64_t getEHFrameAddress() const override { return EHFrameAddress; }
   const DWARFSection &getLineSection() const override { return LineSection; }
   StringRef getStrSection() const override { return StrSection; }
   const DWARFSection &getRangesSection() const override { return RangesSection; }

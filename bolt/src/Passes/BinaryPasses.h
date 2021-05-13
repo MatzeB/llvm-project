@@ -16,13 +16,11 @@
 #include "BinaryContext.h"
 #include "BinaryFunction.h"
 #include "DynoStats.h"
-#include "HFSort.h"
 #include "llvm/Support/CommandLine.h"
 #include <atomic>
 #include <map>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace llvm {
@@ -78,8 +76,8 @@ public:
   }
 
   void runOnFunctions(BinaryContext &BC) override {
-    const auto NewDynoStats = getDynoStats(BC.getBinaryFunctions());
-    const auto Changed = (NewDynoStats != PrevDynoStats);
+    const DynoStats NewDynoStats = getDynoStats(BC.getBinaryFunctions());
+    const bool Changed = (NewDynoStats != PrevDynoStats);
     outs() << "BOLT-INFO: program-wide dynostats "
            << Title << (Changed ? "" : " (no change)") << ":\n\n"
            << PrevDynoStats;

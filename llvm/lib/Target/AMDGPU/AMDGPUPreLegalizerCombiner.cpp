@@ -41,8 +41,8 @@ public:
       : B(B), MF(B.getMF()), MRI(*B.getMRI()), Helper(Helper){};
 
   struct ClampI64ToI16MatchInfo {
-    int64_t Cmp1;
-    int64_t Cmp2;
+    int64_t Cmp1 = 0;
+    int64_t Cmp2 = 0;
     Register Origin;
   };
 
@@ -70,34 +70,42 @@ bool AMDGPUPreLegalizerCombinerHelper::matchClampI64ToI16(
 
   Register Base;
 
+  auto IsApplicableForCombine = [&MatchInfo]() -> bool {
+    const auto Cmp1 = MatchInfo.Cmp1;
+    const auto Cmp2 = MatchInfo.Cmp2;
+    const auto Diff = std::abs(Cmp2 - Cmp1);
+
+    // If the difference between both comparison values is 0 or 1, there is no
+    // need to clamp.
+    if (Diff == 0 || Diff == 1)
+      return false;
+
+    const int64_t Min = std::numeric_limits<int16_t>::min();
+    const int64_t Max = std::numeric_limits<int16_t>::max();
+
+    // Check if the comparison values are between SHORT_MIN and SHORT_MAX.
+    return ((Cmp2 >= Cmp1 && Cmp1 >= Min && Cmp2 <= Max) ||
+            (Cmp1 >= Cmp2 && Cmp1 <= Max && Cmp2 >= Min));
+  };
+
   // Try to match a combination of min / max MIR opcodes.
-  if (mi_match(MI.getOperand(1).getReg(), MRI, m_GSMin(m_Reg(Base), m_ICst(MatchInfo.Cmp1)))) {
-    if (!mi_match(Base, MRI, m_GSMax(m_Reg(MatchInfo.Origin), m_ICst(MatchInfo.Cmp2)))) {
-      return false;
+  if (mi_match(MI.getOperand(1).getReg(), MRI,
+               m_GSMin(m_Reg(Base), m_ICst(MatchInfo.Cmp1)))) {
+    if (mi_match(Base, MRI,
+                 m_GSMax(m_Reg(MatchInfo.Origin), m_ICst(MatchInfo.Cmp2)))) {
+      return IsApplicableForCombine();
     }
   }
 
-  if (mi_match(MI.getOperand(1).getReg(), MRI, m_GSMax(m_Reg(Base), m_ICst(MatchInfo.Cmp1)))) {
-    if (!mi_match(Base, MRI, m_GSMin(m_Reg(MatchInfo.Origin), m_ICst(MatchInfo.Cmp2)))) {
-      return false;
+  if (mi_match(MI.getOperand(1).getReg(), MRI,
+               m_GSMax(m_Reg(Base), m_ICst(MatchInfo.Cmp1)))) {
+    if (mi_match(Base, MRI,
+                 m_GSMin(m_Reg(MatchInfo.Origin), m_ICst(MatchInfo.Cmp2)))) {
+      return IsApplicableForCombine();
     }
   }
-   
-  const auto Cmp1 = MatchInfo.Cmp1;
-  const auto Cmp2 = MatchInfo.Cmp2;
-  const auto Diff = std::abs(Cmp2 - Cmp1);
 
-  // If the difference between both comparison values is 0 or 1, there is no
-  // need to clamp.
-  if (Diff == 0 || Diff == 1)
-    return false;
-
-  const int64_t Min = std::numeric_limits<int16_t>::min();
-  const int64_t Max = std::numeric_limits<int16_t>::max();
-
-  // Check if the comparison values are between SHORT_MIN and SHORT_MAX.
-  return ((Cmp2 >= Cmp1 && Cmp1 >= Min && Cmp2 <= Max) ||
-          (Cmp1 >= Cmp2 && Cmp1 <= Max && Cmp2 >= Min));
+  return false;
 }
 
 // We want to find a combination of instructions that
@@ -123,10 +131,9 @@ void AMDGPUPreLegalizerCombinerHelper::applyClampI64ToI16(
   assert(MI.getOpcode() != AMDGPU::G_AMDGPU_CVT_PK_I16_I32);
 
   const LLT V2S16 = LLT::vector(2, 16);
-  auto CvtPk = B.buildInstr(AMDGPU::G_AMDGPU_CVT_PK_I16_I32,
-    {V2S16},
-    {Unmerge.getReg(0), Unmerge.getReg(1)},
-    MI.getFlags());
+  auto CvtPk =
+      B.buildInstr(AMDGPU::G_AMDGPU_CVT_PK_I16_I32, {V2S16},
+                   {Unmerge.getReg(0), Unmerge.getReg(1)}, MI.getFlags());
 
   auto MinBoundary = std::min(MatchInfo.Cmp1, MatchInfo.Cmp2);
   auto MaxBoundary = std::max(MatchInfo.Cmp1, MatchInfo.Cmp2);
@@ -135,11 +142,11 @@ void AMDGPUPreLegalizerCombinerHelper::applyClampI64ToI16(
 
   auto Bitcast = B.buildBitcast({S32}, CvtPk);
 
-  auto Med3 = B.buildInstr(AMDGPU::G_AMDGPU_MED3,
-    {S32},
-    {MinBoundaryDst.getReg(0), Bitcast.getReg(0), MaxBoundaryDst.getReg(0)},
-    MI.getFlags());
-  
+  auto Med3 = B.buildInstr(
+      AMDGPU::G_AMDGPU_SMED3, {S32},
+      {MinBoundaryDst.getReg(0), Bitcast.getReg(0), MaxBoundaryDst.getReg(0)},
+      MI.getFlags());
+
   B.buildTrunc(MI.getOperand(0).getReg(), Med3);
 
   MI.eraseFromParent();
@@ -192,7 +199,7 @@ bool AMDGPUPreLegalizerCombinerInfo::combine(GISelChangeObserver &Observer,
   CombinerHelper Helper(Observer, B, KB, MDT);
   AMDGPUPreLegalizerCombinerHelper PreLegalizerHelper(B, Helper);
   AMDGPUGenPreLegalizerCombinerHelper Generated(GeneratedRuleCfg, Helper,
-                                                 PreLegalizerHelper);
+                                                PreLegalizerHelper);
 
   if (Generated.tryCombineAll(Observer, MI, B, Helper))
     return true;
@@ -242,6 +249,9 @@ void AMDGPUPreLegalizerCombiner::getAnalysisUsage(AnalysisUsage &AU) const {
     AU.addRequired<MachineDominatorTree>();
     AU.addPreserved<MachineDominatorTree>();
   }
+
+  AU.addRequired<GISelCSEAnalysisWrapperPass>();
+  AU.addPreserved<GISelCSEAnalysisWrapperPass>();
   MachineFunctionPass::getAnalysisUsage(AU);
 }
 
@@ -258,14 +268,18 @@ bool AMDGPUPreLegalizerCombiner::runOnMachineFunction(MachineFunction &MF) {
   const Function &F = MF.getFunction();
   bool EnableOpt =
       MF.getTarget().getOptLevel() != CodeGenOpt::None && !skipFunction(F);
-
   GISelKnownBits *KB = &getAnalysis<GISelKnownBitsAnalysis>().get(MF);
   MachineDominatorTree *MDT =
       IsOptNone ? nullptr : &getAnalysis<MachineDominatorTree>();
   AMDGPUPreLegalizerCombinerInfo PCInfo(EnableOpt, F.hasOptSize(),
                                         F.hasMinSize(), KB, MDT);
+  // Enable CSE.
+  GISelCSEAnalysisWrapper &Wrapper =
+      getAnalysis<GISelCSEAnalysisWrapperPass>().getCSEWrapper();
+  auto *CSEInfo = &Wrapper.get(TPC->getCSEConfig());
+
   Combiner C(PCInfo, TPC);
-  return C.combineMachineInstrs(MF, /*CSEInfo*/ nullptr);
+  return C.combineMachineInstrs(MF, CSEInfo);
 }
 
 char AMDGPUPreLegalizerCombiner::ID = 0;

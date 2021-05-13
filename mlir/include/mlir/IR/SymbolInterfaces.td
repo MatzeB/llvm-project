@@ -44,7 +44,7 @@ def Symbol : OpInterface<"SymbolOpInterface"> {
       /*defaultImplementation=*/[{
         this->getOperation()->setAttr(
             mlir::SymbolTable::getSymbolAttrName(),
-            StringAttr::get(name, this->getOperation()->getContext()));
+            StringAttr::get(this->getOperation()->getContext(), name));
       }]
     >,
     InterfaceMethod<"Gets the visibility of this symbol.",
@@ -178,10 +178,10 @@ def Symbol : OpInterface<"SymbolOpInterface"> {
   let extraClassDeclaration = [{
     /// Custom classof that handles the case where the symbol is optional.
     static bool classof(Operation *op) {
-      auto *concept = getInterfaceFor(op);
-      if (!concept)
+      auto *opConcept = getInterfaceFor(op);
+      if (!opConcept)
         return false;
-      return !concept->isOptionalSymbol(op) ||
+      return !opConcept->isOptionalSymbol(opConcept, op) ||
              op->getAttr(::mlir::SymbolTable::getSymbolAttrName());
     }
   }];

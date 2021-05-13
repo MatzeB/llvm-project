@@ -36,6 +36,7 @@ struct TestLinalgCodegenStrategy
     registry.insert<AffineDialect,
                     gpu::GPUDialect,
                     linalg::LinalgDialect,
+                    memref::MemRefDialect,
                     scf::SCFDialect,
                     StandardOpsDialect,
                     vector::VectorDialect>();
@@ -56,6 +57,10 @@ struct TestLinalgCodegenStrategy
   ListOption<int64_t> tileSizes{*this, "tile-sizes",
                                 llvm::cl::MiscFlags::CommaSeparated,
                                 llvm::cl::desc("Specifies the tile sizes.")};
+  ListOption<unsigned> tileInterchange{
+      *this, "tile-interchange", llvm::cl::MiscFlags::CommaSeparated,
+      llvm::cl::desc("Specifies the tile interchange.")};
+
   Option<bool> promote{
       *this, "promote",
       llvm::cl::desc("Promote the tile into a small aligned memory buffer."),
@@ -110,6 +115,12 @@ struct TestLinalgCodegenStrategy
           "\tlinalg.copy: anchor on linalg.copy\n"
           "\tlinalg.fill: anchor on linalg.fill\n"),
       llvm::cl::init("")};
+  Option<std::string> anchorFuncOpName{
+      *this, "anchor-func",
+      llvm::cl::desc(
+          "Which single func op is the anchor for the codegen strategy to "
+          "latch on."),
+      llvm::cl::init("")};
 };
 
 template <>
@@ -132,7 +143,7 @@ void TestLinalgCodegenStrategy::runStrategy<LinalgOp>(
           LinalgPromotionOptions()
               .setAlignment(16)
               .setUseFullTileBuffersByDefault(registerPromoteFullTile))
-      .vectorizeIf<LinalgOp>(vectorize, anchorOpName)
+      .vectorizeIf(vectorize, anchorOpName)
       .setVectorTransformsOptions(
           vector::VectorTransformsOptions()
               .setVectorTransformsOptions(vectorContractLowering)
@@ -174,9 +185,14 @@ void TestLinalgCodegenStrategy::runStrategy(
 
 /// Apply transformations specified as patterns.
 void TestLinalgCodegenStrategy::runOnFunction() {
+  if (!anchorFuncOpName.empty() && anchorFuncOpName != getFunction().getName())
+    return;
+
   LinalgTilingOptions tilingOptions;
   if (!tileSizes.empty())
     tilingOptions = tilingOptions.setTileSizes(tileSizes);
+  if (!tileInterchange.empty())
+    tilingOptions = tilingOptions.setInterchange(tileInterchange);
 
   LinalgTilingOptions registerTilingOptions;
   if (!registerTileSizes.empty())

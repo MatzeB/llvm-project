@@ -64,7 +64,6 @@ def testTraverseOpRegionBlockIterators():
   # CHECK:         BLOCK 0:
   # CHECK:           OP 0: %0 = "custom.addi"
   # CHECK:           OP 1: return
-  # CHECK:    OP 1: module_terminator
   walk_operations("", op)
 
 run(testTraverseOpRegionBlockIterators)
@@ -101,7 +100,6 @@ def testTraverseOpRegionBlockIndices():
   # CHECK:         BLOCK 0:
   # CHECK:           OP 0: %0 = "custom.addi"
   # CHECK:           OP 1: return
-  # CHECK:    OP 1: module_terminator
   walk_operations("", module.operation)
 
 run(testTraverseOpRegionBlockIndices)
@@ -215,6 +213,38 @@ def testOperationOperandsSlice():
 
 
 run(testOperationOperandsSlice)
+
+
+# CHECK-LABEL: TEST: testOperationOperandsSet
+def testOperationOperandsSet():
+  with Context() as ctx, Location.unknown(ctx):
+    ctx.allow_unregistered_dialects = True
+    module = Module.parse(r"""
+      func @f1() {
+        %0 = "test.producer0"() : () -> i64
+        %1 = "test.producer1"() : () -> i64
+        %2 = "test.producer2"() : () -> i64
+        "test.consumer"(%0) : (i64) -> ()
+        return
+      }""")
+    func = module.body.operations[0]
+    entry_block = func.regions[0].blocks[0]
+    producer1 = entry_block.operations[1]
+    producer2 = entry_block.operations[2]
+    consumer = entry_block.operations[3]
+    assert len(consumer.operands) == 1
+    type = consumer.operands[0].type
+
+    # CHECK: test.producer1
+    consumer.operands[0] = producer1.result
+    print(consumer.operands[0])
+
+    # CHECK: test.producer2
+    consumer.operands[-1] = producer2.result
+    print(consumer.operands[0])
+
+
+run(testOperationOperandsSet)
 
 
 # CHECK-LABEL: TEST: testDetachedOperation
@@ -470,7 +500,7 @@ def testOperationPrint():
   print(bytes_value)
 
   # Test get_asm with options.
-  # CHECK: value = opaque<"", "0xDEADBEEF"> : tensor<4xi32>
+  # CHECK: value = opaque<"_", "0xDEADBEEF"> : tensor<4xi32>
   # CHECK: "std.return"(%arg0) : (i32) -> () -:4:7
   module.operation.print(large_elements_limit=2, enable_debug_info=True,
       pretty_debug_info=True, print_generic_op_form=True, use_local_scope=True)
@@ -492,7 +522,7 @@ def testKnownOpView():
     # addf should map to a known OpView class in the std dialect.
     # We know the OpView for it defines an 'lhs' attribute.
     addf = module.body.operations[2]
-    # CHECK: <mlir.dialects.std._AddFOp object
+    # CHECK: <mlir.dialects._std_ops_gen._AddFOp object
     print(repr(addf))
     # CHECK: "custom.f32"()
     print(addf.lhs)
@@ -546,9 +576,9 @@ run(testSingleResultProperty)
 def testPrintInvalidOperation():
   ctx = Context()
   with Location.unknown(ctx):
-    module = Operation.create("module", regions=1)
-    # This block does not have a terminator, it may crash the custom printer.
-    # Verify that we fallback to the generic printer for safety.
+    module = Operation.create("module", regions=2)
+    # This module has two region and is invalid verify that we fallback
+    # to the generic printer for safety.
     block = module.regions[0].blocks.append()
     # CHECK: // Verification failed, printing generic form
     # CHECK: "module"() ( {
@@ -603,3 +633,38 @@ def testOperationName():
     print(op.operation.name)
 
 run(testOperationName)
+
+# CHECK-LABEL: TEST: testCapsuleConversions
+def testCapsuleConversions():
+  ctx = Context()
+  ctx.allow_unregistered_dialects = True
+  with Location.unknown(ctx):
+    m = Operation.create("custom.op1").operation
+    m_capsule = m._CAPIPtr
+    assert '"mlir.ir.Operation._CAPIPtr"' in repr(m_capsule)
+    m2 = Operation._CAPICreate(m_capsule)
+    assert m2 is m
+
+run(testCapsuleConversions)
+
+# CHECK-LABEL: TEST: testOperationErase
+def testOperationErase():
+  ctx = Context()
+  ctx.allow_unregistered_dialects = True
+  with Location.unknown(ctx):
+    m = Module.create()
+    with InsertionPoint(m.body):
+      op = Operation.create("custom.op1")
+
+      # CHECK: "custom.op1"
+      print(m)
+
+      op.operation.erase()
+
+      # CHECK-NOT: "custom.op1"
+      print(m)
+
+      # Ensure we can create another operation
+      Operation.create("custom.op2")
+
+run(testOperationErase)

@@ -13,7 +13,6 @@
 #include "SplitFunctions.h"
 #include "llvm/Support/CommandLine.h"
 
-#include <numeric>
 #include <vector>
 
 #define DEBUG_TYPE "bolt-opts"
@@ -123,8 +122,8 @@ void SplitFunctions::splitFunction(BinaryFunction &BF) {
     return;
 
   bool AllCold = true;
-  for (auto *BB : BF.layout()) {
-    auto ExecCount = BB->getExecutionCount();
+  for (BinaryBasicBlock *BB : BF.layout()) {
+    uint64_t ExecCount = BB->getExecutionCount();
     if (ExecCount == BinaryBasicBlock::COUNT_NO_PROFILE)
       return;
     if (ExecCount != 0)
@@ -134,9 +133,9 @@ void SplitFunctions::splitFunction(BinaryFunction &BF) {
   if (AllCold)
     return;
 
-  auto PreSplitLayout = BF.getLayout();
+  std::vector<BinaryBasicBlock *> PreSplitLayout = BF.getLayout();
 
-  auto &BC = BF.getBinaryContext();
+  BinaryContext &BC = BF.getBinaryContext();
   size_t OriginalHotSize;
   size_t HotSize;
   size_t ColdSize;
@@ -156,7 +155,7 @@ void SplitFunctions::splitFunction(BinaryFunction &BF) {
 
   // Never outline the first basic block.
   BF.layout_front()->setCanOutline(false);
-  for (auto *BB : BF.layout()) {
+  for (BinaryBasicBlock *BB : BF.layout()) {
     if (!BB->canOutline())
       continue;
     if (BB->getExecutionCount() != 0) {
@@ -181,7 +180,7 @@ void SplitFunctions::splitFunction(BinaryFunction &BF) {
       // runtime cannot deal with split functions. However, if we can guarantee
       // that the block never throws, it is safe to move the block to
       // decrease the size of the function.
-      for (auto &Instr : *BB) {
+      for (MCInst &Instr : *BB) {
         if (BF.getBinaryContext().MIB->isInvoke(Instr)) {
           BB->setCanOutline(false);
           break;
@@ -235,7 +234,7 @@ void SplitFunctions::splitFunction(BinaryFunction &BF) {
                         << Twine::utohexstr(OriginalHotSize) << '\n');
 
       BF.updateBasicBlockLayout(PreSplitLayout);
-      for (auto &BB : BF) {
+      for (BinaryBasicBlock &BB : BF) {
         BB.setIsCold(false);
       }
     } else {

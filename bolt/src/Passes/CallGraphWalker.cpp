@@ -9,8 +9,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "CallGraphWalker.h"
+#include "BinaryFunctionCallGraph.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Timer.h"
+#include <queue>
+#include <set>
 
 namespace opts {
 extern llvm::cl::opt<bool> TimeOpts;
@@ -25,24 +28,24 @@ void CallGraphWalker::traverseCG() {
   std::queue<BinaryFunction *> Queue;
   std::set<BinaryFunction *> InQueue;
 
-  for (auto *Func : TopologicalCGOrder) {
+  for (BinaryFunction *Func : TopologicalCGOrder) {
     Queue.push(Func);
     InQueue.insert(Func);
   }
 
   while (!Queue.empty()) {
-    auto *Func = Queue.front();
+    BinaryFunction *Func = Queue.front();
     Queue.pop();
     InQueue.erase(Func);
 
     bool Changed{false};
-    for (auto Visitor : Visitors) {
+    for (CallbackTy Visitor : Visitors) {
       bool CurVisit = Visitor(Func);
       Changed = Changed || CurVisit;
     }
 
     if (Changed) {
-      for (auto CallerID : CG.predecessors(CG.getNodeId(Func))) {
+      for (CallGraph::NodeId CallerID : CG.predecessors(CG.getNodeId(Func))) {
         BinaryFunction *CallerFunc = CG.nodeIdToFunc(CallerID);
         if (InQueue.count(CallerFunc))
           continue;

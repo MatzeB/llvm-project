@@ -9,10 +9,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "DebugData.h"
-#include "BinaryBasicBlock.h"
-#include "BinaryFunction.h"
-#include "llvm/MC/MCSymbol.h"
-#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/EndianStream.h"
 #include "llvm/Support/LEB128.h"
@@ -42,7 +38,7 @@ uint64_t writeAddressRanges(
     raw_svector_ostream &Stream,
     const DebugAddressRangesVector &AddressRanges,
     const bool WriteRelativeRanges = false) {
-  for (auto &Range : AddressRanges) {
+  for (const DebugAddressRange &Range : AddressRanges) {
     support::endian::write(Stream, Range.LowPC, support::little);
     support::endian::write(
         Stream, WriteRelativeRanges ? Range.HighPC - Range.LowPC : Range.HighPC,
@@ -89,7 +85,7 @@ DebugRangesSectionWriter::addRanges(const DebugAddressRangesVector &Ranges) {
   // Reading the SectionOffset and updating it should be atomic to guarantee
   // unique and correct offsets in patches.
   std::lock_guard<std::mutex> Lock(WriterMutex);
-  const auto EntryOffset = SectionOffset;
+  const uint32_t EntryOffset = SectionOffset;
   SectionOffset += writeAddressRanges(*RangesStream.get(), Ranges);
 
   return EntryOffset;
@@ -107,8 +103,9 @@ void DebugARangesSectionWriter::writeARangesSection(
   // specification, section 6.1.4 Lookup by Address
   // http://www.dwarfstd.org/doc/DWARF4.pdf
   for (const auto &CUOffsetAddressRangesPair : CUAddressRanges) {
-    const auto Offset = CUOffsetAddressRangesPair.first;
-    const auto &AddressRanges = CUOffsetAddressRangesPair.second;
+    const uint64_t Offset = CUOffsetAddressRangesPair.first;
+    const DebugAddressRangesVector &AddressRanges =
+        CUOffsetAddressRangesPair.second;
 
     // Emit header.
 
@@ -157,7 +154,7 @@ DebugLocWriter::addList(const DebugLocationsVector &LocList) {
 
   // Since there is a separate DebugLocWriter for each thread,
   // we don't need a lock to read the SectionOffset and update it.
-  const auto EntryOffset = SectionOffset;
+  const uint32_t EntryOffset = SectionOffset;
 
   for (const DebugLocationEntry &Entry : LocList) {
     support::endian::write(*LocStream, static_cast<uint64_t>(Entry.LowPC),
@@ -178,11 +175,11 @@ DebugLocWriter::addList(const DebugLocationsVector &LocList) {
 
 void SimpleBinaryPatcher::addBinaryPatch(uint32_t Offset,
                                          const std::string &NewValue) {
-  Patches.emplace_back(std::make_pair(Offset, NewValue));
+  Patches.emplace_back(Offset, NewValue);
 }
 
 void SimpleBinaryPatcher::addBytePatch(uint32_t Offset, uint8_t Value) {
-  Patches.emplace_back(std::make_pair(Offset, std::string(1, Value)));
+  Patches.emplace_back(Offset, std::string(1, Value));
 }
 
 void SimpleBinaryPatcher::addLEPatch(uint32_t Offset, uint64_t NewValue,
@@ -192,7 +189,7 @@ void SimpleBinaryPatcher::addLEPatch(uint32_t Offset, uint64_t NewValue,
     LE64[I] = NewValue & 0xff;
     NewValue >>= 8;
   }
-  Patches.emplace_back(std::make_pair(Offset, LE64));
+  Patches.emplace_back(Offset, LE64);
 }
 
 void SimpleBinaryPatcher::addUDataPatch(uint32_t Offset, uint64_t Value, uint64_t Size) {
@@ -236,8 +233,9 @@ void DebugAbbrevPatcher::addAttributePatch(
 void DebugAbbrevPatcher::patchBinary(std::string &Contents) {
   SimpleBinaryPatcher Patcher;
 
-  for (const auto &Patch : AbbrevPatches) {
-    const auto Attribute = Patch.Abbrev->findAttribute(Patch.Attr);
+  for (const AbbrevAttrPatch &Patch : AbbrevPatches) {
+    const DWARFAbbreviationDeclaration::AttributeSpec *const Attribute =
+        Patch.Abbrev->findAttribute(Patch.Attr);
     assert(Attribute && "Specified attribute doesn't occur in abbreviation.");
 
     // Because we're only handling standard values (i.e. no DW_FORM_GNU_* or

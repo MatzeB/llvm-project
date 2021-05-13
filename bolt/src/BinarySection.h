@@ -15,19 +15,18 @@
 #include "Relocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/BinaryFormat/ELF.h"
-#include "llvm/MC/MCSymbol.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
-#include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/raw_ostream.h"
 #include <map>
 #include <memory>
 #include <set>
 
 namespace llvm {
+class MCStreamer;
+class MCSymbol;
 
 using namespace object;
 
@@ -107,9 +106,9 @@ class BinarySection {
         ELFSectionRef(Section).getType() == ELF::SHT_NOBITS)
       return StringRef();
 
-    auto ContentsOrErr = Section.getContents();
+    Expected<StringRef> ContentsOrErr = Section.getContents();
     if (!ContentsOrErr) {
-      auto E = ContentsOrErr.takeError();
+      Error E = ContentsOrErr.takeError();
       errs() << "BOLT-ERROR: cannot get section contents for "
              << getName(Section) << ": " << E << ".\n";
       exit(1);
@@ -501,7 +500,7 @@ public:
 };
 
 inline uint8_t *copyByteArray(const uint8_t *Data, uint64_t Size) {
-  auto Array = new uint8_t[Size];
+  auto *Array = new uint8_t[Size];
   memcpy(Array, Data, Size);
   return Array;
 }

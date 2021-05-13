@@ -201,9 +201,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "livedebugvalues"
 
-STATISTIC(NumInserted, "Number of DBG_VALUE instructions inserted");
-STATISTIC(NumRemoved, "Number of DBG_VALUE instructions removed");
-
 // Act more like the VarLoc implementation, by propagating some locations too
 // far and ignoring some transfers.
 static cl::opt<bool> EmulateOldLDV("emulate-old-livedebugvalues", cl::Hidden,
@@ -3199,10 +3196,10 @@ void InstrRefBasedLDV::initialSetup(MachineFunction &MF) {
   // Compute mappings of block <=> RPO order.
   ReversePostOrderTraversal<MachineFunction *> RPOT(&MF);
   unsigned int RPONumber = 0;
-  for (auto RI = RPOT.begin(), RE = RPOT.end(); RI != RE; ++RI) {
-    OrderToBB[RPONumber] = *RI;
-    BBToOrder[*RI] = RPONumber;
-    BBNumToRPO[(*RI)->getNumber()] = RPONumber;
+  for (MachineBasicBlock *MBB : RPOT) {
+    OrderToBB[RPONumber] = MBB;
+    BBToOrder[MBB] = RPONumber;
+    BBNumToRPO[MBB->getNumber()] = RPONumber;
     ++RPONumber;
   }
 }

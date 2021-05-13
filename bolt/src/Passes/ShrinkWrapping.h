@@ -11,12 +11,11 @@
 #ifndef LLVM_TOOLS_LLVM_BOLT_PASSES_SHRINKWRAPPING_H
 #define LLVM_TOOLS_LLVM_BOLT_PASSES_SHRINKWRAPPING_H
 
-#include "BinaryPasses.h"
 #include "FrameAnalysis.h"
-#include "DataflowInfoManager.h"
 
 namespace llvm {
 namespace bolt {
+class DataflowInfoManager;
 
 /// Encapsulates logic required to analyze a binary function and detect which
 /// registers are being saved as callee-saved, where are these saves and where
@@ -228,8 +227,8 @@ public:
       : FA(FA), BC(BC), BF(BF), Info(Info), AllocatorId(AllocId) {}
 
   ~StackLayoutModifier() {
-    for (auto &BB : BF) {
-      for (auto &Inst : BB) {
+    for (BinaryBasicBlock &BB : BF) {
+      for (MCInst &Inst : BB) {
         BC.MIB->removeAnnotation(Inst, getTodoTag());
         BC.MIB->removeAnnotation(Inst, getSlotTag());
         BC.MIB->removeAnnotation(Inst, getOffsetCFIRegTag());
@@ -487,7 +486,7 @@ private:
 
   /// Insert any CFI that should be attached to a register spill save/restore.
   BBIterTy insertCFIsForPushOrPop(BinaryBasicBlock &BB, BBIterTy Pos,
-                                  unsigned Reg, bool isPush, int Sz,
+                                  unsigned Reg, bool IsPush, int Sz,
                                   int64_t NewOffset);
 
   /// Auxiliary function to processInsertionsList, adding a new instruction
@@ -524,8 +523,8 @@ public:
         SLM(FA, BC, BF, Info, AllocId), CSA(FA, BC, BF, Info, AllocId) {}
 
   ~ShrinkWrapping() {
-    for (auto &BB : BF) {
-      for (auto &Inst : BB) {
+    for (BinaryBasicBlock &BB : BF) {
+      for (MCInst &Inst : BB) {
         BC.MIB->removeAnnotation(Inst, getAnnotationIndex());
       }
     }

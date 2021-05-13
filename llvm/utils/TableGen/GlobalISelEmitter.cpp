@@ -3536,7 +3536,7 @@ private:
   const CodeGenInstruction *getEquivNode(Record &Equiv,
                                          const TreePatternNode *N) const;
 
-  Error importRulePredicates(RuleMatcher &M, ArrayRef<Predicate> Predicates);
+  Error importRulePredicates(RuleMatcher &M, ArrayRef<Record *> Predicates);
   Expected<InstructionMatcher &>
   createAndImportSelDAGMatcher(RuleMatcher &Rule,
                                InstructionMatcher &InsnMatcher,
@@ -3723,14 +3723,13 @@ GlobalISelEmitter::GlobalISelEmitter(RecordKeeper &RK)
 
 //===- Emitter ------------------------------------------------------------===//
 
-Error
-GlobalISelEmitter::importRulePredicates(RuleMatcher &M,
-                                        ArrayRef<Predicate> Predicates) {
-  for (const Predicate &P : Predicates) {
-    if (!P.Def || P.getCondString().empty())
+Error GlobalISelEmitter::importRulePredicates(RuleMatcher &M,
+                                              ArrayRef<Record *> Predicates) {
+  for (Record *Pred : Predicates) {
+    if (Pred->getValueAsString("CondString").empty())
       continue;
-    declareSubtargetFeature(P.Def);
-    M.addRequiredFeature(P.Def);
+    declareSubtargetFeature(Pred);
+    M.addRequiredFeature(Pred);
   }
 
   return Error::success();
@@ -4464,7 +4463,6 @@ Expected<action_iterator> GlobalISelEmitter::importExplicitUseRenderer(
     return failedImport(
         "Dst pattern child def is an unsupported tablegen class");
   }
-
   return failedImport("Dst pattern child is an unsupported kind");
 }
 
@@ -5043,7 +5041,9 @@ Expected<RuleMatcher> GlobalISelEmitter::runOnPattern(const PatternToMatch &P) {
                                   "  =>  " +
                                   llvm::to_string(*P.getDstPattern()));
 
-  if (auto Error = importRulePredicates(M, P.getPredicates()))
+  SmallVector<Record *, 4> Predicates;
+  P.getPredicateRecords(Predicates);
+  if (auto Error = importRulePredicates(M, Predicates))
     return std::move(Error);
 
   // Next, analyze the pattern operators.
@@ -5351,7 +5351,7 @@ void GlobalISelEmitter::emitCxxPredicateFns(
     StringRef AdditionalDeclarations,
     std::function<bool(const Record *R)> Filter) {
   std::vector<const Record *> MatchedRecords;
-  const auto &Defs = RK.getAllDerivedDefinitions("PatFrag");
+  const auto &Defs = RK.getAllDerivedDefinitions("PatFrags");
   std::copy_if(Defs.begin(), Defs.end(), std::back_inserter(MatchedRecords),
                [&](Record *Record) {
                  return !Record->getValueAsString(CodeFieldName).empty() &&
@@ -5595,9 +5595,17 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
       RK.getAllDerivedDefinitions("GIComplexOperandMatcher");
   llvm::sort(ComplexPredicates, orderByName);
 
-  std::vector<Record *> CustomRendererFns =
-      RK.getAllDerivedDefinitions("GICustomOperandRenderer");
-  llvm::sort(CustomRendererFns, orderByName);
+  std::vector<StringRef> CustomRendererFns;
+  transform(RK.getAllDerivedDefinitions("GICustomOperandRenderer"),
+            std::back_inserter(CustomRendererFns), [](const auto &Record) {
+              return Record->getValueAsString("RendererFn");
+            });
+  // Sort and remove duplicates to get a list of unique renderer functions, in
+  // case some were mentioned more than once.
+  llvm::sort(CustomRendererFns);
+  CustomRendererFns.erase(
+      std::unique(CustomRendererFns.begin(), CustomRendererFns.end()),
+      CustomRendererFns.end());
 
   unsigned MaxTemporaries = 0;
   for (const auto &Rule : Rules)
@@ -5674,13 +5682,6 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
     "  AvailableFunctionFeatures = computeAvailableFunctionFeatures("
     "(const " << Target.getName() << "Subtarget *)&MF.getSubtarget(), &MF);\n"
     "}\n";
-
-  if (Target.getName() == "X86" || Target.getName() == "AArch64") {
-    // TODO: Implement PGSO.
-    OS << "static bool shouldOptForSize(const MachineFunction *MF) {\n";
-    OS << "    return MF->getFunction().hasOptSize();\n";
-    OS << "}\n\n";
-  }
 
   SubtargetFeatureInfo::emitComputeAvailableFeatures(
       Target.getName(), "InstructionSelector",
@@ -5791,17 +5792,15 @@ void GlobalISelEmitter::run(raw_ostream &OS) {
   OS << "// Custom renderers.\n"
      << "enum {\n"
      << "  GICR_Invalid,\n";
-  for (const auto &Record : CustomRendererFns)
-    OS << "  GICR_" << Record->getValueAsString("RendererFn") << ",\n";
+  for (const auto &Fn : CustomRendererFns)
+    OS << "  GICR_" << Fn << ",\n";
   OS << "};\n";
 
   OS << Target.getName() << "InstructionSelector::CustomRendererFn\n"
      << Target.getName() << "InstructionSelector::CustomRenderers[] = {\n"
      << "  nullptr, // GICR_Invalid\n";
-  for (const auto &Record : CustomRendererFns)
-    OS << "  &" << Target.getName()
-       << "InstructionSelector::" << Record->getValueAsString("RendererFn")
-       << ", // " << Record->getName() << "\n";
+  for (const auto &Fn : CustomRendererFns)
+    OS << "  &" << Target.getName() << "InstructionSelector::" << Fn << ",\n";
   OS << "};\n\n";
 
   llvm::stable_sort(Rules, [&](const RuleMatcher &A, const RuleMatcher &B) {

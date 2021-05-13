@@ -8,10 +8,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "BinaryContext.h"
 #include "BinaryEmitter.h"
+#include "BinaryContext.h"
 #include "BinaryFunction.h"
 #include "llvm/MC/MCSection.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/SMLoc.h"
@@ -97,19 +98,19 @@ size_t padFunction(const BinaryFunction &Function) {
   static std::map<std::string, size_t> FunctionPadding;
 
   if (FunctionPadding.empty() && !FunctionPadSpec.empty()) {
-    for (auto &Spec : FunctionPadSpec) {
-      auto N = Spec.find(':');
+    for (std::string &Spec : FunctionPadSpec) {
+      size_t N = Spec.find(':');
       if (N == std::string::npos)
         continue;
-      auto Name = Spec.substr(0, N);
-      auto Padding = std::stoull(Spec.substr(N+1));
+      std::string Name = Spec.substr(0, N);
+      size_t Padding = std::stoull(Spec.substr(N+1));
       FunctionPadding[Name] = Padding;
     }
   }
 
   for (auto &FPI : FunctionPadding) {
-    auto Name = FPI.first;
-    auto Padding = FPI.second;
+    std::string Name = FPI.first;
+    size_t Padding = FPI.second;
     if (Function.hasNameRegex(Name)) {
       return Padding;
     }
@@ -189,7 +190,7 @@ private:
 void BinaryEmitter::emitAll(StringRef OrgSecPrefix) {
   Streamer.InitSections(false);
 
-  if (auto *RtLibrary = BC.getRuntimeLibrary()) {
+  if (RuntimeLibrary *RtLibrary = BC.getRuntimeLibrary()) {
     RtLibrary->emitBinary(BC, Streamer);
   }
 
@@ -207,9 +208,9 @@ void BinaryEmitter::emitAll(StringRef OrgSecPrefix) {
 
 void BinaryEmitter::emitFunctions() {
   auto emit = [&](const std::vector<BinaryFunction *> &Functions) {
-    const auto HasProfile = BC.NumProfiledFuncs > 0;
+    const bool HasProfile = BC.NumProfiledFuncs > 0;
     const bool OriginalAllowAutoPadding = Streamer.getAllowAutoPadding();
-    for (auto *Function : Functions) {
+    for (BinaryFunction *Function : Functions) {
       if (!BC.shouldEmit(*Function)) {
         continue;
       }
@@ -275,7 +276,7 @@ bool BinaryEmitter::emitFunction(BinaryFunction &Function, bool EmitColdPart) {
 
   if (BC.HasRelocations) {
     Streamer.emitCodeAlignment(BinaryFunction::MinAlign);
-    auto MaxAlignBytes = EmitColdPart
+    uint16_t MaxAlignBytes = EmitColdPart
       ? Function.getMaxColdAlignmentBytes()
       : Function.getMaxAlignmentBytes();
     if (MaxAlignBytes > 0)
@@ -309,15 +310,15 @@ bool BinaryEmitter::emitFunction(BinaryFunction &Function, bool EmitColdPart) {
       Streamer.emitCFIPersonality(Function.getPersonalityFunction(),
                                   Function.getPersonalityEncoding());
     }
-    auto *LSDASymbol = EmitColdPart ? Function.getColdLSDASymbol()
-                                    : Function.getLSDASymbol();
+    MCSymbol *LSDASymbol =
+        EmitColdPart ? Function.getColdLSDASymbol() : Function.getLSDASymbol();
     if (LSDASymbol) {
       Streamer.emitCFILsda(LSDASymbol, BC.LSDAEncoding);
     } else {
       Streamer.emitCFILsda(0, dwarf::DW_EH_PE_omit);
     }
     // Emit CFI instructions relative to the CIE
-    for (const auto &CFIInstr : Function.cie()) {
+    for (const MCCFIInstruction &CFIInstr : Function.cie()) {
       // Only write CIE CFI insns that LLVM will not already emit
       const std::vector<MCCFIInstruction> &FrameInstrs =
           MAI->getInitialFrameState();
@@ -332,7 +333,7 @@ bool BinaryEmitter::emitFunction(BinaryFunction &Function, bool EmitColdPart) {
 
   // Emit UD2 at the beginning if requested by user.
   if (!opts::BreakFunctionNames.empty()) {
-    for (auto &Name : opts::BreakFunctionNames) {
+    for (std::string &Name : opts::BreakFunctionNames) {
       if (Function.hasNameRegex(Name)) {
         Streamer.emitIntValue(0x0B0F, 2); // UD2: 0F 0B
         break;
@@ -344,7 +345,7 @@ bool BinaryEmitter::emitFunction(BinaryFunction &Function, bool EmitColdPart) {
   emitFunctionBody(Function, EmitColdPart, /*EmitCodeOnly=*/false);
 
   // Emit padding if requested.
-  if (auto Padding = opts::padFunction(Function)) {
+  if (size_t Padding = opts::padFunction(Function)) {
     LLVM_DEBUG(dbgs() << "BOLT-DEBUG: padding function " << Function << " with "
                       << Padding << " bytes\n");
     Streamer.emitFill(Padding, MAI->getTextAlignFillValue());
@@ -385,7 +386,7 @@ void BinaryEmitter::emitFunctionBody(BinaryFunction &BF, bool EmitColdPart,
 
   // Track the first emitted instruction with debug info.
   bool FirstInstr = true;
-  for (auto BB : BF.layout()) {
+  for (BinaryBasicBlock *BB : BF.layout()) {
     if (EmitColdPart != BB->isCold())
       continue;
 
@@ -396,7 +397,7 @@ void BinaryEmitter::emitFunctionBody(BinaryFunction &BF, bool EmitColdPart,
     }
     Streamer.emitLabel(BB->getLabel());
     if (!EmitCodeOnly) {
-      if (auto *EntrySymbol = BF.getSecondaryEntryPointSymbol(*BB)) {
+      if (MCSymbol *EntrySymbol = BF.getSecondaryEntryPointSymbol(*BB)) {
         Streamer.emitLabel(EntrySymbol);
       }
     }
@@ -417,14 +418,14 @@ void BinaryEmitter::emitFunctionBody(BinaryFunction &BF, bool EmitColdPart,
     // Remember if the last instruction emitted was a prefix.
     bool LastIsPrefix = false;
     for (auto I = BB->begin(), E = BB->end(); I != E; ++I) {
-      auto &Instr = *I;
+      MCInst &Instr = *I;
 
       if (EmitCodeOnly && BC.MII->get(Instr.getOpcode()).isPseudo())
         continue;
 
       // Handle pseudo instructions.
       if (BC.MIB->isEHLabel(Instr)) {
-        const auto *Label = BC.MIB->getTargetSymbol(Instr);
+        const MCSymbol *Label = BC.MIB->getTargetSymbol(Instr);
         assert(Instr.getNumOperands() >= 1 && Label &&
                "bad EH_LABEL instruction");
         Streamer.emitLabel(const_cast<MCSymbol *>(Label));
@@ -457,7 +458,7 @@ void BinaryEmitter::emitFunctionBody(BinaryFunction &BF, bool EmitColdPart,
         const auto Offset = BC.MIB->getAnnotationAs<uint32_t>(Instr, "Offset");
         MCSymbol *LocSym = BC.Ctx->createTempSymbol();
         Streamer.emitLabel(LocSym);
-        BB->getLocSyms().emplace_back(std::make_pair(Offset, LocSym));
+        BB->getLocSyms().emplace_back(Offset, LocSym);
       }
 
       Streamer.emitInstruction(Instr, *BC.STI);
@@ -575,7 +576,7 @@ void BinaryEmitter::emitConstantIslands(BinaryFunction &BF, bool EmitColdPart,
         ++IS;
       }
       if (RI != BF.getMoveRelocations().end() && FunctionOffset == RI->first) {
-        auto RelocationSize = RI->second.emit(&Streamer);
+        size_t RelocationSize = RI->second.emit(&Streamer);
         LLVM_DEBUG(dbgs() << "BOLT-DEBUG: emitted relocation for symbol "
                           << RI->second.Symbol->getName() << " at offset 0x"
                           << Twine::utohexstr(RI->first) << " with size "
@@ -595,7 +596,7 @@ void BinaryEmitter::emitConstantIslands(BinaryFunction &BF, bool EmitColdPart,
     return;
   // Now emit constant islands from other functions that we may have used in
   // this function.
-  for (auto *ExternalFunc : Islands.Dependency) {
+  for (BinaryFunction *ExternalFunc : Islands.Dependency) {
     emitConstantIslands(*ExternalFunc, EmitColdPart, &BF);
   }
 }
@@ -621,8 +622,8 @@ SMLoc BinaryEmitter::emitLineInfo(const BinaryFunction &BF, SMLoc NewLoc,
   // have come across some inlined code.  We must look up the CU
   // for the instruction's original function and get the line table
   // from that.
-  const auto FunctionUnitIndex = FunctionCU->getOffset();
-  const auto CurrentUnitIndex = RowReference.DwCompileUnitIndex;
+  const uint64_t FunctionUnitIndex = FunctionCU->getOffset();
+  const uint32_t CurrentUnitIndex = RowReference.DwCompileUnitIndex;
   if (CurrentUnitIndex != FunctionUnitIndex) {
     CurrentLineTable = BC.DwCtx->getLineTableForUnit(
         BC.DwCtx->getCompileUnitForOffset(CurrentUnitIndex));
@@ -632,7 +633,8 @@ SMLoc BinaryEmitter::emitLineInfo(const BinaryFunction &BF, SMLoc NewLoc,
         CurrentLineTable->Rows[RowReference.RowIndex - 1].File);
   }
 
-  const auto &CurrentRow = CurrentLineTable->Rows[RowReference.RowIndex - 1];
+  const DWARFDebugLine::Row &CurrentRow =
+      CurrentLineTable->Rows[RowReference.RowIndex - 1];
   if (!CurrentFilenum)
     CurrentFilenum = CurrentRow.File;
 
@@ -666,7 +668,7 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
   }
 
   for (auto &JTI : BF.jumpTables()) {
-    auto &JT = *JTI.second;
+    JumpTable &JT = *JTI.second;
     if (opts::PrintJumpTables)
       JT.print(outs());
     if ((opts::JumpTables == JTS_BASIC || !BF.isSimple()) &&
@@ -677,9 +679,8 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
       if (opts::JumpTables == JTS_BASIC) {
         std::string Name = ".local." + JT.Labels[0]->getName().str();
         std::replace(Name.begin(), Name.end(), '/', '.');
-        auto &Section = BC.registerOrUpdateSection(Name,
-                                                   ELF::SHT_PROGBITS,
-                                                   ELF::SHF_ALLOC);
+        BinarySection &Section =
+            BC.registerOrUpdateSection(Name, ELF::SHT_PROGBITS, ELF::SHF_ALLOC);
         Section.setAnonymous(true);
         JT.setOutputSection(Section);
         HotSection = BC.getDataSection(Name);
@@ -724,7 +725,7 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
   }
   MCSymbol *LastLabel = nullptr;
   uint64_t Offset = 0;
-  for (auto *Entry : JT.Entries) {
+  for (MCSymbol *Entry : JT.Entries) {
     auto LI = JT.Labels.find(Offset);
     if (LI != JT.Labels.end()) {
       LLVM_DEBUG(dbgs() << "BOLT-DEBUG: emitting jump table "
@@ -748,9 +749,12 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
     if (JT.Type == JumpTable::JTT_NORMAL) {
       Streamer.emitSymbolValue(Entry, JT.OutputEntrySize);
     } else { // JTT_PIC
-      auto JTExpr = MCSymbolRefExpr::create(LastLabel, Streamer.getContext());
-      auto E = MCSymbolRefExpr::create(Entry, Streamer.getContext());
-      auto Value = MCBinaryExpr::createSub(E, JTExpr, Streamer.getContext());
+      const MCSymbolRefExpr *JTExpr =
+          MCSymbolRefExpr::create(LastLabel, Streamer.getContext());
+      const MCSymbolRefExpr *E =
+          MCSymbolRefExpr::create(Entry, Streamer.getContext());
+      const MCBinaryExpr *Value =
+          MCBinaryExpr::createSub(E, JTExpr, Streamer.getContext());
       Streamer.emitValue(Value, JT.EntrySize);
     }
     Offset += JT.EntrySize;
@@ -759,8 +763,8 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
 
 // The code is based on EHStreamer::emitExceptionTable().
 void BinaryEmitter::emitLSDA(BinaryFunction &BF, bool EmitColdPart) {
-  const auto *Sites =
-    EmitColdPart ? &BF.getColdCallSites() : &BF.getCallSites();
+  const std::vector<BinaryFunction::CallSite> *Sites =
+      EmitColdPart ? &BF.getColdCallSites() : &BF.getCallSites();
   if (Sites->empty()) {
     return;
   }
@@ -773,21 +777,22 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, bool EmitColdPart) {
   //
   //  sizeof(dwarf::DW_EH_PE_data4) * 3 + sizeof(uleb128(action))
   uint64_t CallSiteTableLength = Sites->size() * 4 * 3;
-  for (const auto &CallSite : *Sites) {
+  for (const BinaryFunction::CallSite &CallSite : *Sites) {
     CallSiteTableLength += getULEB128Size(CallSite.Action);
   }
 
   Streamer.SwitchSection(BC.MOFI->getLSDASection());
 
-  const auto TTypeEncoding = BC.TTypeEncoding;
-  const auto TTypeEncodingSize = BC.getDWARFEncodingSize(TTypeEncoding);
-  const auto TTypeAlignment = 4;
+  const unsigned TTypeEncoding = BC.TTypeEncoding;
+  const unsigned TTypeEncodingSize = BC.getDWARFEncodingSize(TTypeEncoding);
+  const uint16_t TTypeAlignment = 4;
 
   // Type tables have to be aligned at 4 bytes.
   Streamer.emitValueToAlignment(TTypeAlignment);
 
   // Emit the LSDA label.
-  auto *LSDASymbol = EmitColdPart ? BF.getColdLSDASymbol() : BF.getLSDASymbol();
+  MCSymbol *LSDASymbol =
+      EmitColdPart ? BF.getColdLSDASymbol() : BF.getLSDASymbol();
   assert(LSDASymbol && "no LSDA symbol set");
   Streamer.emitLabel(LSDASymbol);
 
@@ -868,9 +873,9 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, bool EmitColdPart) {
   Streamer.emitIntValue(dwarf::DW_EH_PE_sdata4, 1);
   Streamer.emitULEB128IntValue(CallSiteTableLength);
 
-  for (const auto &CallSite : *Sites) {
-    const auto *BeginLabel = CallSite.Start;
-    const auto *EndLabel = CallSite.End;
+  for (const BinaryFunction::CallSite &CallSite : *Sites) {
+    const MCSymbol *BeginLabel = CallSite.Start;
+    const MCSymbol *EndLabel = CallSite.End;
 
     assert(BeginLabel && "start EH label expected");
     assert(EndLabel && "end EH label expected");
@@ -891,13 +896,13 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, bool EmitColdPart) {
   //
   // For type table we (re-)encode the table using TTypeEncoding matching
   // the current assembler mode.
-  for (auto const &Byte : BF.getLSDAActionTable()) {
+  for (uint8_t const &Byte : BF.getLSDAActionTable()) {
     Streamer.emitIntValue(Byte, 1);
   }
 
-  const auto &TypeTable = (TTypeEncoding & dwarf::DW_EH_PE_indirect)
-      ? BF.getLSDATypeAddressTable()
-      : BF.getLSDATypeTable();
+  const BinaryFunction::LSDATypeTableTy &TypeTable =
+      (TTypeEncoding & dwarf::DW_EH_PE_indirect) ? BF.getLSDATypeAddressTable()
+                                                 : BF.getLSDATypeTable();
   assert(TypeTable.size() == BF.getLSDATypeTable().size() &&
          "indirect type table size mismatch");
 
@@ -915,10 +920,9 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, bool EmitColdPart) {
           BC.getOrCreateGlobalSymbol(TypeAddress, "TI", 0, TTypeAlignment);
         MCSymbol *DotSymbol = BC.Ctx->createNamedTempSymbol();
         Streamer.emitLabel(DotSymbol);
-        const auto *SubDotExpr = MCBinaryExpr::createSub(
+        const MCBinaryExpr *SubDotExpr = MCBinaryExpr::createSub(
             MCSymbolRefExpr::create(TypeSymbol, *BC.Ctx),
-            MCSymbolRefExpr::create(DotSymbol, *BC.Ctx),
-            *BC.Ctx);
+            MCSymbolRefExpr::create(DotSymbol, *BC.Ctx), *BC.Ctx);
         Streamer.emitValue(SubDotExpr, TTypeEncodingSize);
       } else {
         Streamer.emitIntValue(0, TTypeEncodingSize);
@@ -927,14 +931,14 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, bool EmitColdPart) {
     }
     }
   }
-  for (auto const &Byte : BF.getLSDATypeIndexTable()) {
+  for (uint8_t const &Byte : BF.getLSDATypeIndexTable()) {
     Streamer.emitIntValue(Byte, 1);
   }
 }
 
 void BinaryEmitter::emitDebugLineInfoForOriginalFunctions() {
   for (auto &It : BC.getBinaryFunctions()) {
-    const auto &Function = It.second;
+    const BinaryFunction &Function = It.second;
 
     // If the function was emitted, its line info was emitted with it.
     if (Function.isEmitted())
@@ -953,10 +957,10 @@ void BinaryEmitter::emitDebugLineInfoForOriginalFunctions() {
     uint64_t Address = It.first;
     if (LineTable->lookupAddressRange({Address, 0}, Function.getMaxSize(),
                                       Results)) {
-      auto &OutputLineTable =
+      MCLineSection &OutputLineTable =
           BC.Ctx->getMCDwarfLineTable(Unit->getOffset()).getMCLineSections();
-      for (auto RowIndex : Results) {
-        const auto &Row = LineTable->Rows[RowIndex];
+      for (uint32_t RowIndex : Results) {
+        const DWARFDebugLine::Row &Row = LineTable->Rows[RowIndex];
         BC.Ctx->setCurrentDwarfLoc(
             Row.File,
             Row.Line,
@@ -968,7 +972,7 @@ void BinaryEmitter::emitDebugLineInfoForOriginalFunctions() {
             Row.Isa,
             Row.Discriminator,
             Row.Address.Address);
-        auto Loc = BC.Ctx->getCurrentDwarfLoc();
+        MCDwarfLoc Loc = BC.Ctx->getCurrentDwarfLoc();
         BC.Ctx->clearDwarfLocSeen();
         OutputLineTable.addLineEntry(MCDwarfLineEntry{nullptr, Loc},
                                      FunctionSection);
@@ -977,7 +981,7 @@ void BinaryEmitter::emitDebugLineInfoForOriginalFunctions() {
       // for end_sequence mark.
       BC.Ctx->setCurrentDwarfLoc(0, 0, 0, 0, 0, 0,
                                  Address + Function.getMaxSize());
-      auto Loc = BC.Ctx->getCurrentDwarfLoc();
+      MCDwarfLoc Loc = BC.Ctx->getCurrentDwarfLoc();
       BC.Ctx->clearDwarfLocSeen();
       OutputLineTable.addLineEntry(MCDwarfLineEntry{nullptr, Loc},
                                    FunctionSection);
@@ -1017,7 +1021,7 @@ void BinaryEmitter::emitFunctionBodyRaw(BinaryFunction &BF) {
       (LI == BF.getLabels().end() ? BF.getSize() : LI->first);
     uint64_t NextRelocationOffset =
       (RI == BF.getMoveRelocations().end() ? BF.getSize() : RI->first);
-    auto NextStop = std::min(NextLabelOffset, NextRelocationOffset);
+    uint64_t NextStop = std::min(NextLabelOffset, NextRelocationOffset);
     assert(NextStop <= BF.getSize() && "internal overflow error");
     if (FunctionOffset < NextStop) {
       Streamer.emitBytes(FunctionContents.slice(FunctionOffset, NextStop));
@@ -1031,7 +1035,7 @@ void BinaryEmitter::emitFunctionBodyRaw(BinaryFunction &BF) {
       ++LI;
     }
     if (RI != BF.getMoveRelocations().end() && FunctionOffset == RI->first) {
-      auto RelocationSize = RI->second.emit(&Streamer);
+      size_t RelocationSize = RI->second.emit(&Streamer);
       LLVM_DEBUG(dbgs() << "BOLT-DEBUG: emitted relocation for symbol "
                         << RI->second.Symbol->getName() << " at offset 0x"
                         << Twine::utohexstr(RI->first) << " with size "
@@ -1047,7 +1051,7 @@ void BinaryEmitter::emitFunctionBodyRaw(BinaryFunction &BF) {
 }
 
 void BinaryEmitter::emitDataSections(StringRef OrgSecPrefix) {
-  for (auto &Section : BC.sections()) {
+  for (BinarySection &Section : BC.sections()) {
     if (!Section.hasRelocations() || !Section.hasSectionRef())
       continue;
 

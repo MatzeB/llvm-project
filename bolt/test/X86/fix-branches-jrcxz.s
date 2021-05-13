@@ -5,8 +5,8 @@
 # RUN: llvm-mc -filetype=obj -triple x86_64-unknown-unknown \
 # RUN:   %s -o %t.o
 # RUN: link_fdata %s %t.o %t.fdata
-# RUN: strip --strip-unneeded %t.o
-# RUN: %host_cc %t.o -o %t.exe -Wl,-q
+# RUN: llvm-strip --strip-unneeded %t.o
+# RUN: %host_cc %cflags %t.o -o %t.exe -Wl,-q
 # RUN: llvm-bolt %t.exe -relocs=1 -reorder-blocks=cache+ -print-finalized \
 # RUN:    -o %t.out -data %t.fdata | FileCheck %s
 # RUN: %t.out 1 2 3
@@ -14,11 +14,19 @@
 # CHECK: BOLT-INFO
 
   .text
+  .section .text.startup,"ax",@progbits
+  .p2align 5,,31
   .globl main
   .type main, %function
-  .size main, .Lend1-main
 main:
-# FDATA: 0 [unknown] 0 1 main 0 0 510
+  jmp test_function
+
+.globl test_function
+.hidden test_function
+.type test_function,@function
+.align 32
+test_function:
+# FDATA: 0 main 0 1 test_function 0 0 510
   xorq %rcx, %rcx
   andq $3, %rdi
   jmpq *jumptbl(,%rdi,8)
@@ -33,8 +41,8 @@ main:
   movl $0x0, %eax
 .J1:
   jrcxz .BBend
-# FDATA: 1 main #.J1# 1 main #.BB2# 0 10
-# FDATA: 1 main #.J1# 1 main #.BBend# 0 500
+# FDATA: 1 test_function #.J1# 1 test_function #.BB2# 0 10
+# FDATA: 1 test_function #.J1# 1 test_function #.BBend# 0 500
 .BB2:
   movl $0x2, %eax
   jmp .BBend

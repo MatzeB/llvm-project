@@ -24,7 +24,6 @@ class ValueAPITestCase(TestBase):
         self.line = line_number('main.c', '// Break at this line')
 
     @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr24772")
-    @add_test_categories(['pyapi'])
     def test(self):
         """Exercise some SBValue APIs."""
         d = {'EXE': self.exe_name}
@@ -176,11 +175,11 @@ class ValueAPITestCase(TestBase):
         ]:
             self.assertTrue(v)
 
-        self.assertTrue(
-            frame0.FindVariable('uinthex').GetValueAsUnsigned() == 3768803088,
+        self.assertEqual(
+            frame0.FindVariable('uinthex').GetValueAsUnsigned(), 3768803088,
             'unsigned uinthex == 3768803088')
-        self.assertTrue(
-            frame0.FindVariable('sinthex').GetValueAsUnsigned() == 3768803088,
+        self.assertEqual(
+            frame0.FindVariable('sinthex').GetValueAsUnsigned(), 3768803088,
             'unsigned sinthex == 3768803088')
 
         self.assertTrue(

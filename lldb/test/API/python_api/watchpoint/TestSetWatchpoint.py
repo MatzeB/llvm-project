@@ -25,7 +25,6 @@ class SetWatchpointAPITestCase(TestBase):
         self.line = line_number(
             self.source, '// Set break point at this line.')
 
-    @add_test_categories(['pyapi'])
     # Read-write watchpoints not supported on SystemZ
     @expectedFailureAll(archs=['s390x'])
     def test_watch_val(self):
@@ -98,8 +97,8 @@ class SetWatchpointAPITestCase(TestBase):
         process.Continue()
 
         # At this point, the inferior process should have exited.
-        self.assertTrue(
-            process.GetState() == lldb.eStateExited,
+        self.assertEqual(
+            process.GetState(), lldb.eStateExited,
             PROCESS_EXITED)
 
         self.dbg.DeleteTarget(target)

@@ -11,12 +11,24 @@
 #ifndef LLVM_TOOLS_LLVM_BOLT_BOLTADDRESSTRANSLATION_H
 #define LLVM_TOOLS_LLVM_BOLT_BOLTADDRESSTRANSLATION_H
 
-#include "BinaryContext.h"
-#include "llvm/Object/ELFObjectFile.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include <cstdint>
+#include <map>
+#include <system_error>
 
 namespace llvm {
+class raw_ostream;
+
+namespace object {
+class ELFObjectFileBase;
+} // namespace object
 
 namespace bolt {
+class BinaryBasicBlock;
+class BinaryContext;
+class BinaryFunction;
 
 /// The map of output addresses to input ones to be used when translating
 /// samples collected in a binary that was already processed by BOLT. We do not
@@ -59,6 +71,9 @@ public:
   // In-memory representation of the address translation table
   using MapTy = std::map<uint32_t, uint32_t>;
 
+  // List of taken fall-throughs
+  using FallthroughListTy = SmallVector<std::pair<uint64_t, uint64_t>, 16>;
+
   /// Name of the ELF section where the table will be serialized to in the
   /// output binary
   static const char *SECTION_NAME;
@@ -82,7 +97,7 @@ public:
   /// taken in the path started at FirstLBR.To and ending at SecondLBR.From.
   /// Return NoneType if trace is invalid or the list of fall-throughs
   /// otherwise.
-  Optional<SmallVector<std::pair<uint64_t, uint64_t>, 16>>
+  Optional<FallthroughListTy>
   getFallthroughsInTrace(const BinaryFunction &Func, uint64_t From,
                          uint64_t To) const;
 

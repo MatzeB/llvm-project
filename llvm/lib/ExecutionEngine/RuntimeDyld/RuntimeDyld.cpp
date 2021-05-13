@@ -146,8 +146,8 @@ void RuntimeDyldImpl::resolveLocalRelocations() {
     // The Section here (Sections[i]) refers to the section in which the
     // symbol for the relocation is located.  The SectionID in the relocation
     // entry provides the section to which the relocation will be applied.
-    int Idx = it->first;
-    uint64_t Addr = Sections[Idx].getLoadAddress();
+    unsigned Idx = it->first;
+    uint64_t Addr = getSectionLoadAddress(Idx);
     LLVM_DEBUG(dbgs() << "Resolving relocations Section #" << Idx << "\t"
                       << format("%p", (uintptr_t)Addr) << "\n");
     resolveRelocationList(it->second, Addr);
@@ -1084,7 +1084,8 @@ void RuntimeDyldImpl::resolveRelocationList(const RelocationList &Relocs,
   for (unsigned i = 0, e = Relocs.size(); i != e; ++i) {
     const RelocationEntry &RE = Relocs[i];
     // Ignore relocations for sections that were not loaded
-    if (Sections[RE.SectionID].getAddress() == nullptr)
+    if (RE.SectionID != AbsoluteSymbolSection &&
+        Sections[RE.SectionID].getAddress() == nullptr)
       continue;
     resolveRelocation(RE, Value);
   }
@@ -1097,7 +1098,8 @@ void RuntimeDyldImpl::applyExternalSymbolRelocations(
     RelocationList &Relocs = RelocKV.second;
     if (Name.size() == 0) {
       // This is an absolute symbol, use an address of zero.
-      LLVM_DEBUG(dbgs() << "Resolving absolute relocations.\n");
+      LLVM_DEBUG(dbgs() << "Resolving absolute relocations."
+                        << "\n");
       resolveRelocationList(Relocs, 0);
     } else {
       uint64_t Addr = 0;
@@ -1125,15 +1127,14 @@ void RuntimeDyldImpl::applyExternalSymbolRelocations(
       // If Resolver returned UINT64_MAX, the client wants to handle this symbol
       // manually and we shouldn't resolve its relocations.
       if (Addr != UINT64_MAX) {
+
         // Tweak the address based on the symbol flags if necessary.
-        // For example, this is used by RuntimeDyldMachOARM to toggle the low
-        // bit if the target symbol is Thumb.
+        // For example, this is used by RuntimeDyldMachOARM to toggle the low bit
+        // if the target symbol is Thumb.
         Addr = modifyAddressBasedOnFlags(Addr, Flags);
 
         LLVM_DEBUG(dbgs() << "Resolving relocations Name: " << Name << "\t"
                           << format("0x%lx", Addr) << "\n");
-        // This list may have been updated when we called getSymbolAddress, so
-        // don't change this code to get the list earlier.
         resolveRelocationList(Relocs, Addr);
       }
     }

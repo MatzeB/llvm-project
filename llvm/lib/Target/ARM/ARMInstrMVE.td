@@ -1878,6 +1878,14 @@ let Predicates = [HasMVEInt] in {
             (MVE_VMOV_from_lane_u16 MQPR:$src, imm:$lane)>;
   def : Pat<(ARMvgetlaneu (v8f16 MQPR:$src), imm:$lane),
             (MVE_VMOV_from_lane_u16 MQPR:$src, imm:$lane)>;
+  // For i16's inserts being extracted from low lanes, then may use VINS.
+  def : Pat<(ARMinsertelt (v8i16 MQPR:$src1),
+                          (ARMvgetlaneu (v8i16 MQPR:$src2), imm_even:$extlane),
+                          imm_odd:$inslane),
+            (COPY_TO_REGCLASS (INSERT_SUBREG (v4f32 (COPY_TO_REGCLASS MQPR:$src1, MQPR)),
+                                (VINSH (EXTRACT_SUBREG MQPR:$src1, (SSubReg_f16_reg imm_odd:$inslane)),
+                                       (EXTRACT_SUBREG MQPR:$src2, (SSubReg_f16_reg imm_even:$extlane))),
+                                (SSubReg_f16_reg imm_odd:$inslane)), MQPR)>;
 
   def : Pat<(v16i8 (scalar_to_vector GPR:$src)),
             (MVE_VMOV_to_lane_8  (v16i8 (IMPLICIT_DEF)), rGPR:$src, (i32 0))>;
@@ -1892,8 +1900,13 @@ let Predicates = [HasMVEInt] in {
   def : Pat<(insertelt (v4f32 MQPR:$src1), (f32 SPR:$src2), imm:$lane),
             (INSERT_SUBREG (v4f32 (COPY_TO_REGCLASS MQPR:$src1, MQPR)), SPR:$src2, (SSubReg_f32_reg imm:$lane))>;
 
-  def : Pat<(insertelt (v8f16 MQPR:$src1), (f16 HPR:$src2), imm:$lane),
+  def : Pat<(insertelt (v8f16 MQPR:$src1), (f16 HPR:$src2), imm_even:$lane),
             (MVE_VMOV_to_lane_16 MQPR:$src1, (COPY_TO_REGCLASS (f16 HPR:$src2), rGPR), imm:$lane)>;
+  def : Pat<(insertelt (v8f16 MQPR:$src1), (f16 HPR:$src2), imm_odd:$lane),
+            (COPY_TO_REGCLASS (INSERT_SUBREG (v4f32 (COPY_TO_REGCLASS MQPR:$src1, MQPR)),
+                                (VINSH (EXTRACT_SUBREG MQPR:$src1, (SSubReg_f16_reg imm_odd:$lane)),
+                                       (COPY_TO_REGCLASS HPR:$src2, SPR)),
+                                (SSubReg_f16_reg imm_odd:$lane)), MQPR)>;
   def : Pat<(extractelt (v8f16 MQPR:$src), imm_even:$lane),
             (EXTRACT_SUBREG MQPR:$src, (SSubReg_f16_reg imm_even:$lane))>;
   def : Pat<(extractelt (v8f16 MQPR:$src), imm_odd:$lane),
@@ -1901,6 +1914,8 @@ let Predicates = [HasMVEInt] in {
               (VMOVH (EXTRACT_SUBREG MQPR:$src, (SSubReg_f16_reg imm_odd:$lane))),
               HPR)>;
 
+  def : Pat<(v2f64 (scalar_to_vector (f64 DPR:$src))),
+            (INSERT_SUBREG (v2f64 (IMPLICIT_DEF)), DPR:$src, dsub_0)>;
   def : Pat<(v4f32 (scalar_to_vector SPR:$src)),
             (INSERT_SUBREG (v4f32 (IMPLICIT_DEF)), SPR:$src, ssub_0)>;
   def : Pat<(v4f32 (scalar_to_vector GPR:$src)),
@@ -1909,44 +1924,6 @@ let Predicates = [HasMVEInt] in {
             (INSERT_SUBREG (v8f16 (IMPLICIT_DEF)), (f16 HPR:$src), ssub_0)>;
   def : Pat<(v8f16 (scalar_to_vector GPR:$src)),
             (MVE_VMOV_to_lane_16 (v8f16 (IMPLICIT_DEF)), rGPR:$src, (i32 0))>;
-
-  foreach LANE = [0, 2, 4, 6] in {
-    defvar SSUB = !cast<SubRegIndex>("ssub_"#!srl(LANE, 1));
-
-    // v8f16 pattern for inserting two lanes using a VINS
-    def : Pat<(insertelt (insertelt (v8f16 MQPR:$srcV), (f16 HPR:$src1), LANE),
-                         (f16 HPR:$src2), !add(LANE,1)),
-              (COPY_TO_REGCLASS (INSERT_SUBREG (v4f32 (COPY_TO_REGCLASS MQPR:$srcV, MQPR)),
-                                  (VINSH (COPY_TO_REGCLASS HPR:$src1, SPR),
-                                         (COPY_TO_REGCLASS HPR:$src2, SPR)),
-                                 SSUB), MQPR)>;
-
-    // v8i16 pattern for extracting 2 even lane elements and inserting them using a VINS
-    def : Pat<(ARMinsertelt (ARMinsertelt (v8i16 MQPR:$srcV),
-                                          (ARMvgetlaneu (v8i16 MQPR:$src1), imm_even:$lane1),
-                                          LANE),
-                           (ARMvgetlaneu (v8i16 MQPR:$src2), imm_even:$lane2),
-                           !add(LANE,1)),
-              (COPY_TO_REGCLASS (INSERT_SUBREG (v4f32 (COPY_TO_REGCLASS MQPR:$srcV, MQPR)),
-                                  (VINSH (EXTRACT_SUBREG (v8f16 (COPY_TO_REGCLASS MQPR:$src1, MQPR)),
-                                                         (SSubReg_f16_reg imm_even:$lane1)),
-                                         (EXTRACT_SUBREG (v8f16 (COPY_TO_REGCLASS MQPR:$src2, MQPR)),
-                                                         (SSubReg_f16_reg imm_even:$lane2))),
-                                 SSUB), MQPR)>;
-
-    // v8i16 pattern for extracting an element using VMOVX and inserting another using a VINS
-    def : Pat<(ARMinsertelt (ARMinsertelt (v8i16 MQPR:$srcV),
-                                          (ARMvgetlaneu (v8i16 MQPR:$src1), imm_odd:$lane1),
-                                          LANE),
-                            (ARMvgetlaneu (v8i16 MQPR:$src2), imm_even:$lane2),
-                            !add(LANE,1)),
-              (COPY_TO_REGCLASS (INSERT_SUBREG (v4f32 (COPY_TO_REGCLASS MQPR:$srcV, MQPR)),
-                                  (VINSH (VMOVH (EXTRACT_SUBREG (v8f16 (COPY_TO_REGCLASS MQPR:$src1, MQPR)),
-                                                                (SSubReg_f16_reg imm_odd:$lane1))),
-                                                (EXTRACT_SUBREG (v8f16 (COPY_TO_REGCLASS MQPR:$src2, MQPR)),
-                                                                (SSubReg_f16_reg imm_even:$lane2))),
-                                 SSUB), MQPR)>;
-  }
 }
 
 // end of mve_bit instructions
@@ -5728,11 +5705,12 @@ defm MVE_VQDMLASH_qr  : MVE_VQDMLAH_qr_types<"vqdmlash",  0b1, 0b1>;
 defm MVE_VQRDMLASH_qr : MVE_VQDMLAH_qr_types<"vqrdmlash", 0b0, 0b1>;
 
 class MVE_VxDUP<string iname, string suffix, bits<2> size, bit bit_12,
-              list<dag> pattern=[]>
+                ValueType VT, SDPatternOperator vxdup>
   : MVE_p<(outs MQPR:$Qd, tGPREven:$Rn),
           (ins tGPREven:$Rn_src, MVE_VIDUP_imm:$imm), NoItinerary,
           iname, suffix, "$Qd, $Rn, $imm", vpred_r, "$Rn = $Rn_src",
-          pattern> {
+          [(set (VT MQPR:$Qd), (i32 tGPREven:$Rn),
+              (vxdup (i32 tGPREven:$Rn_src), (i32 imm:$imm)))]> {
   bits<4> Qd;
   bits<4> Rn;
   bits<2> imm;
@@ -5753,13 +5731,13 @@ class MVE_VxDUP<string iname, string suffix, bits<2> size, bit bit_12,
   let hasSideEffects = 0;
 }
 
-def MVE_VIDUPu8  : MVE_VxDUP<"vidup", "u8",  0b00, 0b0>;
-def MVE_VIDUPu16 : MVE_VxDUP<"vidup", "u16", 0b01, 0b0>;
-def MVE_VIDUPu32 : MVE_VxDUP<"vidup", "u32", 0b10, 0b0>;
+def MVE_VIDUPu8  : MVE_VxDUP<"vidup", "u8",  0b00, 0b0, v16i8, ARMvidup>;
+def MVE_VIDUPu16 : MVE_VxDUP<"vidup", "u16", 0b01, 0b0, v8i16, ARMvidup>;
+def MVE_VIDUPu32 : MVE_VxDUP<"vidup", "u32", 0b10, 0b0, v4i32, ARMvidup>;
 
-def MVE_VDDUPu8  : MVE_VxDUP<"vddup", "u8",  0b00, 0b1>;
-def MVE_VDDUPu16 : MVE_VxDUP<"vddup", "u16", 0b01, 0b1>;
-def MVE_VDDUPu32 : MVE_VxDUP<"vddup", "u32", 0b10, 0b1>;
+def MVE_VDDUPu8  : MVE_VxDUP<"vddup", "u8",  0b00, 0b1, v16i8, null_frag>;
+def MVE_VDDUPu16 : MVE_VxDUP<"vddup", "u16", 0b01, 0b1, v8i16, null_frag>;
+def MVE_VDDUPu32 : MVE_VxDUP<"vddup", "u32", 0b10, 0b1, v4i32, null_frag>;
 
 class MVE_VxWDUP<string iname, string suffix, bits<2> size, bit bit_12,
                  list<dag> pattern=[]>
@@ -6254,11 +6232,7 @@ multiclass MVE_VLDRSTR_cs_m<MVE_ldst_direction dir, MVE_memsz memsz,
     def _post : MVE_VLDRSTR_cs<
         dir, memsz, 0, 1,
         !con((outs rGPR:$wb), dir.Oops),
-        // We need an !if here to select the base register class,
-        // because it's legal to write back to SP in a load of this
-        // type, but not in a store.
-        !con(dir.Iops, (ins !if(dir.load, t2_addr_offset_none,
-                                          t2_nosp_addr_offset_none):$Rn,
+        !con(dir.Iops, (ins t2_nosp_addr_offset_none:$Rn,
                             t2am_imm7_offset<memsz.shift>:$addr)),
         asm, suffix, IndexModePost, "$Qd, $Rn$addr", "$Rn.base = $wb"> {
       bits<4> Rn;

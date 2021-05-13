@@ -11,15 +11,9 @@
 #include "BinaryBasicBlock.h"
 #include "BinaryContext.h"
 #include "BinaryFunction.h"
-#include "ParallelUtilities.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCAsmLayout.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/Errc.h"
-#include <limits>
-#include <string>
 
 #undef  DEBUG_TYPE
 #define DEBUG_TYPE "bolt"
@@ -46,13 +40,13 @@ bool BinaryBasicBlock::hasInstructions() const {
 }
 
 void BinaryBasicBlock::adjustNumPseudos(const MCInst &Inst, int Sign) {
-  auto &BC = Function->getBinaryContext();
+  BinaryContext &BC = Function->getBinaryContext();
   if (BC.MII->get(Inst.getOpcode()).isPseudo())
     NumPseudos += Sign;
 }
 
 BinaryBasicBlock::iterator BinaryBasicBlock::getFirstNonPseudo() {
-  const auto &BC = Function->getBinaryContext();
+  const BinaryContext &BC = Function->getBinaryContext();
   for (auto II = Instructions.begin(), E = Instructions.end(); II != E; ++II) {
     if (!BC.MII->get(II->getOpcode()).isPseudo())
       return II;
@@ -61,7 +55,7 @@ BinaryBasicBlock::iterator BinaryBasicBlock::getFirstNonPseudo() {
 }
 
 BinaryBasicBlock::reverse_iterator BinaryBasicBlock::getLastNonPseudo() {
-  const auto &BC = Function->getBinaryContext();
+  const BinaryContext &BC = Function->getBinaryContext();
   for (auto RII = Instructions.rbegin(), E = Instructions.rend();
        RII != E; ++RII) {
     if (!BC.MII->get(RII->getOpcode()).isPseudo())
@@ -71,9 +65,9 @@ BinaryBasicBlock::reverse_iterator BinaryBasicBlock::getLastNonPseudo() {
 }
 
 bool BinaryBasicBlock::validateSuccessorInvariants() {
-  const auto *Inst = getLastNonPseudoInstr();
-  const auto *JT = Inst ? Function->getJumpTable(*Inst) : nullptr;
-  auto &BC = Function->getBinaryContext();
+  const MCInst *Inst = getLastNonPseudoInstr();
+  const JumpTable *JT = Inst ? Function->getJumpTable(*Inst) : nullptr;
+  BinaryContext &BC = Function->getBinaryContext();
   bool Valid = true;
 
   if (JT) {
@@ -84,7 +78,7 @@ bool BinaryBasicBlock::validateSuccessorInvariants() {
     const std::vector<const MCSymbol *> Entries(&JT->Entries[Range.first],
                                                 &JT->Entries[Range.second]);
     std::set<const MCSymbol *> UniqueSyms(Entries.begin(), Entries.end());
-    for (auto *Succ : Successors) {
+    for (BinaryBasicBlock *Succ : Successors) {
       auto Itr = UniqueSyms.find(Succ->getLabel());
       if (Itr != UniqueSyms.end()) {
         UniqueSyms.erase(Itr);
@@ -100,7 +94,7 @@ bool BinaryBasicBlock::validateSuccessorInvariants() {
     // If there are any leftover entries in the jump table, they
     // must be one of the function end labels.
     if (Valid) {
-      for (auto *Sym : UniqueSyms) {
+      for (const MCSymbol *Sym : UniqueSyms) {
         Valid &= (Sym == Function->getFunctionEndLabel() ||
                   Sym == Function->getFunctionColdEndLabel());
         if (!Valid) {
@@ -195,7 +189,8 @@ int32_t BinaryBasicBlock::getCFIStateAtInstr(const MCInst *Instr) const {
       getFunction()->getState() >= BinaryFunction::State::CFG &&
       "can only calculate CFI state when function is in or past the CFG state");
 
-  const auto &FDEProgram = getFunction()->getFDEProgram();
+  const std::vector<MCCFIInstruction> &FDEProgram =
+      getFunction()->getFDEProgram();
 
   // Find the last CFI preceding Instr in this basic block.
   const MCInst *LastCFI = nullptr;
@@ -240,7 +235,7 @@ int32_t BinaryBasicBlock::getCFIStateAtInstr(const MCInst *Instr) const {
     --State;
     assert(State >= 0 && "first CFI cannot be RestoreState");
     while (Depth && State >= 0) {
-      const auto &CFIInstr = FDEProgram[State];
+      const MCCFIInstruction &CFIInstr = FDEProgram[State];
       if (CFIInstr.getOperation() == MCCFIInstruction::OpRestoreState) {
         ++Depth;
       } else if (CFIInstr.getOperation() == MCCFIInstruction::OpRememberState) {
@@ -290,7 +285,7 @@ void BinaryBasicBlock::replaceSuccessor(BinaryBasicBlock *Succ,
 }
 
 void BinaryBasicBlock::removeAllSuccessors() {
-  for (auto *SuccessorBB : successors()) {
+  for (BinaryBasicBlock *SuccessorBB : successors()) {
     SuccessorBB->removePredecessor(this);
   }
   Successors.clear();
@@ -338,9 +333,9 @@ void BinaryBasicBlock::removeDuplicateConditionalSuccessor(MCInst *CondBranch) {
   assert(succ_size() == 2 && Successors[0] == Successors[1] &&
          "conditional successors expected");
 
-  auto *Succ = Successors[0];
-  const auto CondBI = BranchInfo[0];
-  const auto UncondBI = BranchInfo[1];
+  BinaryBasicBlock *Succ = Successors[0];
+  const BinaryBranchInfo CondBI = BranchInfo[0];
+  const BinaryBranchInfo UncondBI = BranchInfo[1];
 
   eraseInstruction(findInstruction(CondBranch));
 
@@ -357,14 +352,14 @@ void BinaryBasicBlock::removeDuplicateConditionalSuccessor(MCInst *CondBranch) {
 
 void BinaryBasicBlock::adjustExecutionCount(double Ratio) {
   auto adjustedCount = [&](uint64_t Count) -> uint64_t {
-    auto NewCount = Count * Ratio;
+    double NewCount = Count * Ratio;
     if (!NewCount && Count && (Ratio > 0.0))
       NewCount = 1;
     return NewCount;
   };
 
   setExecutionCount(adjustedCount(getKnownExecutionCount()));
-  for (auto &BI : branch_info()) {
+  for (BinaryBranchInfo &BI : branch_info()) {
     if (BI.Count != COUNT_NO_PROFILE)
       BI.Count = adjustedCount(BI.Count);
     if (BI.MispredictedCount != COUNT_INFERRED)
@@ -402,7 +397,7 @@ BinaryBasicBlock::getMacroOpFusionPair() const {
   auto RI = getLastNonPseudo();
   assert(RI != rend() && "cannot have an empty block with 2 successors");
 
-  auto &BC = Function->getBinaryContext();
+  BinaryContext &BC = Function->getBinaryContext();
 
   // Skip instruction if it's an unconditional branch following
   // a conditional one.
@@ -425,7 +420,7 @@ BinaryBasicBlock::getMacroOpFusionPair() const {
 }
 
 MCInst *BinaryBasicBlock::getTerminatorBefore(MCInst *Pos) {
-  auto &BC = Function->getBinaryContext();
+  BinaryContext &BC = Function->getBinaryContext();
   auto Itr = rbegin();
   bool Check = Pos ? false : true;
   MCInst *FirstTerminator{nullptr};
@@ -444,7 +439,7 @@ MCInst *BinaryBasicBlock::getTerminatorBefore(MCInst *Pos) {
 }
 
 bool BinaryBasicBlock::hasTerminatorAfter(MCInst *Pos) {
-  auto &BC = Function->getBinaryContext();
+  BinaryContext &BC = Function->getBinaryContext();
   auto Itr = rbegin();
   while (Itr != rend()) {
     if (&*Itr == Pos)
@@ -467,7 +462,7 @@ bool BinaryBasicBlock::swapConditionalSuccessors() {
 
 void BinaryBasicBlock::addBranchInstruction(const BinaryBasicBlock *Successor) {
   assert(isSuccessor(Successor));
-  auto &BC = Function->getBinaryContext();
+  BinaryContext &BC = Function->getBinaryContext();
   MCInst NewInst;
   std::unique_lock<std::shared_timed_mutex> Lock(BC.CtxMutex);
   BC.MIB->createUncondBranch(NewInst, Successor->getLabel(), BC.Ctx.get());
@@ -475,7 +470,7 @@ void BinaryBasicBlock::addBranchInstruction(const BinaryBasicBlock *Successor) {
 }
 
 void BinaryBasicBlock::addTailCallInstruction(const MCSymbol *Target) {
-  auto &BC = Function->getBinaryContext();
+  BinaryContext &BC = Function->getBinaryContext();
   MCInst NewInst;
   BC.MIB->createTailCall(NewInst, Target, BC.Ctx.get());
   Instructions.emplace_back(std::move(NewInst));
@@ -483,8 +478,8 @@ void BinaryBasicBlock::addTailCallInstruction(const MCSymbol *Target) {
 
 uint32_t BinaryBasicBlock::getNumCalls() const {
   uint32_t N{0};
-  auto &BC = Function->getBinaryContext();
-  for (auto &Instr : Instructions) {
+  BinaryContext &BC = Function->getBinaryContext();
+  for (const MCInst &Instr : Instructions) {
     if (BC.MIB->isCall(Instr))
       ++N;
   }
@@ -493,9 +488,9 @@ uint32_t BinaryBasicBlock::getNumCalls() const {
 
 uint32_t BinaryBasicBlock::getNumPseudos() const {
 #ifndef NDEBUG
-  auto &BC = Function->getBinaryContext();
+  BinaryContext &BC = Function->getBinaryContext();
   uint32_t N = 0;
-  for (auto &Instr : Instructions) {
+  for (const MCInst &Instr : Instructions) {
     if (BC.MII->get(Instr.getOpcode()).isPseudo())
       ++N;
   }
@@ -515,7 +510,7 @@ BinaryBasicBlock::getBranchStats(const BinaryBasicBlock *Succ) const {
   if (Function->hasValidProfile()) {
     uint64_t TotalCount = 0;
     uint64_t TotalMispreds = 0;
-    for (const auto &BI : BranchInfo) {
+    for (const BinaryBranchInfo &BI : BranchInfo) {
       if (BI.Count != COUNT_NO_PROFILE) {
         TotalCount += BI.Count;
         TotalMispreds += BI.MispredictedCount;
@@ -525,7 +520,7 @@ BinaryBasicBlock::getBranchStats(const BinaryBasicBlock *Succ) const {
     if (TotalCount > 0) {
       auto Itr = std::find(Successors.begin(), Successors.end(), Succ);
       assert(Itr != Successors.end());
-      const auto &BI = BranchInfo[Itr - Successors.begin()];
+      const BinaryBranchInfo &BI = BranchInfo[Itr - Successors.begin()];
       if (BI.Count && BI.Count != COUNT_NO_PROFILE) {
         if (TotalMispreds == 0) TotalMispreds = 1;
         return std::make_pair(double(BI.Count) / TotalCount,
@@ -537,7 +532,7 @@ BinaryBasicBlock::getBranchStats(const BinaryBasicBlock *Succ) const {
 }
 
 void BinaryBasicBlock::dump() const {
-  auto &BC = Function->getBinaryContext();
+  BinaryContext &BC = Function->getBinaryContext();
   if (Label) outs() << Label->getName() << ":\n";
   BC.printInstructions(outs(), Instructions.begin(), Instructions.end(),
                        getOffset());
@@ -559,7 +554,7 @@ uint64_t BinaryBasicBlock::estimateSize(const MCCodeEmitter *Emitter) const {
 BinaryBasicBlock::BinaryBranchInfo &
 BinaryBasicBlock::getBranchInfo(const BinaryBasicBlock &Succ) {
   auto BI = branch_info_begin();
-  for (auto BB : successors()) {
+  for (BinaryBasicBlock *BB : successors()) {
     if (&Succ == BB)
       return *BI;
     ++BI;
@@ -572,7 +567,7 @@ BinaryBasicBlock::getBranchInfo(const BinaryBasicBlock &Succ) {
 BinaryBasicBlock::BinaryBranchInfo &
 BinaryBasicBlock::getBranchInfo(const MCSymbol *Label) {
   auto BI = branch_info_begin();
-  for (auto BB : successors()) {
+  for (BinaryBasicBlock *BB : successors()) {
     if (BB->getLabel() == Label)
       return *BI;
     ++BI;
@@ -585,7 +580,7 @@ BinaryBasicBlock::getBranchInfo(const MCSymbol *Label) {
 BinaryBasicBlock *BinaryBasicBlock::splitAt(iterator II) {
   assert(II != end() && "expected iterator pointing to instruction");
 
-  auto *NewBlock = getFunction()->addBasicBlock(0);
+  BinaryBasicBlock *NewBlock = getFunction()->addBasicBlock(0);
 
   // Adjust successors/predecessors and propagate the execution count.
   moveAllSuccessorsTo(NewBlock);
@@ -606,8 +601,8 @@ void BinaryBasicBlock::updateOutputValues(const MCAsmLayout &Layout) {
   if (!LocSyms)
     return;
 
-  const auto BBAddress = getOutputAddressRange().first;
-  const auto BBOffset = Layout.getSymbolOffset(*getLabel());
+  const uint64_t BBAddress = getOutputAddressRange().first;
+  const uint64_t BBOffset = Layout.getSymbolOffset(*getLabel());
   for (const auto &LocSymKV : *LocSyms) {
     const uint32_t InputFunctionOffset = LocSymKV.first;
     const uint32_t OutputOffset = static_cast<uint32_t>(

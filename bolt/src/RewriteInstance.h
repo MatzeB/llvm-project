@@ -13,14 +13,9 @@
 #ifndef LLVM_TOOLS_LLVM_BOLT_REWRITE_INSTANCE_H
 #define LLVM_TOOLS_LLVM_BOLT_REWRITE_INSTANCE_H
 
-#include "BinaryFunction.h"
-#include "ExecutableFileMemoryManager.h"
+#include "BinaryContext.h"
 #include "NameResolver.h"
-#include "Passes/Instrumentation.h"
-#include "ProfileReaderBase.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/StringSet.h"
-#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/ObjectFile.h"
@@ -35,11 +30,9 @@ class ToolOutputFile;
 namespace bolt {
 
 class BoltAddressTranslation;
-class BinaryContext;
 class CFIReaderWriter;
 class DWARFRewriter;
-class NameResolver;
-class RewriteInstanceDiff;
+class ProfileReaderBase;
 
 /// This class encapsulates all data necessary to carry on binary reading,
 /// disassembly, CFG building, BB reordering (among other binary-level
@@ -92,6 +85,8 @@ public:
   }
 
 private:
+  using ELF64LEPhdrTy = object::ELF64LEFile::Elf_Phdr;
+
   /// Populate array of binary functions and other objects of interest
   /// from meta data in the file.
   void discoverFileObjects();
@@ -220,12 +215,9 @@ private:
   /// Return true if the relocation was successfully processed, false otherwise.
   /// The \p SymbolName, \p SymbolAddress, \p Addend and \p ExtractedValue
   /// parameters will be set on success.
-  bool analyzeRelocation(const RelocationRef &Rel,
-                         uint64_t RType,
-                         std::string &SymbolName,
-                         bool &IsSectionRelocation,
-                         uint64_t &SymbolAddress,
-                         int64_t &Addend,
+  bool analyzeRelocation(const object::RelocationRef &Rel, uint64_t RType,
+                         std::string &SymbolName, bool &IsSectionRelocation,
+                         uint64_t &SymbolAddress, int64_t &Addend,
                          uint64_t &ExtractedValue) const;
 
   /// Rewrite non-allocatable sections with modifications.
@@ -239,15 +231,15 @@ private:
 
   /// ELF-specific part. TODO: refactor into new class.
 #define ELF_FUNCTION(FUNC)                                                     \
-  template <typename ELFT> void FUNC(ELFObjectFile<ELFT> *Obj);                \
+  template <typename ELFT> void FUNC(object::ELFObjectFile<ELFT> *Obj);        \
   void FUNC() {                                                                \
-    if (auto *ELF32LE = dyn_cast<ELF32LEObjectFile>(InputFile))                \
+    if (auto *ELF32LE = dyn_cast<object::ELF32LEObjectFile>(InputFile))        \
       return FUNC(ELF32LE);                                                    \
-    if (auto *ELF64LE = dyn_cast<ELF64LEObjectFile>(InputFile))                \
+    if (auto *ELF64LE = dyn_cast<object::ELF64LEObjectFile>(InputFile))        \
       return FUNC(ELF64LE);                                                    \
-    if (auto *ELF32BE = dyn_cast<ELF32BEObjectFile>(InputFile))                \
+    if (auto *ELF32BE = dyn_cast<object::ELF32BEObjectFile>(InputFile))        \
       return FUNC(ELF32BE);                                                    \
-    auto *ELF64BE = cast<ELF64BEObjectFile>(InputFile);                        \
+    auto *ELF64BE = cast<object::ELF64BEObjectFile>(InputFile);                \
     return FUNC(ELF64BE);                                                      \
   }
 
@@ -283,9 +275,10 @@ private:
   /// Return a list of all sections to include in the output binary.
   /// Populate \p NewSectionIndex with a map of input to output indices.
   template <typename ELFT,
-            typename ELFShdrTy = typename ELFObjectFile<ELFT>::Elf_Shdr>
-  std::vector<ELFShdrTy> getOutputSections(
-      ELFObjectFile<ELFT> *File, std::vector<uint32_t> &NewSectionIndex);
+            typename ELFShdrTy = typename object::ELFObjectFile<ELFT>::Elf_Shdr>
+  std::vector<ELFShdrTy>
+  getOutputSections(object::ELFObjectFile<ELFT> *File,
+                    std::vector<uint32_t> &NewSectionIndex);
 
   /// Return true if \p Section should be stripped from the output binary.
   template <typename ELFShdrTy>
@@ -296,16 +289,12 @@ private:
   /// \p IsDynSym is set to true for dynamic symbol table since we
   /// are updating it in-place with minimal modifications.
   template <typename ELFT,
-            typename ELFShdrTy = typename ELFObjectFile<ELFT>::Elf_Shdr,
-            typename WriteFuncTy,
-            typename StrTabFuncTy>
-  void updateELFSymbolTable(
-      ELFObjectFile<ELFT> *File,
-      bool IsDynSym,
-      const ELFShdrTy &SymTabSection,
-      const std::vector<uint32_t> &NewSectionIndex,
-      WriteFuncTy Write,
-      StrTabFuncTy AddToStrTab);
+            typename ELFShdrTy = typename object::ELFObjectFile<ELFT>::Elf_Shdr,
+            typename WriteFuncTy, typename StrTabFuncTy>
+  void updateELFSymbolTable(object::ELFObjectFile<ELFT> *File, bool IsDynSym,
+                            const ELFShdrTy &SymTabSection,
+                            const std::vector<uint32_t> &NewSectionIndex,
+                            WriteFuncTy Write, StrTabFuncTy AddToStrTab);
 
   /// Add a notes section containing the BOLT revision and command line options.
   void addBoltInfoSection();
@@ -444,7 +433,6 @@ private:
 
   /// Exception handling and stack unwinding information in this binary.
   ErrorOr<BinarySection &> LSDASection{std::errc::bad_address};
-  const llvm::DWARFDebugFrame *EHFrame{nullptr};
   ErrorOr<BinarySection &> EHFrameSection{std::errc::bad_address};
 
   /// .plt section.

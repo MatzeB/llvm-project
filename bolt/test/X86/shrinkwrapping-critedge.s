@@ -6,8 +6,8 @@
 # RUN: llvm-mc -filetype=obj -triple x86_64-unknown-unknown \
 # RUN:   %s -o %t.o
 # RUN: link_fdata %s %t.o %t.fdata
-# RUN: strip --strip-unneeded %t.o
-# RUN: %host_cc %t.o -o %t.exe -Wl,-q -nostdlib
+# RUN: llvm-strip --strip-unneeded %t.o
+# RUN: %host_cc %cflags %t.o -o %t.exe -Wl,-q -nostdlib
 # RUN: llvm-bolt %t.exe -relocs -o %t.out -data %t.fdata \
 # RUN:     -frame-opt=all -simplify-conditional-tail-calls=false \
 # RUN:     -eliminate-unreachable=false

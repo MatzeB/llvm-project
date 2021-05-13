@@ -44,6 +44,9 @@ llvm_config.use_default_substitutions()
 config.substitutions.append(('%host_cc', config.host_cc))
 config.substitutions.append(('%host_cxx', config.host_cxx))
 
+config.substitutions.append(('%cflags', '-no-pie'))
+config.substitutions.append(('%cxxflags', '-no-pie'))
+
 tool_dirs = [config.llvm_tools_dir,
              config.test_source_root]
 
@@ -54,6 +57,8 @@ tools = [
     ToolSubst('perf2bolt', unresolved='fatal'),
     ToolSubst('yaml2obj', unresolved='fatal'),
     ToolSubst('llvm-mc', unresolved='fatal'),
+    ToolSubst('llvm-nm', unresolved='fatal'),
+    ToolSubst('llvm-strip', unresolved='fatal'),
     ToolSubst('linker', command=linker_tool, unresolved='fatal'),
     ToolSubst('link_fdata', command=FindTool('link_fdata.sh'), unresolved='fatal'),
 ]

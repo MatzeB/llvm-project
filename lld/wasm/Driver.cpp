@@ -9,8 +9,7 @@
 #include "lld/Common/Driver.h"
 #include "Config.h"
 #include "InputChunks.h"
-#include "InputGlobal.h"
-#include "InputTable.h"
+#include "InputElement.h"
 #include "MarkLive.h"
 #include "SymbolTable.h"
 #include "Writer.h"
@@ -471,6 +470,15 @@ static void setConfigs() {
     config->importTable = true;
   }
 
+  if (config->relocatable) {
+    if (config->exportTable)
+      error("--relocatable is incompatible with --export-table");
+    if (config->growableTable)
+      error("--relocatable is incompatible with --growable-table");
+    // Ignore any --import-table, as it's redundant.
+    config->importTable = true;
+  }
+
   if (config->shared) {
     config->importMemory = true;
     config->unresolvedSymbols = UnresolvedPolicy::ImportFuncs;
@@ -596,8 +604,7 @@ static GlobalSymbol *createGlobalVariable(StringRef name, bool isMutable) {
 
 static GlobalSymbol *createOptionalGlobal(StringRef name, bool isMutable) {
   InputGlobal *g = createGlobal(name, isMutable);
-  return symtab->addOptionalGlobalSymbols(name, WASM_SYMBOL_VISIBILITY_HIDDEN,
-                                          g);
+  return symtab->addOptionalGlobalSymbol(name, g);
 }
 
 // Create ABI-defined synthetic symbols
@@ -788,67 +795,6 @@ static void wrapSymbols(ArrayRef<WrappedSymbol> wrapped) {
     symtab->wrap(w.sym, w.real, w.wrap);
 }
 
-static TableSymbol *createDefinedIndirectFunctionTable(StringRef name) {
-  const uint32_t invalidIndex = -1;
-  WasmLimits limits{0, 0, 0}; // Set by the writer.
-  WasmTableType type{uint8_t(ValType::FUNCREF), limits};
-  WasmTable desc{invalidIndex, type, name};
-  InputTable *table = make<InputTable>(desc, nullptr);
-  uint32_t flags = config->exportTable ? 0 : WASM_SYMBOL_VISIBILITY_HIDDEN;
-  TableSymbol *sym = symtab->addSyntheticTable(name, flags, table);
-  sym->markLive();
-  sym->forceExport = config->exportTable;
-  return sym;
-}
-
-static TableSymbol *createUndefinedIndirectFunctionTable(StringRef name) {
-  WasmLimits limits{0, 0, 0}; // Set by the writer.
-  WasmTableType *type = make<WasmTableType>();
-  type->ElemType = uint8_t(ValType::FUNCREF);
-  type->Limits = limits;
-  StringRef module(defaultModule);
-  uint32_t flags = config->exportTable ? 0 : WASM_SYMBOL_VISIBILITY_HIDDEN;
-  flags |= WASM_SYMBOL_UNDEFINED;
-  Symbol *sym =
-      symtab->addUndefinedTable(name, name, module, flags, nullptr, type);
-  sym->markLive();
-  sym->forceExport = config->exportTable;
-  return cast<TableSymbol>(sym);
-}
-
-static TableSymbol *resolveIndirectFunctionTable() {
-  Symbol *existingTable = symtab->find(functionTableName);
-  if (existingTable) {
-    if (!isa<TableSymbol>(existingTable)) {
-      error(Twine("reserved symbol must be of type table: `") +
-            functionTableName + "`");
-      return nullptr;
-    }
-    if (existingTable->isDefined()) {
-      error(Twine("reserved symbol must not be defined in input files: `") +
-            functionTableName + "`");
-      return nullptr;
-    }
-  }
-
-  if (config->importTable) {
-    if (existingTable)
-      return cast<TableSymbol>(existingTable);
-    else
-      return createUndefinedIndirectFunctionTable(functionTableName);
-  } else if ((existingTable && existingTable->isLive()) ||
-             config->exportTable) {
-    // A defined table is required.  Either because the user request an exported
-    // table or because the table symbol is already live.  The existing table is
-    // guaranteed to be undefined due to the check above.
-    return createDefinedIndirectFunctionTable(functionTableName);
-  }
-
-  // An indirect function table will only be present in the symbol table if
-  // needed by a reloc; if we get here, we don't need one.
-  return nullptr;
-}
-
 void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   WasmOptTable parser;
   opt::InputArgList args = parser.parse(argsArr.slice(1));
@@ -919,8 +865,13 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   for (auto *arg : args.filtered(OPT_trace_symbol))
     symtab->trace(arg->getValue());
 
-  for (auto *arg : args.filtered(OPT_export))
+  for (auto *arg : args.filtered(OPT_export_if_defined))
     config->exportedSymbols.insert(arg->getValue());
+
+  for (auto *arg : args.filtered(OPT_export)) {
+    config->exportedSymbols.insert(arg->getValue());
+    config->requiredExports.push_back(arg->getValue());
+  }
 
   createSyntheticSymbols();
 
@@ -937,8 +888,8 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
 
   // Handle the `--export <sym>` options
   // This works like --undefined but also exports the symbol if its found
-  for (auto *arg : args.filtered(OPT_export))
-    handleUndefined(arg->getValue());
+  for (auto &iter : config->exportedSymbols)
+    handleUndefined(iter.first());
 
   Symbol *entrySym = nullptr;
   if (!config->relocatable && !config->entry.empty()) {
@@ -1012,15 +963,10 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   if (!wrapped.empty())
     wrapSymbols(wrapped);
 
-  for (auto *arg : args.filtered(OPT_export)) {
-    Symbol *sym = symtab->find(arg->getValue());
+  for (auto &iter : config->exportedSymbols) {
+    Symbol *sym = symtab->find(iter.first());
     if (sym && sym->isDefined())
       sym->forceExport = true;
-    else if (config->unresolvedSymbols == UnresolvedPolicy::ReportError)
-      error(Twine("symbol exported via --export not found: ") +
-            arg->getValue());
-    else if (config->unresolvedSymbols == UnresolvedPolicy::Warn)
-      warn(Twine("symbol exported via --export not found: ") + arg->getValue());
   }
 
   if (!config->relocatable && !config->isPic) {
@@ -1038,13 +984,12 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   // Do size optimizations: garbage collection
   markLive();
 
-  if (!config->relocatable) {
-    // Provide the indirect funciton table if needed.
-    WasmSym::indirectFunctionTable = resolveIndirectFunctionTable();
+  // Provide the indirect function table if needed.
+  WasmSym::indirectFunctionTable =
+      symtab->resolveIndirectFunctionTable(/*required =*/false);
 
-    if (errorCount())
-      return;
-  }
+  if (errorCount())
+    return;
 
   // Write the result to the file.
   writeResult();

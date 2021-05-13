@@ -61,10 +61,36 @@ bool FrontendAction::BeginSourceFile(
   assert(!realInput.IsEmpty() && "Unexpected empty filename!");
   set_currentInput(realInput);
   set_instance(&ci);
+
   if (!ci.HasAllSources()) {
     BeginSourceFileCleanUp(*this, ci);
     return false;
   }
+
+  auto &invoc = ci.invocation();
+
+  // Include command-line and predefined preprocessor macros. Use either:
+  //  * `-cpp/-nocpp`, or
+  //  * the file extension (if the user didn't express any preference)
+  // to decide whether to include them or not.
+  if ((invoc.preprocessorOpts().macrosFlag_ == PPMacrosFlag::Include) ||
+      (invoc.preprocessorOpts().macrosFlag_ == PPMacrosFlag::Unknown &&
+          currentInput().MustBePreprocessed())) {
+    invoc.setDefaultPredefinitions();
+    invoc.collectMacroDefinitions();
+  }
+
+  // Decide between fixed and free form (if the user didn't express any
+  // preference, use the file extension to decide)
+  if (invoc.frontendOpts().fortranForm_ == FortranForm::Unknown) {
+    invoc.fortranOpts().isFixedForm = currentInput().IsFixedForm();
+  }
+
+  if (!BeginSourceFileAction(ci)) {
+    BeginSourceFileCleanUp(*this, ci);
+    return false;
+  }
+
   return true;
 }
 
@@ -73,25 +99,6 @@ bool FrontendAction::ShouldEraseOutputFiles() {
 }
 
 llvm::Error FrontendAction::Execute() {
-  CompilerInstance &ci = this->instance();
-
-  std::string currentInputPath{GetCurrentFileOrBufferName()};
-
-  Fortran::parser::Options parserOptions =
-      this->instance().invocation().fortranOpts();
-
-  // Prescan. In case of failure, report and return.
-  ci.parsing().Prescan(currentInputPath, parserOptions);
-
-  if (ci.parsing().messages().AnyFatalError()) {
-    const unsigned diagID = ci.diagnostics().getCustomDiagID(
-        clang::DiagnosticsEngine::Error, "Could not scan %0");
-    ci.diagnostics().Report(diagID) << GetCurrentFileOrBufferName();
-    ci.parsing().messages().Emit(llvm::errs(), ci.allCookedSources());
-
-    return llvm::Error::success();
-  }
-
   ExecuteAction();
 
   return llvm::Error::success();

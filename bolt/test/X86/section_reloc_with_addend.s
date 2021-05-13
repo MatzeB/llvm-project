@@ -10,8 +10,8 @@
 # RUN: llvm-mc -filetype=obj -triple x86_64-unknown-unknown \
 # RUN:   %s -o %t.o
 # Delete our BB symbols so BOLT doesn't mark them as entry points
-# RUN: strip --strip-unneeded %t.o
-# RUN: %host_cc %t.o -o %t.exe -Wl,-q
+# RUN: llvm-strip --strip-unneeded %t.o
+# RUN: %host_cc %cflags %t.o -o %t.exe -Wl,-q
 
 # RUN: llvm-bolt %t.exe -relocs=1 -print-finalized -print-only=main -o %t.out
 

@@ -43,13 +43,11 @@ unsigned llvm::ComputeLinearIndex(Type *Ty,
 
   // Given a struct type, recursively traverse the elements.
   if (StructType *STy = dyn_cast<StructType>(Ty)) {
-    for (StructType::element_iterator EB = STy->element_begin(),
-                                      EI = EB,
-                                      EE = STy->element_end();
-        EI != EE; ++EI) {
-      if (Indices && *Indices == unsigned(EI - EB))
-        return ComputeLinearIndex(*EI, Indices+1, IndicesEnd, CurIndex);
-      CurIndex = ComputeLinearIndex(*EI, nullptr, nullptr, CurIndex);
+    for (auto I : llvm::enumerate(STy->elements())) {
+      Type *ET = I.value();
+      if (Indices && *Indices == I.index())
+        return ComputeLinearIndex(ET, Indices + 1, IndicesEnd, CurIndex);
+      CurIndex = ComputeLinearIndex(ET, nullptr, nullptr, CurIndex);
     }
     assert(!Indices && "Unexpected out of bound");
     return CurIndex;
@@ -562,14 +560,12 @@ bool llvm::attributesPermitTailCall(const Function *F, const Instruction *I,
 
   // Following attributes are completely benign as far as calling convention
   // goes, they shouldn't affect whether the call is a tail call.
-  CallerAttrs.removeAttribute(Attribute::NoAlias);
-  CalleeAttrs.removeAttribute(Attribute::NoAlias);
-  CallerAttrs.removeAttribute(Attribute::NonNull);
-  CalleeAttrs.removeAttribute(Attribute::NonNull);
-  CallerAttrs.removeAttribute(Attribute::Dereferenceable);
-  CalleeAttrs.removeAttribute(Attribute::Dereferenceable);
-  CallerAttrs.removeAttribute(Attribute::DereferenceableOrNull);
-  CalleeAttrs.removeAttribute(Attribute::DereferenceableOrNull);
+  for (const auto &Attr : {Attribute::Alignment, Attribute::Dereferenceable,
+                           Attribute::DereferenceableOrNull, Attribute::NoAlias,
+                           Attribute::NonNull}) {
+    CallerAttrs.removeAttribute(Attr);
+    CalleeAttrs.removeAttribute(Attr);
+  }
 
   if (CallerAttrs.contains(Attribute::ZExt)) {
     if (!CalleeAttrs.contains(Attribute::ZExt))

@@ -106,7 +106,8 @@ set(MLIR_PYTHON_BINDINGS_VERSION_LOCKED 1 CACHE BOOL
 
 if(MLIR_BINDINGS_PYTHON_ENABLED)
   include(MLIRDetectPythonEnv)
-  find_package(Python3 COMPONENTS Interpreter Development NumPy REQUIRED)
+  find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION}
+    COMPONENTS Interpreter Development NumPy REQUIRED)
   message(STATUS "Found python include dirs: ${Python3_INCLUDE_DIRS}")
   message(STATUS "Found python libraries: ${Python3_LIBRARIES}")
   message(STATUS "Found numpy v${Python3_NumPy_VERSION}: ${Python3_NumPy_INCLUDE_DIRS}")
@@ -133,16 +134,13 @@ add_subdirectory(lib)
 add_subdirectory(lib/CAPI)
 if (MLIR_INCLUDE_TESTS)
   add_definitions(-DMLIR_INCLUDE_TESTS)
-  if (TARGET gtest)
+  add_custom_target(MLIRUnitTests)
+  if (EXISTS ${LLVM_MAIN_SRC_DIR}/utils/unittest/googletest/include/gtest/gtest.h)
     add_subdirectory(unittests)
   else()
     message(WARNING "gtest not found, unittests will not be available")
   endif()
   add_subdirectory(test)
-endif()
-if (MLIR_INCLUDE_INTEGRATION_TESTS)
-  add_definitions(-DMLIR_INCLUDE_INTEGRATION_TESTS)
-  add_subdirectory(integration_test)
 endif()
 # Tools needs to come late to ensure that MLIR_ALL_LIBS is populated.
 # Generally things after this point may depend on MLIR_ALL_LIBS or libMLIR.so.

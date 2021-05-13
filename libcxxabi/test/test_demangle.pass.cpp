@@ -6,6 +6,15 @@
 //
 //===----------------------------------------------------------------------===//
 
+// The demangler does not pass all these tests with the system dylibs on macOS.
+// XFAIL: with_system_cxx_lib=macosx10.15
+// XFAIL: with_system_cxx_lib=macosx10.14
+// XFAIL: with_system_cxx_lib=macosx10.13
+// XFAIL: with_system_cxx_lib=macosx10.12
+// XFAIL: with_system_cxx_lib=macosx10.11
+// XFAIL: with_system_cxx_lib=macosx10.10
+// XFAIL: with_system_cxx_lib=macosx10.9
+
 #include "support/timer.h"
 #include <cassert>
 #include <cstdio>
@@ -29834,6 +29843,10 @@ const char* cases[][2] =
     {"_Z1fIL4Enumn1EEvv", "void f<(Enum)-1>()"},
 
     {"_ZN1A1gIiEEDTcldtptfpT1b1fIT_EEEv", "decltype(this->b.f<int>()) A::g<int>()"},
+
+    // Optional template-args for vendor extended type qualifier.
+    // See https://bugs.llvm.org/show_bug.cgi?id=48009.
+    {"_Z3fooILi79EEbU7_ExtIntIXT_EEi", "bool foo<79>(int _ExtInt<79>)"},
 };
 
 const unsigned N = sizeof(cases) / sizeof(cases[0]);

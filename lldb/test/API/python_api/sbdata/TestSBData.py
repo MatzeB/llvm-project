@@ -20,7 +20,6 @@ class SBDataAPICase(TestBase):
         # Find the line number to break on inside main.cpp.
         self.line = line_number('main.cpp', '// set breakpoint here')
 
-    @add_test_categories(['pyapi'])
     @skipIfReproducer # SBData::SetData is not instrumented.
     def test_byte_order_and_address_byte_size(self):
         """Test the SBData::SetData() to ensure the byte order and address
@@ -41,7 +40,6 @@ class SBDataAPICase(TestBase):
         addr = data.GetAddress(error, 0)
         self.assertEqual(addr, 0x8877665544332211);
 
-    @add_test_categories(['pyapi'])
     @skipIfReproducer # SBData::SetData is not instrumented.
     def test_with_run_command(self):
         """Test the SBData APIs."""
@@ -430,20 +428,20 @@ class SBDataAPICase(TestBase):
         self.assert_data(data2.GetUnsignedInt64, 24, 4)
         self.assert_data(data2.GetUnsignedInt64, 32, 5)
 
-        self.assertTrue(
-            data2.uint64[0] == 1,
+        self.assertEqual(
+            data2.uint64[0], 1,
             'read_data_helper failure: set data2[0] = 1')
-        self.assertTrue(
-            data2.uint64[1] == 2,
+        self.assertEqual(
+            data2.uint64[1], 2,
             'read_data_helper failure: set data2[1] = 2')
-        self.assertTrue(
-            data2.uint64[2] == 3,
+        self.assertEqual(
+            data2.uint64[2], 3,
             'read_data_helper failure: set data2[2] = 3')
-        self.assertTrue(
-            data2.uint64[3] == 4,
+        self.assertEqual(
+            data2.uint64[3], 4,
             'read_data_helper failure: set data2[3] = 4')
-        self.assertTrue(
-            data2.uint64[4] == 5,
+        self.assertEqual(
+            data2.uint64[4], 5,
             'read_data_helper failure: set data2[4] = 5')
 
         self.assertTrue(
@@ -468,20 +466,20 @@ class SBDataAPICase(TestBase):
         self.assert_data(data2.GetUnsignedInt32, 12, 4)
         self.assert_data(data2.GetUnsignedInt32, 16, 5)
 
-        self.assertTrue(
-            data2.uint32[0] == 1,
+        self.assertEqual(
+            data2.uint32[0], 1,
             'read_data_helper failure: set 32-bit data2[0] = 1')
-        self.assertTrue(
-            data2.uint32[1] == 2,
+        self.assertEqual(
+            data2.uint32[1], 2,
             'read_data_helper failure: set 32-bit data2[1] = 2')
-        self.assertTrue(
-            data2.uint32[2] == 3,
+        self.assertEqual(
+            data2.uint32[2], 3,
             'read_data_helper failure: set 32-bit data2[2] = 3')
-        self.assertTrue(
-            data2.uint32[3] == 4,
+        self.assertEqual(
+            data2.uint32[3], 4,
             'read_data_helper failure: set 32-bit data2[3] = 4')
-        self.assertTrue(
-            data2.uint32[4] == 5,
+        self.assertEqual(
+            data2.uint32[4], 5,
             'read_data_helper failure: set 32-bit data2[4] = 5')
 
         data2.SetDataFromDoubleArray([3.14, 6.28, 2.71])

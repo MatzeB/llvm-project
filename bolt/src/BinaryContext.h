@@ -25,23 +25,14 @@
 #include "llvm/ADT/iterator.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/BinaryFormat/MachO.h"
-#include "llvm/DebugInfo/DWARF/DWARFCompileUnit.h"
-#include "llvm/DebugInfo/DWARF/DWARFContext.h"
-#include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCDisassembler/MCDisassembler.h"
-#include "llvm/MC/MCInstPrinter.h"
-#include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
-#include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCSectionMachO.h"
-#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
@@ -56,13 +47,14 @@
 #include <vector>
 
 namespace llvm {
+class MCDisassembler;
+class MCInstPrinter;
 
 using namespace object;
 
 namespace bolt {
 
 class BinaryFunction;
-class BinaryBasicBlock;
 class ExecutableFileMemoryManager;
 
 /// Information on loadable part of the file.
@@ -691,7 +683,7 @@ public:
   /// Return a value of the global \p Symbol or an error if the value
   /// was not set.
   ErrorOr<uint64_t> getSymbolValue(const MCSymbol &Symbol) const {
-    const auto *BD = getBinaryDataByName(Symbol.getName());
+    const BinaryData *BD = getBinaryDataByName(Symbol.getName());
     if (!BD)
       return std::make_error_code(std::errc::bad_address);
     return BD->getAddress();

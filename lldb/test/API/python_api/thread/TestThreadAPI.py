@@ -16,19 +16,16 @@ class ThreadAPITestCase(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
 
-    @add_test_categories(['pyapi'])
     def test_get_process(self):
         """Test Python SBThread.GetProcess() API."""
         self.build()
         self.get_process()
 
-    @add_test_categories(['pyapi'])
     def test_get_stop_description(self):
         """Test Python SBThread.GetStopDescription() API."""
         self.build()
         self.get_stop_description()
 
-    @add_test_categories(['pyapi'])
     def test_run_to_address(self):
         """Test Python SBThread.RunToAddress() API."""
         # We build a different executable than the default build() does.
@@ -38,7 +35,6 @@ class ThreadAPITestCase(TestBase):
         self.run_to_address(self.exe_name)
 
     @skipIfAsan # The output looks different under ASAN.
-    @add_test_categories(['pyapi'])
     @expectedFailureAll(oslist=["linux"], archs=['arm'], bugnumber="llvm.org/pr45892")
     @expectedFailureAll(oslist=["windows"])
     def test_step_out_of_malloc_into_function_b(self):
@@ -49,7 +45,6 @@ class ThreadAPITestCase(TestBase):
         self.setTearDownCleanup(dictionary=d)
         self.step_out_of_malloc_into_function_b(self.exe_name)
 
-    @add_test_categories(['pyapi'])
     def test_step_over_3_times(self):
         """Test Python SBThread.StepOver() API."""
         # We build a different executable than the default build() does.
@@ -99,8 +94,7 @@ class ThreadAPITestCase(TestBase):
 
         proc_of_thread = thread.GetProcess()
         self.trace("proc_of_thread:", proc_of_thread)
-        self.assertTrue(proc_of_thread.GetProcessID()
-                        == process.GetProcessID())
+        self.assertEqual(proc_of_thread.GetProcessID(), process.GetProcessID())
 
     def get_stop_description(self):
         """Test Python SBThread.GetStopDescription() API."""
@@ -180,8 +174,8 @@ class ThreadAPITestCase(TestBase):
 
         thread.StepOut()
         self.runCmd("thread backtrace")
-        self.assertTrue(
-            thread.GetFrameAtIndex(0).GetLineEntry().GetLine() == self.step_out_of_malloc,
+        self.assertEqual(
+            thread.GetFrameAtIndex(0).GetLineEntry().GetLine(), self.step_out_of_malloc,
             "step out of malloc into function b is successful")
 
     def step_over_3_times(self, exe_name):

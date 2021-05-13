@@ -8,7 +8,8 @@
 
 #include "HugifyRuntimeLibrary.h"
 #include "BinaryFunction.h"
-#include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
+#include "llvm/ExecutionEngine/RuntimeDyld.h"
+#include "llvm/MC/MCStreamer.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/CommandLine.h"
 
@@ -56,7 +57,7 @@ void HugifyRuntimeLibrary::adjustCommandLineOptions(
 }
 
 void HugifyRuntimeLibrary::emitBinary(BinaryContext &BC, MCStreamer &Streamer) {
-  const auto *StartFunction =
+  const BinaryFunction *StartFunction =
       BC.getBinaryFunctionAtAddress(*(BC.StartFunctionAddress));
   assert(!StartFunction->isFragment() && "expected main function fragment");
   if (!StartFunction) {
@@ -67,7 +68,7 @@ void HugifyRuntimeLibrary::emitBinary(BinaryContext &BC, MCStreamer &Streamer) {
   const auto Flags = BinarySection::getFlags(/*IsReadOnly=*/false,
                                              /*IsText=*/false,
                                              /*IsAllocatable=*/true);
-  auto *Section =
+  MCSectionELF *Section =
       BC.Ctx->getELFSection(".bolt.hugify.entries", ELF::SHT_PROGBITS, Flags);
 
   // __bolt_hugify_init_ptr stores the poiter the hugify library needs to
@@ -87,7 +88,7 @@ void HugifyRuntimeLibrary::emitBinary(BinaryContext &BC, MCStreamer &Streamer) {
 void HugifyRuntimeLibrary::link(BinaryContext &BC, StringRef ToolPath,
                                 RuntimeDyld &RTDyld,
                                 std::function<void(RuntimeDyld &)> OnLoad) {
-  auto LibPath = getLibPath(ToolPath, opts::RuntimeHugifyLib);
+  std::string LibPath = getLibPath(ToolPath, opts::RuntimeHugifyLib);
   loadLibrary(LibPath, RTDyld);
   OnLoad(RTDyld);
   RTDyld.finalizeWithMemoryManagerLocking();

@@ -11,17 +11,19 @@
 #ifndef LLVM_TOOLS_LLVM_BOLT_EXCEPTIONS_H
 #define LLVM_TOOLS_LLVM_BOLT_EXCEPTIONS_H
 
-#include "BinaryContext.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/DebugInfo/DWARF/DWARFDebugFrame.h"
-#include "llvm/Support/Casting.h"
+#include <cstdint>
 #include <map>
+#include <vector>
 
 namespace llvm {
+class DWARFDebugFrame;
+namespace dwarf {
+class FDE;
+} // namespace dwarf
+
 namespace bolt {
 
 class BinaryFunction;
-class RewriteInstance;
 
 /// \brief Wraps up information to read all CFI instructions and feed them to a
 /// BinaryFunction, as well as rewriting CFI sections.
@@ -46,12 +48,6 @@ public:
       std::vector<uint64_t> &FailedAddresses) const;
 
   using FDEsMap = std::map<uint64_t, const dwarf::FDE *>;
-  using fde_iterator = FDEsMap::const_iterator;
-
-  /// Get all FDEs discovered by this reader.
-  iterator_range<fde_iterator> fdes() const {
-    return iterator_range<fde_iterator>(FDEs.begin(), FDEs.end());
-  }
 
   const FDEsMap &getFDEs() const {
     return FDEs;

@@ -20,29 +20,28 @@
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/MC/MCAsmBackend.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrDesc.h"
 #include "llvm/MC/MCInstrInfo.h"
-#include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/Allocator.h"
-#include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/ErrorOr.h"
 #include <cassert>
 #include <cstdint>
 #include <map>
-#include <mutex>
-#include <set>
-#include <shared_mutex>
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace llvm {
+class MCContext;
+class MCFixup;
+class MCRegisterInfo;
+class MCSymbol;
+class raw_ostream;
+
 namespace bolt {
 
 /// Different types of indirect branches encountered during disassembly.
@@ -99,11 +98,11 @@ private:
     if (Inst.getNumOperands() == 0)
       return nullptr;
 
-    const auto &LastOp = Inst.getOperand(Inst.getNumOperands() - 1);
+    const MCOperand &LastOp = Inst.getOperand(Inst.getNumOperands() - 1);
     if (!LastOp.isInst())
       return nullptr;
 
-    auto *AnnotationInst = const_cast<MCInst *>(LastOp.getInst());
+    MCInst *AnnotationInst = const_cast<MCInst *>(LastOp.getInst());
     assert(AnnotationInst->getOpcode() == TargetOpcode::ANNOTATION_LABEL);
 
     return AnnotationInst;
@@ -111,17 +110,17 @@ private:
 
   void setAnnotationOpValue(MCInst &Inst, unsigned Index, int64_t Value,
                             AllocatorIdTy AllocatorId = 0) {
-    auto *AnnotationInst = getAnnotationInst(Inst);
+    MCInst *AnnotationInst = getAnnotationInst(Inst);
     if (!AnnotationInst) {
-      auto &Allocator = getAnnotationAllocator(AllocatorId);
+      AnnotationAllocator &Allocator = getAnnotationAllocator(AllocatorId);
       AnnotationInst = new (Allocator.MCInstAllocator.Allocate()) MCInst();
       AnnotationInst->setOpcode(TargetOpcode::ANNOTATION_LABEL);
       Inst.addOperand(MCOperand::createInst(AnnotationInst));
     }
 
-    const auto AnnotationValue = encodeAnnotationImm(Index, Value);
+    const int64_t AnnotationValue = encodeAnnotationImm(Index, Value);
     for (int I = AnnotationInst->getNumOperands() - 1; I >= 0; --I) {
-      auto ImmValue = AnnotationInst->getOperand(I).getImm();
+      int64_t ImmValue = AnnotationInst->getOperand(I).getImm();
       if (extractAnnotationIndex(ImmValue) == Index) {
         AnnotationInst->getOperand(I).setImm(AnnotationValue);
         return;
@@ -133,12 +132,12 @@ private:
 
   Optional<int64_t>
   getAnnotationOpValue(const MCInst &Inst, unsigned Index) const {
-    const auto *AnnotationInst = getAnnotationInst(Inst);
+    const MCInst *AnnotationInst = getAnnotationInst(Inst);
     if (!AnnotationInst)
       return NoneType();
 
     for (int I = AnnotationInst->getNumOperands() - 1; I >= 0; --I) {
-      auto ImmValue = AnnotationInst->getOperand(I).getImm();
+      int64_t ImmValue = AnnotationInst->getOperand(I).getImm();
       if (extractAnnotationIndex(ImmValue) == Index) {
         return extractAnnotationValue(ImmValue);
       }
@@ -307,8 +306,8 @@ public:
 
   /// Free the values allocator within the annotation allocator
   void freeValuesAllocator(AllocatorIdTy AllocatorId) {
-    auto &Allocator = getAnnotationAllocator(AllocatorId);
-    for (auto *Annotation : Allocator.AnnotationPool)
+    AnnotationAllocator &Allocator = getAnnotationAllocator(AllocatorId);
+    for (MCPlus::MCAnnotation *Annotation : Allocator.AnnotationPool)
       Annotation->~MCAnnotation();
 
     Allocator.AnnotationPool.clear();
@@ -322,8 +321,8 @@ public:
   /// Free all memory allocated for annotations
   void freeAnnotations() {
     for (auto &Element : AnnotationAllocators) {
-      auto &Allocator = Element.second;
-      for (auto *Annotation : Allocator.AnnotationPool)
+      AnnotationAllocator &Allocator = Element.second;
+      for (MCPlus::MCAnnotation *Annotation : Allocator.AnnotationPool)
         Annotation->~MCAnnotation();
 
       Allocator.AnnotationPool.clear();
@@ -612,13 +611,13 @@ public:
             MCPlus::getNumPrimeOperands(*CurInst))
         return false;
 
-      const auto &Op = CurInst->getOperand(OpNum);
+      const MCOperand &Op = CurInst->getOperand(OpNum);
       if (!Op.isReg())
         return true;
 
       MCPhysReg Reg = Op.getReg();
       while (next()) {
-        const auto &InstrDesc = MIA.Info->get(CurInst->getOpcode());
+        const MCInstrDesc &InstrDesc = MIA.Info->get(CurInst->getOpcode());
         if (InstrDesc.hasDefOfPhysReg(*CurInst, Reg, MRI)) {
           InstrWindow = InstrWindow.slice(0, CurInst - InstrWindow.begin() + 1);
           return true;
@@ -675,7 +674,7 @@ public:
 
       if (OpNum < 0)
         return false;
-      const auto &Op = CurInst->getOperand(OpNum);
+      const MCOperand &Op = CurInst->getOperand(OpNum);
       if (!Op.isImm())
         return false;
       Imm = Op.getImm();
@@ -714,7 +713,7 @@ public:
       if (OpNum < 0 || static_cast<unsigned int>(OpNum) >=
             MCPlus::getNumPrimeOperands(*I))
         return false;
-      const auto &Op = I->getOperand(OpNum);
+      const MCOperand &Op = I->getOperand(OpNum);
       if (!Op.isReg())
         return false;
       Reg = Op.getReg();
@@ -1548,7 +1547,7 @@ public:
     if (AI != AnnotationNameIndexMap.end())
       return AI->second;
 
-    const auto Index =
+    const unsigned Index =
         AnnotationNameIndexMap.size() + MCPlus::MCAnnotation::kGeneric;
     AnnotationNameIndexMap.insert(std::make_pair(Name, Index));
     AnnotationNames.emplace_back(std::string(Name));
@@ -1562,7 +1561,7 @@ public:
                                  const ValueType &Val,
                                  AllocatorIdTy AllocatorId = 0) {
     assert(!hasAnnotation(Inst, Index));
-    auto &Allocator = getAnnotationAllocator(AllocatorId);
+    AnnotationAllocator &Allocator = getAnnotationAllocator(AllocatorId);
     auto *A = new (Allocator.ValueAllocator)
         MCPlus::MCSimpleAnnotation<ValueType>(Val);
 
@@ -1605,7 +1604,7 @@ public:
   template <typename ValueType>
   ValueType &getOrCreateAnnotationAs(MCInst &Inst, StringRef Name,
                                      AllocatorIdTy AllocatorId = 0) {
-    const auto Index = getOrCreateAnnotationIndex(Name);
+    const unsigned Index = getOrCreateAnnotationIndex(Name);
     return getOrCreateAnnotationAs<ValueType>(Inst, Index, AllocatorId);
   }
 
@@ -1613,7 +1612,7 @@ public:
   /// Use hasAnnotation() if the annotation may not exist.
   template <typename ValueType>
   ValueType &getAnnotationAs(const MCInst &Inst, unsigned Index) const {
-    auto Value = getAnnotationOpValue(Inst, Index);
+    Optional<int64_t> Value = getAnnotationOpValue(Inst, Index);
     assert(Value && "annotation should exist");
     return reinterpret_cast<MCPlus::MCSimpleAnnotation<ValueType> *>
       (*Value)->getValue();
@@ -1643,7 +1642,7 @@ public:
   template <typename ValueType> const ValueType &
   getAnnotationWithDefault(const MCInst &Inst, StringRef Name,
                            const ValueType &DefaultValue = ValueType()) {
-    const auto Index = getOrCreateAnnotationIndex(Name);
+    const unsigned Index = getOrCreateAnnotationIndex(Name);
     return getAnnotationWithDefault<ValueType>(Inst, Index, DefaultValue);
   }
 
