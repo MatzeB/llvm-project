@@ -219,7 +219,7 @@ void BinaryEmitter::emitFunctions() {
                         << "\" : " << Function->getFunctionNumber() << '\n');
 
       // Was any part of the function emitted.
-      bool Emitted{false};
+      bool Emitted = false;
 
       // Turn off Intel JCC Erratum mitigation for cold code if requested
       if (HasProfile && opts::X86AlignBranchBoundaryHotOnly &&
@@ -677,6 +677,9 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
     } else {
       MCSection *HotSection, *ColdSection;
       if (opts::JumpTables == JTS_BASIC) {
+        // In non-relocation mode we have to emit jump tables in local sections.
+        // This way we only overwrite them when the corresponding function is
+        // overwritten.
         std::string Name = ".local." + JT.Labels[0]->getName().str();
         std::replace(Name.begin(), Name.end(), '/', '.');
         BinarySection &Section =
