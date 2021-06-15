@@ -1489,7 +1489,17 @@ void BinaryContext::preprocessDWODebugInfo() {
       if (llvm::Optional<uint64_t> DWOId = DwarfUnit->getDWOId()) {
         DWARFUnit *DWOCU =
             DwarfUnit->getNonSkeletonUnitDIE(false).getDwarfUnit();
-        assert(DWOCU->isDWOUnit() && "No CU for DWO ID.");
+        if (!DWOCU->isDWOUnit()) {
+          std::string DWOName = dwarf::toString(
+              DwarfUnit->getUnitDIE().find(
+                  {dwarf::DW_AT_dwo_name, dwarf::DW_AT_GNU_dwo_name}),
+              "");
+          outs() << "BOLT-WARNING: Debug Fission: DWO debug information for "
+                 << DWOName
+                 << " was not retrieved and won't be updated. Please check "
+                    "relative path.\n";
+          continue;
+        }
         DWOCUs[*DWOId] = DWOCU;
       }
     }
@@ -1690,25 +1700,31 @@ void BinaryContext::printInstruction(raw_ostream &OS,
 
   MIB->printAnnotations(Instruction, OS);
 
-  const DWARFDebugLine::LineTable *LineTable =
-    Function && opts::PrintDebugInfo ? Function->getDWARFLineTable()
-                                     : nullptr;
-
-  if (LineTable) {
+  if (opts::PrintDebugInfo) {
     DebugLineTableRowRef RowRef =
         DebugLineTableRowRef::fromSMLoc(Instruction.getLoc());
-
     if (RowRef != DebugLineTableRowRef::NULL_ROW) {
+      const DWARFDebugLine::LineTable *LineTable;
+      if (Function && Function->getDWARFUnit() &&
+          Function->getDWARFUnit()->getOffset() == RowRef.DwCompileUnitIndex) {
+        LineTable = Function->getDWARFLineTable();
+      } else {
+        LineTable = DwCtx->getLineTableForUnit(
+            DwCtx->getCompileUnitForOffset(RowRef.DwCompileUnitIndex));
+      }
+      assert(LineTable &&
+             "line table expected for instruction with debug info");
+
       const DWARFDebugLine::Row &Row = LineTable->Rows[RowRef.RowIndex - 1];
       StringRef FileName = "";
       if (Optional<const char *> FName =
               LineTable->Prologue.FileNames[Row.File - 1].Name.getAsCString())
         FileName = *FName;
       OS << " # debug line " << FileName << ":" << Row.Line;
-
-      if (Row.Column) {
+      if (Row.Column)
         OS << ":" << Row.Column;
-      }
+      if (Row.Discriminator)
+        OS << " discriminator:" << Row.Discriminator;
     }
   }
 

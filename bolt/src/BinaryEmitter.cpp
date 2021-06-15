@@ -122,6 +122,7 @@ size_t padFunction(const BinaryFunction &Function) {
 } // namespace opts
 
 namespace {
+using JumpTable = bolt::JumpTable;
 
 class BinaryEmitter {
 private:
@@ -189,6 +190,17 @@ private:
 
 void BinaryEmitter::emitAll(StringRef OrgSecPrefix) {
   Streamer.InitSections(false);
+
+  if (opts::UpdateDebugSections && BC.isELF()) {
+    // Force the emission of debug line info into allocatable section to ensure
+    // RuntimeDyld will process it without ProcessAllSections flag.
+    //
+    // NB: on MachO all sections are required for execution, hence no need
+    //     to change flags/attributes.
+    MCSectionELF *ELFDwarfLineSection =
+        static_cast<MCSectionELF *>(BC.MOFI->getDwarfLineSection());
+    ELFDwarfLineSection->setFlags(ELF::SHF_ALLOC);
+  }
 
   if (RuntimeLibrary *RtLibrary = BC.getRuntimeLibrary()) {
     RtLibrary->emitBinary(BC, Streamer);
@@ -660,6 +672,10 @@ SMLoc BinaryEmitter::emitLineInfo(const BinaryFunction &BF, SMLoc NewLoc,
 }
 
 void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
+  MCSection *ReadOnlySection = BC.MOFI->getReadOnlySection();
+  MCSection *ReadOnlyColdSection = BC.MOFI->getContext().getELFSection(
+      ".rodata.cold", ELF::SHT_PROGBITS, ELF::SHF_ALLOC);
+
   if (!BF.hasJumpTables())
     return;
 
@@ -690,11 +706,10 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
         ColdSection = HotSection;
       } else {
         if (BF.isSimple()) {
-          HotSection = BC.MOFI->getReadOnlySection();
-          ColdSection = BC.MOFI->getReadOnlyColdSection();
+          HotSection = ReadOnlySection;
+          ColdSection = ReadOnlyColdSection;
         } else {
-          HotSection = BF.hasProfile() ? BC.MOFI->getReadOnlySection()
-                                       : BC.MOFI->getReadOnlyColdSection();
+          HotSection = BF.hasProfile() ? ReadOnlySection : ReadOnlyColdSection;
           ColdSection = HotSection;
         }
       }
