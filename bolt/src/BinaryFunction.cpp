@@ -683,13 +683,6 @@ void BinaryFunction::printRelocations(raw_ostream &OS,
     Sep = ", ";
     ++RI;
   }
-
-  RI = MoveRelocations.lower_bound(Offset);
-  while (RI != MoveRelocations.end() && RI->first < Offset + Size) {
-    OS << Sep << "(M: " << RI->second << ")";
-    Sep = ", ";
-    ++RI;
-  }
 }
 
 IndirectBranchType
@@ -980,7 +973,13 @@ bool BinaryFunction::disassemble() {
       errs() << '\n';
       Instruction.dump_pretty(errs(), BC.InstPrinter.get());
       errs() << '\n';
-      return false;
+      errs() << "BOLT-ERROR: cannot handle PC-relative operand at 0x"
+             << Twine::utohexstr(Address) << ". Skipping function " << *this
+             << ".\n";
+      if (BC.HasRelocations)
+        exit(1);
+      IsSimple = false;
+      return;
     }
     if (TargetAddress == 0 && opts::Verbosity >= 1) {
       outs() << "BOLT-INFO: PC-relative operand is zero in function " << *this
@@ -1004,7 +1003,6 @@ bool BinaryFunction::disassemble() {
                          Instruction,
                          Expr,
                          *BC.Ctx, 0)));
-    return true;
   };
 
   // Used to fix the target of linker-generated AArch64 stubs with no relocation
@@ -1020,6 +1018,110 @@ bool BinaryFunction::disassemble() {
                                  Val, ELF::R_AARCH64_ADR_PREL_PG_HI21);
     MIB->replaceImmWithSymbolRef(LoadLowBits, TargetSymbol, Addend, Ctx.get(),
                                  Val, ELF::R_AARCH64_ADD_ABS_LO12_NC);
+  };
+
+  auto handleExternalReference = [&](MCInst &Instruction, uint64_t Size,
+                                     uint64_t Offset, uint64_t TargetAddress,
+                                     bool &IsCall) -> MCSymbol * {
+    const bool IsCondBranch = MIB->isConditionalBranch(Instruction);
+    const uint64_t AbsoluteInstrAddr = getAddress() + Offset;
+    MCSymbol *TargetSymbol = nullptr;
+    InterproceduralReferences.insert(TargetAddress);
+    if (opts::Verbosity >= 2 && !IsCall && Size == 2 && !BC.HasRelocations) {
+      errs() << "BOLT-WARNING: relaxed tail call detected at 0x"
+             << Twine::utohexstr(AbsoluteInstrAddr) << " in function " << *this
+             << ". Code size will be increased.\n";
+    }
+
+    assert(!MIB->isTailCall(Instruction) &&
+           "synthetic tail call instruction found");
+
+    // This is a call regardless of the opcode.
+    // Assign proper opcode for tail calls, so that they could be
+    // treated as calls.
+    if (!IsCall) {
+      if (!MIB->convertJmpToTailCall(Instruction)) {
+        assert(IsCondBranch && "unknown tail call instruction");
+        if (opts::Verbosity >= 2) {
+          errs() << "BOLT-WARNING: conditional tail call detected in "
+                 << "function " << *this << " at 0x"
+                 << Twine::utohexstr(AbsoluteInstrAddr) << ".\n";
+        }
+      }
+      IsCall = true;
+    }
+
+    TargetSymbol = BC.getOrCreateGlobalSymbol(TargetAddress, "FUNCat");
+    if (opts::Verbosity >= 2 && TargetAddress == 0) {
+      // We actually see calls to address 0 in presence of weak
+      // symbols originating from libraries. This code is never meant
+      // to be executed.
+      outs() << "BOLT-INFO: Function " << *this
+             << " has a call to address zero.\n";
+    }
+
+    return TargetSymbol;
+  };
+
+  auto handleIndirectBranch = [&](MCInst &Instruction, uint64_t Size,
+                                  uint64_t Offset) {
+    uint64_t IndirectTarget = 0;
+    IndirectBranchType Result =
+        processIndirectBranch(Instruction, Size, Offset, IndirectTarget);
+    switch (Result) {
+    default:
+      llvm_unreachable("unexpected result");
+    case IndirectBranchType::POSSIBLE_TAIL_CALL: {
+      bool Result = MIB->convertJmpToTailCall(Instruction);
+      (void)Result;
+      assert(Result);
+      break;
+    }
+    case IndirectBranchType::POSSIBLE_JUMP_TABLE:
+    case IndirectBranchType::POSSIBLE_PIC_JUMP_TABLE:
+      if (opts::JumpTables == JTS_NONE)
+        IsSimple = false;
+      break;
+    case IndirectBranchType::POSSIBLE_FIXED_BRANCH: {
+      if (containsAddress(IndirectTarget)) {
+        const MCSymbol *TargetSymbol = getOrCreateLocalLabel(IndirectTarget);
+        Instruction.clear();
+        MIB->createUncondBranch(Instruction, TargetSymbol, BC.Ctx.get());
+        TakenBranches.emplace_back(Offset, IndirectTarget - getAddress());
+        HasFixedIndirectBranch = true;
+      } else {
+        MIB->convertJmpToTailCall(Instruction);
+        InterproceduralReferences.insert(IndirectTarget);
+      }
+      break;
+    }
+    case IndirectBranchType::UNKNOWN:
+      // Keep processing. We'll do more checks and fixes in
+      // postProcessIndirectBranches().
+      UnknownIndirectBranchOffsets.emplace(Offset);
+      break;
+    }
+  };
+
+  // Check for linker veneers, which lack relocations and need manual
+  // adjustments.
+  auto handleAArch64IndirectCall = [&](MCInst &Instruction, uint64_t Offset) {
+    const uint64_t AbsoluteInstrAddr = getAddress() + Offset;
+    MCInst *TargetHiBits, *TargetLowBits;
+    uint64_t TargetAddress;
+    if (MIB->matchLinkerVeneer(Instructions.begin(), Instructions.end(),
+                               AbsoluteInstrAddr, Instruction, TargetHiBits,
+                               TargetLowBits, TargetAddress)) {
+      MIB->addAnnotation(Instruction, "AArch64Veneer", true);
+
+      uint8_t Counter = 0;
+      for (auto It = std::prev(Instructions.end()); Counter != 2;
+           --It, ++Counter) {
+        MIB->addAnnotation(It->second, "AArch64Veneer", true);
+      }
+
+      fixStubTarget(*TargetLowBits, *TargetHiBits, TargetAddress);
+    }
   };
 
   uint64_t Size = 0;  // instruction size
@@ -1197,69 +1299,9 @@ bool BinaryFunction::disassemble() {
               }
               goto add_instruction;
             }
-            InterproceduralReferences.insert(TargetAddress);
-            if (opts::Verbosity >= 2 && !IsCall && Size == 2 &&
-                !BC.HasRelocations) {
-              errs() << "BOLT-WARNING: relaxed tail call detected at 0x"
-                     << Twine::utohexstr(AbsoluteInstrAddr) << " in function "
-                     << *this << ". Code size will be increased.\n";
-            }
-
-            assert(!MIB->isTailCall(Instruction) &&
-                   "synthetic tail call instruction found");
-
-            // This is a call regardless of the opcode.
-            // Assign proper opcode for tail calls, so that they could be
-            // treated as calls.
-            if (!IsCall) {
-              if (!MIB->convertJmpToTailCall(Instruction)) {
-                assert(IsCondBranch && "unknown tail call instruction");
-                if (opts::Verbosity >= 2) {
-                  errs() << "BOLT-WARNING: conditional tail call detected in "
-                         << "function " << *this << " at 0x"
-                         << Twine::utohexstr(AbsoluteInstrAddr) << ".\n";
-                }
-              }
-              IsCall = true;
-            }
-
-            TargetSymbol =
-                BC.getOrCreateGlobalSymbol(TargetAddress, "FUNCat");
-            if (TargetAddress == 0) {
-              // We actually see calls to address 0 in presence of weak
-              // symbols originating from libraries. This code is never meant
-              // to be executed.
-              if (opts::Verbosity >= 2) {
-                outs() << "BOLT-INFO: Function " << *this
-                       << " has a call to address zero.\n";
-              }
-            }
-
-            if (BC.HasRelocations) {
-              // Check if we need to create relocation to move this function's
-              // code without re-assembly.
-              size_t RelSize = (Size < 5) ? 1 : 4;
-              uint64_t RelOffset = Offset + Size - RelSize;
-              if (BC.isAArch64()) {
-                RelSize = 0;
-                RelOffset = Offset;
-              }
-              auto RI = MoveRelocations.find(RelOffset);
-              if (RI == MoveRelocations.end()) {
-                uint64_t RelType =
-                    (RelSize == 1) ? ELF::R_X86_64_PC8 : ELF::R_X86_64_PC32;
-                if (BC.isAArch64())
-                  RelType = ELF::R_AARCH64_CALL26;
-                LLVM_DEBUG(dbgs()
-                           << "BOLT-DEBUG: creating relocation for static"
-                           << " function call to " << TargetSymbol->getName()
-                           << " at offset 0x" << Twine::utohexstr(RelOffset)
-                           << " with size " << RelSize << " for function "
-                           << *this << '\n');
-                addRelocation(getAddress() + RelOffset, TargetSymbol, RelType,
-                              -RelSize, 0);
-              }
-            }
+            // May update Instruction and IsCall
+            TargetSymbol = handleExternalReference(Instruction, Size, Offset,
+                                                   TargetAddress, IsCall);
           }
         }
 
@@ -1276,87 +1318,17 @@ bool BinaryFunction::disassemble() {
       } else {
         // Could not evaluate branch. Should be an indirect call or an
         // indirect branch. Bail out on the latter case.
-        if (MIB->isIndirectBranch(Instruction)) {
-          uint64_t IndirectTarget = 0;
-          IndirectBranchType Result =
-              processIndirectBranch(Instruction, Size, Offset, IndirectTarget);
-          switch (Result) {
-          default:
-            llvm_unreachable("unexpected result");
-          case IndirectBranchType::POSSIBLE_TAIL_CALL: {
-            bool Result = MIB->convertJmpToTailCall(Instruction);
-            (void)Result;
-            assert(Result);
-            break;
-          }
-          case IndirectBranchType::POSSIBLE_JUMP_TABLE:
-          case IndirectBranchType::POSSIBLE_PIC_JUMP_TABLE:
-            if (opts::JumpTables == JTS_NONE)
-              IsSimple = false;
-            break;
-          case IndirectBranchType::POSSIBLE_FIXED_BRANCH: {
-            if (containsAddress(IndirectTarget)) {
-              const MCSymbol *TargetSymbol =
-                  getOrCreateLocalLabel(IndirectTarget);
-              Instruction.clear();
-              MIB->createUncondBranch(Instruction, TargetSymbol, BC.Ctx.get());
-              TakenBranches.emplace_back(Offset, IndirectTarget - getAddress());
-              HasFixedIndirectBranch = true;
-            } else {
-              MIB->convertJmpToTailCall(Instruction);
-              InterproceduralReferences.insert(IndirectTarget);
-            }
-            break;
-          }
-          case IndirectBranchType::UNKNOWN:
-            // Keep processing. We'll do more checks and fixes in
-            // postProcessIndirectBranches().
-            UnknownIndirectBranchOffsets.emplace(Offset);
-            break;
-          };
-        }
+        if (MIB->isIndirectBranch(Instruction))
+          handleIndirectBranch(Instruction, Size, Offset);
         // Indirect call. We only need to fix it if the operand is RIP-relative.
-        if (IsSimple && MIB->hasPCRelOperand(Instruction)) {
-          if (!handlePCRelOperand(Instruction, AbsoluteInstrAddr, Size)) {
-            errs() << "BOLT-ERROR: cannot handle PC-relative operand at 0x"
-                   << Twine::utohexstr(AbsoluteInstrAddr)
-                   << ". Skipping function " << *this << ".\n";
-            if (BC.HasRelocations)
-              exit(1);
-            IsSimple = false;
-          }
-        }
-        // AArch64 indirect call - check for linker veneers, which lack
-        // relocations and need manual adjustments
-        MCInst *TargetHiBits, *TargetLowBits;
-        uint64_t TargetAddress;
-        if (BC.isAArch64() &&
-            MIB->matchLinkerVeneer(Instructions.begin(), Instructions.end(),
-                                   AbsoluteInstrAddr, Instruction, TargetHiBits,
-                                   TargetLowBits, TargetAddress)) {
-          MIB->addAnnotation(Instruction, "AArch64Veneer", true);
+        if (IsSimple && MIB->hasPCRelOperand(Instruction))
+          handlePCRelOperand(Instruction, AbsoluteInstrAddr, Size);
 
-          uint8_t Counter = 0;
-          for (auto It = std::prev(Instructions.end()); Counter != 2;
-               --It, ++Counter) {
-            MIB->addAnnotation(It->second, "AArch64Veneer", true);
-          }
-
-          fixStubTarget(*TargetLowBits, *TargetHiBits, TargetAddress);
-        }
+        if (BC.isAArch64())
+          handleAArch64IndirectCall(Instruction, Offset);
       }
-    } else {
-      if (MIB->hasPCRelOperand(Instruction) && !UsedReloc) {
-        if (!handlePCRelOperand(Instruction, AbsoluteInstrAddr, Size)) {
-          errs() << "BOLT-ERROR: cannot handle PC-relative operand at 0x"
-                 << Twine::utohexstr(AbsoluteInstrAddr)
-                 << ". Skipping function " << *this << ".\n";
-          if (BC.HasRelocations)
-            exit(1);
-          IsSimple = false;
-        }
-      }
-    }
+    } else if (MIB->hasPCRelOperand(Instruction) && !UsedReloc)
+      handlePCRelOperand(Instruction, AbsoluteInstrAddr, Size);
 
 add_instruction:
     if (getDWARFLineTable()) {
@@ -2824,7 +2796,7 @@ bool BinaryFunction::finalizeCFIState() {
 }
 
 bool BinaryFunction::requiresAddressTranslation() const {
-  return opts::EnableBAT || hasSDTMarker();
+  return opts::EnableBAT || hasSDTMarker() || hasPseudoProbe();
 }
 
 uint64_t BinaryFunction::getInstructionCount() const {
@@ -3125,7 +3097,7 @@ void BinaryFunction::dumpGraphForPass(std::string Annotation) const {
 
 void BinaryFunction::dumpGraphToFile(std::string Filename) const {
   std::error_code EC;
-  raw_fd_ostream of(Filename, EC, sys::fs::F_None);
+  raw_fd_ostream of(Filename, EC, sys::fs::OF_None);
   if (EC) {
     if (opts::Verbosity >= 1) {
       errs() << "BOLT-WARNING: " << EC.message() << ", unable to open "
@@ -3571,7 +3543,7 @@ size_t BinaryFunction::computeHash(bool UseDFS,
     for (const MCInst &Inst : *BB) {
       unsigned Opcode = Inst.getOpcode();
 
-      if (BC.MII->get(Opcode).isPseudo())
+      if (BC.MIB->isPseudo(Inst))
         continue;
 
       // Ignore unconditional jumps since we check CFG consistency by processing
@@ -3840,6 +3812,7 @@ bool BinaryFunction::replaceJumpTableEntryIn(BinaryBasicBlock *BB,
   assert(JT && "No jump table structure for this indirect branch");
   bool Patched = JT->replaceDestination(JTAddress, OldDest->getLabel(),
                                         NewDest->getLabel());
+  (void)Patched;
   assert(Patched && "Invalid entry to be replaced in jump table");
   return true;
 }

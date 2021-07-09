@@ -429,7 +429,7 @@ void MachORewriteInstance::emitAndLink() {
   std::error_code EC;
   std::unique_ptr<::llvm::ToolOutputFile> TempOut =
       std::make_unique<::llvm::ToolOutputFile>(
-          opts::OutputFilename + ".bolt.o", EC, sys::fs::F_None);
+          opts::OutputFilename + ".bolt.o", EC, sys::fs::OF_None);
   check_error(EC, "cannot create output object file");
 
   if (opts::KeepTmp)
@@ -510,7 +510,7 @@ void MachORewriteInstance::writeInstrumentationSection(StringRef SectionName,
 void MachORewriteInstance::rewriteFile() {
   std::error_code EC;
   Out = std::make_unique<ToolOutputFile>(opts::OutputFilename, EC,
-                                         sys::fs::F_None);
+                                         sys::fs::OF_None);
   check_error(EC, "cannot create output executable file");
   raw_fd_ostream &OS = Out->os();
   OS << InputFile->getData();

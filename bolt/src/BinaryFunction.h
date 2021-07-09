@@ -45,6 +45,8 @@ class DWARFUnit;
 
 namespace bolt {
 
+using InputOffsetToAddressMapTy = std::unordered_map<uint64_t, uint64_t>;
+
 /// Types of macro-fusion alignment corrections.
 enum MacroFusionType {
   MFT_NONE,
@@ -304,6 +306,10 @@ private:
   /// Indicate that the function body has SDT marker
   bool HasSDTMarker{false};
 
+  /// Indicate that the function body has Pseudo Probe
+  bool HasPseudoProbe{BC.getUniqueSectionByName(".pseudo_probe_desc") &&
+                      BC.getUniqueSectionByName(".pseudo_probe")};
+
   /// True if the original entry point was patched.
   bool IsPatched{false};
 
@@ -524,10 +530,6 @@ private:
   /// List of relocations in this function.
   std::map<uint64_t, Relocation> Relocations;
 
-  /// Map of relocations used for moving the function body as it is.
-  using MoveRelocationsTy = std::map<uint64_t, Relocation>;
-  MoveRelocationsTy MoveRelocations;
-
   /// Information on function constant islands.
   IslandInfo Islands;
 
@@ -572,7 +574,6 @@ private:
   static uint64_t Count;
 
   /// Map offsets of special instructions to addresses in the output.
-  using InputOffsetToAddressMapTy = std::unordered_map<uint64_t, uint64_t>;
   InputOffsetToAddressMapTy InputOffsetToAddressMap;
 
   /// Register alternative function name.
@@ -704,8 +705,6 @@ private:
     clearList(ColdCallSites);
     clearList(LSDATypeTable);
     clearList(LSDATypeAddressTable);
-
-    clearList(MoveRelocations);
 
     clearList(LabelToBB);
 
@@ -1338,11 +1337,6 @@ public:
     default:
       llvm_unreachable("unexpected relocation type in code");
     }
-
-    // FIXME: if we ever find a use for MoveRelocations, this is the place to
-    // initialize those:
-    //    MoveRelocations[Offset] =
-    //      Relocation{Offset, Symbol, RelType, Addend, Value};
   }
 
   /// Return the name of the section this function originated from.
@@ -1479,6 +1473,9 @@ public:
   /// Return true if the function has SDT marker
   bool hasSDTMarker() const { return HasSDTMarker; }
 
+  /// Return true if the function has Pseudo Probe
+  bool hasPseudoProbe() const { return HasPseudoProbe; }
+
   /// Return true if the original entry point was patched.
   bool isPatched() const {
     return IsPatched;
@@ -1524,10 +1521,6 @@ public:
 
   const ArrayRef<uint8_t> getLSDATypeIndexTable() const {
     return LSDATypeIndexTable;
-  }
-
-  const MoveRelocationsTy &getMoveRelocations() const {
-    return MoveRelocations;
   }
 
   const LabelsMapType &getLabels() const {

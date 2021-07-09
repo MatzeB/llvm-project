@@ -820,7 +820,7 @@ IndirectCallPromotion::rewriteCall(
   const MCInst *TailInst = &CallInst;
   if (IsTailCallOrJT) {
     while (TailInst + 1 < &(*IndCallBlock->end()) &&
-           BC.MII->get((TailInst + 1)->getOpcode()).isPseudo()) {
+           BC.MIB->isPseudo(*(TailInst + 1))) {
       TailInsts.push_back(*++TailInst);
     }
   }
@@ -1550,6 +1550,7 @@ void IndirectCallPromotion::runOnFunctions(BinaryContext &BC) {
                    std::max<uint64_t>(TotalIndexBasedCandidates, 1))
          << "%\n";
 
+  (void)verifyProfile;
 #ifndef NDEBUG
   verifyProfile(BFs);
 #endif

@@ -21,6 +21,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "AArch64.h"
 #include "Utils/AArch64BaseInfo.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/SetVector.h"
@@ -55,8 +56,6 @@ struct SVEIntrinsicOpts : public ModulePass {
   void getAnalysisUsage(AnalysisUsage &AU) const override;
 
 private:
-  static IntrinsicInst *isReinterpretToSVBool(Value *V);
-
   bool coalescePTrueIntrinsicCalls(BasicBlock &BB,
                                    SmallSetVector<IntrinsicInst *, 4> &PTrues);
   bool optimizePTrueIntrinsicCalls(SmallSetVector<Function *, 4> &Functions);
@@ -87,21 +86,8 @@ INITIALIZE_PASS_BEGIN(SVEIntrinsicOpts, DEBUG_TYPE, name, false, false)
 INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass);
 INITIALIZE_PASS_END(SVEIntrinsicOpts, DEBUG_TYPE, name, false, false)
 
-namespace llvm {
-ModulePass *createSVEIntrinsicOptsPass() { return new SVEIntrinsicOpts(); }
-} // namespace llvm
-
-/// Returns V if it's a cast from <n x 16 x i1> (aka svbool_t), nullptr
-/// otherwise.
-IntrinsicInst *SVEIntrinsicOpts::isReinterpretToSVBool(Value *V) {
-  IntrinsicInst *I = dyn_cast<IntrinsicInst>(V);
-  if (!I)
-    return nullptr;
-
-  if (I->getIntrinsicID() != Intrinsic::aarch64_sve_convert_to_svbool)
-    return nullptr;
-
-  return I;
+ModulePass *llvm::createSVEIntrinsicOptsPass() {
+  return new SVEIntrinsicOpts();
 }
 
 /// Checks if a ptrue intrinsic call is promoted. The act of promoting a
@@ -116,7 +102,7 @@ IntrinsicInst *SVEIntrinsicOpts::isReinterpretToSVBool(Value *V) {
 ///     <vscale x 4 x i1> => <vscale x 16 x i1> => <vscale x 8 x i1>
 ///
 /// via a sequence of the SVE reinterpret intrinsics convert.{to,from}.svbool.
-bool isPTruePromoted(IntrinsicInst *PTrue) {
+static bool isPTruePromoted(IntrinsicInst *PTrue) {
   // Find all users of this intrinsic that are calls to convert-to-svbool
   // reinterpret intrinsics.
   SmallVector<IntrinsicInst *, 4> ConvertToUses;

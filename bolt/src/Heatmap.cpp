@@ -63,7 +63,7 @@ void Heatmap::registerAddressRange(uint64_t StartAddress, uint64_t EndAddress,
 
 void Heatmap::print(StringRef FileName) const {
   std::error_code EC;
-  raw_fd_ostream OS(FileName, EC, sys::fs::OpenFlags::F_None);
+  raw_fd_ostream OS(FileName, EC, sys::fs::OpenFlags::OF_None);
   if (EC) {
     errs() << "error opening output file: " << EC.message() << '\n';
     exit(1);
@@ -240,7 +240,7 @@ void Heatmap::print(raw_ostream &OS) const {
 
 void Heatmap::printCDF(StringRef FileName) const {
   std::error_code EC;
-  raw_fd_ostream OS(FileName, EC, sys::fs::OpenFlags::F_None);
+  raw_fd_ostream OS(FileName, EC, sys::fs::OpenFlags::OF_None);
   if (EC) {
     errs() << "error opening output file: " << EC.message() << '\n';
     exit(1);

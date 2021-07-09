@@ -9,6 +9,8 @@
 #ifndef LLD_MACHO_WRITER_H
 #define LLD_MACHO_WRITER_H
 
+#include "Config.h"
+
 #include <cstdint>
 
 namespace lld {
@@ -27,7 +29,9 @@ public:
 
 template <class LP> void writeResult();
 
-template <class LP> void createSyntheticSections();
+NamePair maybeRenameSection(NamePair key);
+
+void createSyntheticSections();
 
 // Add bindings for symbols that need weak or non-lazy bindings.
 void addNonLazyBindingEntries(const Symbol *, const InputSection *,

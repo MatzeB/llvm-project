@@ -644,15 +644,9 @@ void EhFrameSection::writeTo(uint8_t *buf) {
 }
 
 GotSection::GotSection()
-    : SyntheticSection(SHF_ALLOC | SHF_WRITE, SHT_PROGBITS, config->wordsize,
-                       ".got") {
-  // If ElfSym::globalOffsetTable is relative to .got and is referenced,
-  // increase numEntries by the number of entries used to emit
-  // ElfSym::globalOffsetTable.
-  // On PP64 we always add the header at the start.
-  if ((ElfSym::globalOffsetTable && !target->gotBaseSymInGotPlt) ||
-      config->emachine == EM_PPC64)
-    numEntries += target->gotHeaderEntriesNum;
+    : SyntheticSection(SHF_ALLOC | SHF_WRITE, SHT_PROGBITS,
+                       target->gotEntrySize, ".got") {
+  numEntries = target->gotHeaderEntriesNum;
 }
 
 void GotSection::addEntry(Symbol &sym) {
@@ -696,16 +690,9 @@ void GotSection::finalizeContents() {
 }
 
 bool GotSection::isNeeded() const {
-  // We need to emit a GOT even if it's empty if there's a relocation that is
-  // relative to GOT(such as GOTOFFREL).
-
-  // On PPC64 we need to check that the number of entries is more than just the
-  // size of the header since the header is always added. A GOT with just the
-  // header may not actually be needed.
-  if (config->emachine == EM_PPC64)
-    return numEntries > target->gotHeaderEntriesNum || hasGotOffRel;
-
-  return numEntries || hasGotOffRel;
+  // Needed if the GOT symbol is used or the number of entries is more than just
+  // the header. A GOT with just the header may not be needed.
+  return hasGotOffRel || numEntries > target->gotHeaderEntriesNum;
 }
 
 void GotSection::writeTo(uint8_t *buf) {
@@ -1158,15 +1145,16 @@ void GotPltSection::addEntry(Symbol &sym) {
 }
 
 size_t GotPltSection::getSize() const {
-  return (target->gotPltHeaderEntriesNum + entries.size()) * config->wordsize;
+  return (target->gotPltHeaderEntriesNum + entries.size()) *
+         target->gotEntrySize;
 }
 
 void GotPltSection::writeTo(uint8_t *buf) {
   target->writeGotPltHeader(buf);
-  buf += target->gotPltHeaderEntriesNum * config->wordsize;
+  buf += target->gotPltHeaderEntriesNum * target->gotEntrySize;
   for (const Symbol *b : entries) {
     target->writeGotPlt(buf, *b);
-    buf += config->wordsize;
+    buf += target->gotEntrySize;
   }
 }
 
@@ -1194,7 +1182,7 @@ static StringRef getIgotPltName() {
 IgotPltSection::IgotPltSection()
     : SyntheticSection(SHF_ALLOC | SHF_WRITE,
                        config->emachine == EM_PPC64 ? SHT_NOBITS : SHT_PROGBITS,
-                       config->wordsize, getIgotPltName()) {}
+                       target->gotEntrySize, getIgotPltName()) {}
 
 void IgotPltSection::addEntry(Symbol &sym) {
   assert(sym.pltIndex == entries.size());
@@ -1202,13 +1190,13 @@ void IgotPltSection::addEntry(Symbol &sym) {
 }
 
 size_t IgotPltSection::getSize() const {
-  return entries.size() * config->wordsize;
+  return entries.size() * target->gotEntrySize;
 }
 
 void IgotPltSection::writeTo(uint8_t *buf) {
   for (const Symbol *b : entries) {
     target->writeIgotPlt(buf, *b);
-    buf += config->wordsize;
+    buf += target->gotEntrySize;
   }
 }
 

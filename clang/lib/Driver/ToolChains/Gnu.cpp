@@ -51,9 +51,9 @@ static void normalizeCPUNamesForAssembler(const ArgList &Args,
                                           ArgStringList &CmdArgs) {
   if (Arg *A = Args.getLastArg(options::OPT_mcpu_EQ)) {
     StringRef CPUArg(A->getValue());
-    if (CPUArg.equals_lower("krait"))
+    if (CPUArg.equals_insensitive("krait"))
       CmdArgs.push_back("-mcpu=cortex-a15");
-    else if(CPUArg.equals_lower("kryo"))
+    else if (CPUArg.equals_insensitive("kryo"))
       CmdArgs.push_back("-mcpu=cortex-a57");
     else
       Args.AddLastArg(CmdArgs, options::OPT_mcpu_EQ);
@@ -294,7 +294,7 @@ static const char *getLDMOption(const llvm::Triple &T, const ArgList &Args) {
   case llvm::Triple::systemz:
     return "elf64_s390";
   case llvm::Triple::x86_64:
-    if (T.getEnvironment() == llvm::Triple::GNUX32)
+    if (T.isX32())
       return "elf32_x86_64";
     return "elf_x86_64";
   case llvm::Triple::ve:
@@ -670,12 +670,41 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
+  // Facebook T92898286
+  if (Args.hasArg(options::OPT_post_link_optimize))
+    CmdArgs.push_back("-q");
+  // End Facebook T92898286
+
   Args.AddAllArgs(CmdArgs, options::OPT_T);
 
   const char *Exec = Args.MakeArgString(ToolChain.GetLinkerPath());
   C.addCommand(std::make_unique<Command>(JA, *this,
                                          ResponseFileSupport::AtFileCurCP(),
                                          Exec, CmdArgs, Inputs, Output));
+  // Facebook T92898286
+  if (!Args.hasArg(options::OPT_post_link_optimize) || !Output.isFilename())
+    return;
+
+  const char *MvExec = Args.MakeArgString(ToolChain.GetProgramPath("mv"));
+  ArgStringList MoveCmdArgs;
+  MoveCmdArgs.push_back(Output.getFilename());
+  const char *PreBoltBin =
+      Args.MakeArgString(Twine(Output.getFilename()) + ".pre-bolt");
+  MoveCmdArgs.push_back(PreBoltBin);
+  C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
+                                         MvExec, MoveCmdArgs, None));
+
+  ArgStringList BoltCmdArgs;
+  const char *BoltExec =
+      Args.MakeArgString(ToolChain.GetProgramPath("llvm-bolt"));
+  BoltCmdArgs.push_back(PreBoltBin);
+  BoltCmdArgs.push_back("-reorder-blocks=reverse");
+  BoltCmdArgs.push_back("-update-debug-sections");
+  BoltCmdArgs.push_back("-o");
+  BoltCmdArgs.push_back(Output.getFilename());
+  C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
+                                         BoltExec, BoltCmdArgs, None));
+  // End Facebook T92898286
 }
 
 void tools::gnutools::Assembler::ConstructJob(Compilation &C,
@@ -725,7 +754,7 @@ void tools::gnutools::Assembler::ConstructJob(Compilation &C,
     CmdArgs.push_back("--32");
     break;
   case llvm::Triple::x86_64:
-    if (getToolChain().getTriple().getEnvironment() == llvm::Triple::GNUX32)
+    if (getToolChain().getTriple().isX32())
       CmdArgs.push_back("--x32");
     else
       CmdArgs.push_back("--64");
@@ -1733,7 +1762,7 @@ static bool findBiarchMultilibs(const Driver &D,
   // Determine default multilib from: 32, 64, x32
   // Also handle cases such as 64 on 32, 32 on 64, etc.
   enum { UNKNOWN, WANT32, WANT64, WANTX32 } Want = UNKNOWN;
-  const bool IsX32 = TargetTriple.getEnvironment() == llvm::Triple::GNUX32;
+  const bool IsX32 = TargetTriple.isX32();
   if (TargetTriple.isArch32Bit() && !NonExistent(Alt32))
     Want = WANT64;
   else if (TargetTriple.isArch64Bit() && IsX32 && !NonExistent(Altx32))
@@ -2339,7 +2368,7 @@ void Generic_GCC::GCCInstallationDetector::AddDefaultGCCPrefixes(
     TripleAliases.append(begin(AVRTriples), end(AVRTriples));
     break;
   case llvm::Triple::x86_64:
-    if (TargetTriple.getEnvironment() == llvm::Triple::GNUX32) {
+    if (TargetTriple.isX32()) {
       LibDirs.append(begin(X32LibDirs), end(X32LibDirs));
       TripleAliases.append(begin(X32Triples), end(X32Triples));
       BiarchLibDirs.append(begin(X86_64LibDirs), end(X86_64LibDirs));

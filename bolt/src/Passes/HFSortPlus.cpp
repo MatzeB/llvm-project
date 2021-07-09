@@ -24,7 +24,7 @@
 
 #include "HFSort.h"
 #include "llvm/Support/CommandLine.h"
-
+#include <cmath>
 #include <set>
 #include <vector>
 

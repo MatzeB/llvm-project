@@ -16,6 +16,7 @@
 #include "Diagnostics.h"
 #include "FeatureModule.h"
 #include "Headers.h"
+#include "HeuristicResolver.h"
 #include "IncludeFixer.h"
 #include "Preamble.h"
 #include "SourceCode.h"
@@ -288,8 +289,15 @@ ParsedAST::build(llvm::StringRef Filename, const ParseInputs &Inputs,
       std::move(CI), PreamblePCH,
       llvm::MemoryBuffer::getMemBufferCopy(Inputs.Contents, Filename), VFS,
       ASTDiags);
-  if (!Clang)
+  if (!Clang) {
+    // The last diagnostic contains information about the reason of this
+    // failure.
+    std::vector<Diag> Diags(ASTDiags.take());
+    elog("Failed to prepare a compiler instance: {0}",
+         !Diags.empty() ? static_cast<DiagBase &>(Diags.back()).Message
+                        : "unknown error");
     return None;
+  }
 
   auto Action = std::make_unique<ClangdFrontendAction>();
   const FrontendInputFile &MainInput = Clang->getFrontendOpts().Inputs[0];

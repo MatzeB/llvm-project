@@ -273,9 +273,6 @@ void MCDecodedPseudoProbe::print(raw_ostream &OS,
   }
   OS << "Index: " << Index << "  ";
   OS << "Type: " << PseudoProbeTypeStr[static_cast<uint8_t>(Type)] << "  ";
-  if (isDangling()) {
-    OS << "Dangling  ";
-  }
   if (isTailCall()) {
     OS << "TailCall  ";
   }

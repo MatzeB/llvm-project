@@ -150,7 +150,7 @@ YAMLProfileWriter::writeProfile(const RewriteInstance &RI) {
   const auto &Functions = BC.getBinaryFunctions();
 
   std::error_code EC;
-  OS = std::make_unique<raw_fd_ostream>(Filename, EC, sys::fs::F_None);
+  OS = std::make_unique<raw_fd_ostream>(Filename, EC, sys::fs::OF_None);
   if (EC) {
     errs() << "BOLT-WARNING: " << EC.message() << " : unable to open "
            << Filename << " for output.\n";

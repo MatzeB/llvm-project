@@ -9,7 +9,6 @@
 // UNSUPPORTED: c++03, c++11, c++14, c++17
 // UNSUPPORTED: libcpp-no-concepts
 // UNSUPPORTED: gcc-10
-// XFAIL: msvc && clang
 
 // template<class I>
 // unspecified iter_move;
@@ -49,27 +48,6 @@ public:
 
 private:
   I base_ = I{};
-};
-
-class move_tracker {
-public:
-  move_tracker() = default;
-
-  constexpr move_tracker(move_tracker&& other) noexcept : moves_{other.moves_ + 1} { other.moves_ = 0; }
-
-  constexpr move_tracker& operator=(move_tracker&& other) noexcept {
-    moves_ = other.moves_ + 1;
-    other.moves_ = 0;
-    return *this;
-  }
-
-  constexpr move_tracker(move_tracker const& other) = delete;
-  constexpr move_tracker& operator=(move_tracker const& other) = delete;
-
-  [[nodiscard]] constexpr int moves() const noexcept { return moves_; }
-
-private:
-  int moves_ = 0;
 };
 
 template <typename I>

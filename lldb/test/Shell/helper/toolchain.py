@@ -136,6 +136,11 @@ def use_support_substitutions(config):
     # The clang module cache is used for building inferiors.
     host_flags += ['-fmodules-cache-path={}'.format(config.clang_module_cache)]
 
+    # Facebook T92898286
+    if config.llvm_test_bolt:
+        host_flags += ['--post-link-optimize']
+    # End Facebook T92898286
+
     host_flags = ' '.join(host_flags)
     config.substitutions.append(('%clang_host', '%clang ' + host_flags))
     config.substitutions.append(('%clangxx_host', '%clangxx ' + host_flags))
@@ -147,14 +152,14 @@ def use_support_substitutions(config):
 
     llvm_config.use_clang(additional_flags=['--target=specify-a-target-or-use-a-_host-substitution'],
                           additional_tool_dirs=additional_tool_dirs,
-                          required=True)
+                          required=True, use_installed=True)
 
 
     if sys.platform == 'win32':
         _use_msvc_substitutions(config)
 
     have_lld = llvm_config.use_lld(additional_tool_dirs=additional_tool_dirs,
-                                   required=False)
+                                   required=False, use_installed=True)
     if have_lld:
         config.available_features.add('lld')
 

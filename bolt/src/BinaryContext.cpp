@@ -220,11 +220,11 @@ BinaryContext::createBinaryContext(const ObjectFile *File, bool IsPIC,
     return nullptr;
   }
 
-  std::unique_ptr<MCObjectFileInfo> MOFI =
-      std::make_unique<MCObjectFileInfo>();
-  std::unique_ptr<MCContext> Ctx =
-      std::make_unique<MCContext>(AsmInfo.get(), MRI.get(), MOFI.get());
-  MOFI->InitMCObjectFileInfo(*TheTriple, IsPIC, *Ctx);
+  std::unique_ptr<MCContext> Ctx(
+      new MCContext(*TheTriple, AsmInfo.get(), MRI.get(), STI.get()));
+  std::unique_ptr<MCObjectFileInfo> MOFI(
+      TheTarget->createMCObjectFileInfo(*Ctx, IsPIC));
+  Ctx->setObjectFileInfo(MOFI.get());
   // We do not support X86 Large code model. Change this in the future.
   bool Large = false;
   if (TheTriple->getArch() == llvm::Triple::aarch64)
@@ -790,6 +790,10 @@ MCSymbol *BinaryContext::getOrCreateGlobalSymbol(uint64_t Address,
   std::string Name = (Prefix + "0x" + Twine::utohexstr(Address)).str();
   assert(!GlobalSymbols.count(Name) && "created name is not unique");
   return registerNameAtAddress(Name, Address, Size, Alignment, Flags);
+}
+
+MCSymbol *BinaryContext::getOrCreateUndefinedGlobalSymbol(StringRef Name) {
+  return Ctx->getOrCreateSymbol(Name);
 }
 
 BinaryFunction *BinaryContext::createBinaryFunction(
@@ -1461,6 +1465,12 @@ Optional<DWARFUnit *> BinaryContext::getDWOCU(uint64_t DWOId) {
   return Iter->second;
 }
 
+DWARFContext *BinaryContext::getDWOContext() {
+  if (DWOCUs.empty())
+    return nullptr;
+  return &DWOCUs.begin()->second->getContext();
+}
+
 /// Handles DWO sections that can either be in .o, .dwo or .dwp files.
 void BinaryContext::preprocessDWODebugInfo() {
   for (const std::unique_ptr<DWARFUnit> &CU : DwCtx->compile_units()) {
@@ -1718,7 +1728,7 @@ void BinaryContext::printInstruction(raw_ostream &OS,
   }
 }
 
-ErrorOr<BinarySection&> BinaryContext::getSectionForAddress(uint64_t Address) {
+ErrorOr<BinarySection &> BinaryContext::getSectionForAddress(uint64_t Address) {
   auto SI = AddressToSection.upper_bound(Address);
   if (SI != AddressToSection.begin()) {
     --SI;
@@ -1741,6 +1751,7 @@ BinaryContext::getSectionNameForAddress(uint64_t Address) const {
 
 BinarySection &BinaryContext::registerSection(BinarySection *Section) {
   auto Res = Sections.insert(Section);
+  (void)Res;
   assert(Res.second && "can't register the same section twice.");
 
   // Only register allocatable sections in the AddressToSection map.
@@ -1778,6 +1789,7 @@ BinarySection &BinaryContext::registerOrUpdateSection(StringRef Name,
 
     LLVM_DEBUG(dbgs() << "BOLT-DEBUG: updating " << *Section << " -> ");
     const bool Flag = Section->isAllocatable();
+    (void)Flag;
     Section->update(Data, Size, Alignment, ELFType, ELFFlags);
     LLVM_DEBUG(dbgs() << *Section << "\n");
     // FIXME: Fix section flags/attributes for MachO.

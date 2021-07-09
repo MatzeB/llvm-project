@@ -26,6 +26,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/Analysis/GuardUtils.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/Loads.h"
@@ -1181,6 +1182,47 @@ static void computeKnownBitsFromOperator(const Operator *I,
         !I->getType()->isVectorTy()) {
       computeKnownBits(I->getOperand(0), Known, Depth + 1, Q);
       break;
+    }
+
+    // Handle cast from vector integer type to scalar or vector integer.
+    auto *SrcVecTy = dyn_cast<FixedVectorType>(SrcTy);
+    if (!SrcVecTy || !SrcVecTy->getElementType()->isIntegerTy() ||
+        !I->getType()->isIntOrIntVectorTy())
+      break;
+
+    // Look through a cast from narrow vector elements to wider type.
+    // Examples: v4i32 -> v2i64, v3i8 -> v24
+    unsigned SubBitWidth = SrcVecTy->getScalarSizeInBits();
+    if (BitWidth % SubBitWidth == 0) {
+      // Known bits are automatically intersected across demanded elements of a
+      // vector. So for example, if a bit is computed as known zero, it must be
+      // zero across all demanded elements of the vector.
+      //
+      // For this bitcast, each demanded element of the output is sub-divided
+      // across a set of smaller vector elements in the source vector. To get
+      // the known bits for an entire element of the output, compute the known
+      // bits for each sub-element sequentially. This is done by shifting the
+      // one-set-bit demanded elements parameter across the sub-elements for
+      // consecutive calls to computeKnownBits. We are using the demanded
+      // elements parameter as a mask operator.
+      //
+      // The known bits of each sub-element are then inserted into place
+      // (dependent on endian) to form the full result of known bits.
+      unsigned NumElts = DemandedElts.getBitWidth();
+      unsigned SubScale = BitWidth / SubBitWidth;
+      APInt SubDemandedElts = APInt::getNullValue(NumElts * SubScale);
+      for (unsigned i = 0; i != NumElts; ++i) {
+        if (DemandedElts[i])
+          SubDemandedElts.setBit(i * SubScale);
+      }
+
+      KnownBits KnownSrc(SubBitWidth);
+      for (unsigned i = 0; i != SubScale; ++i) {
+        computeKnownBits(I->getOperand(0), SubDemandedElts.shl(i), KnownSrc,
+                         Depth + 1, Q);
+        unsigned ShiftElt = Q.DL.isLittleEndian() ? i : SubScale - 1 - i;
+        Known.insertBits(KnownSrc, ShiftElt * SubBitWidth);
+      }
     }
     break;
   }
@@ -2521,16 +2563,21 @@ bool isKnownNonZero(const Value* V, unsigned Depth, const Query& Q) {
   return isKnownNonZero(V, DemandedElts, Depth, Q);
 }
 
-/// If the pair of operators are the same invertible function of a single
-/// operand return the index of that operand.  Otherwise, return None.  An
-/// invertible function is one that is 1-to-1 and maps every input value
-/// to exactly one output value.  This is equivalent to saying that Op1
-/// and Op2 are equal exactly when the specified pair of operands are equal,
-/// (except that Op1 and Op2 may be poison more often.)
-static Optional<unsigned> getInvertibleOperand(const Operator *Op1,
-                                               const Operator *Op2) {
+/// If the pair of operators are the same invertible function, return the
+/// the operands of the function corresponding to each input. Otherwise,
+/// return None.  An invertible function is one that is 1-to-1 and maps
+/// every input value to exactly one output value.  This is equivalent to
+/// saying that Op1 and Op2 are equal exactly when the specified pair of
+/// operands are equal, (except that Op1 and Op2 may be poison more often.)
+static Optional<std::pair<Value*, Value*>>
+getInvertibleOperands(const Operator *Op1,
+                      const Operator *Op2) {
   if (Op1->getOpcode() != Op2->getOpcode())
     return None;
+
+  auto getOperands = [&](unsigned OpNum) -> auto {
+    return std::make_pair(Op1->getOperand(OpNum), Op2->getOperand(OpNum));
+  };
 
   switch (Op1->getOpcode()) {
   default:
@@ -2538,9 +2585,9 @@ static Optional<unsigned> getInvertibleOperand(const Operator *Op1,
   case Instruction::Add:
   case Instruction::Sub:
     if (Op1->getOperand(0) == Op2->getOperand(0))
-      return 1;
+      return getOperands(1);
     if (Op1->getOperand(1) == Op2->getOperand(1))
-      return 0;
+      return getOperands(0);
     break;
   case Instruction::Mul: {
     // invertible if A * B == (A * B) mod 2^N where A, and B are integers
@@ -2556,7 +2603,7 @@ static Optional<unsigned> getInvertibleOperand(const Operator *Op1,
     if (Op1->getOperand(1) == Op2->getOperand(1) &&
         isa<ConstantInt>(Op1->getOperand(1)) &&
         !cast<ConstantInt>(Op1->getOperand(1))->isZero())
-      return 0;
+      return getOperands(0);
     break;
   }
   case Instruction::Shl: {
@@ -2569,7 +2616,7 @@ static Optional<unsigned> getInvertibleOperand(const Operator *Op1,
       break;
 
     if (Op1->getOperand(1) == Op2->getOperand(1))
-      return 0;
+      return getOperands(0);
     break;
   }
   case Instruction::AShr:
@@ -2580,13 +2627,13 @@ static Optional<unsigned> getInvertibleOperand(const Operator *Op1,
       break;
 
     if (Op1->getOperand(1) == Op2->getOperand(1))
-      return 0;
+      return getOperands(0);
     break;
   }
   case Instruction::SExt:
   case Instruction::ZExt:
     if (Op1->getOperand(0)->getType() == Op2->getOperand(0)->getType())
-      return 0;
+      return getOperands(0);
     break;
   case Instruction::PHI: {
     const PHINode *PN1 = cast<PHINode>(Op1);
@@ -2604,18 +2651,20 @@ static Optional<unsigned> getInvertibleOperand(const Operator *Op1,
         !matchSimpleRecurrence(PN2, BO2, Start2, Step2))
       break;
 
-    Optional<unsigned> Idx = getInvertibleOperand(cast<Operator>(BO1),
-                                                  cast<Operator>(BO2));
-    if (!Idx || *Idx != 0)
-      break;
-    assert(BO1->getOperand(*Idx) == PN1 && BO2->getOperand(*Idx) == PN2);
+    auto Values = getInvertibleOperands(cast<Operator>(BO1),
+                                        cast<Operator>(BO2));
+    if (!Values)
+       break;
 
-    // Phi operands might not be in the same order.  TODO: generalize
-    // interface to return pair of operands.
-    if (PN1->getOperand(0) == BO1 && PN2->getOperand(0) == BO2)
-      return 1;
-    if (PN1->getOperand(1) == BO1 && PN2->getOperand(1) == BO2)
-      return 0;
+    // We have to be careful of mutually defined recurrences here.  Ex:
+    // * X_i = X_(i-1) OP Y_(i-1), and Y_i = X_(i-1) OP V
+    // * X_i = Y_i = X_(i-1) OP Y_(i-1)
+    // The invertibility of these is complicated, and not worth reasoning
+    // about (yet?).
+    if (Values->first != PN1 || Values->second != PN2)
+      break;
+
+    return std::make_pair(Start1, Start2);
   }
   }
   return None;
@@ -2712,11 +2761,9 @@ static bool isKnownNonEqual(const Value *V1, const Value *V2, unsigned Depth,
   auto *O1 = dyn_cast<Operator>(V1);
   auto *O2 = dyn_cast<Operator>(V2);
   if (O1 && O2 && O1->getOpcode() == O2->getOpcode()) {
-    if (Optional<unsigned> Opt = getInvertibleOperand(O1, O2)) {
-      unsigned Idx = *Opt;
-      return isKnownNonEqual(O1->getOperand(Idx), O2->getOperand(Idx),
-                             Depth + 1, Q);
-    }
+    if (auto Values = getInvertibleOperands(O1, O2))
+      return isKnownNonEqual(Values->first, Values->second, Depth + 1, Q);
+
     if (const PHINode *PN1 = dyn_cast<PHINode>(V1)) {
       const PHINode *PN2 = cast<PHINode>(V2);
       // FIXME: This is missing a generalization to handle the case where one is
@@ -5020,7 +5067,8 @@ static bool directlyImpliesPoison(const Value *ValAssumedPoison,
     // V0's elements are all poison or not. (e.g., add_with_overflow)
     const WithOverflowInst *II;
     if (match(I, m_ExtractValue(m_WithOverflowInst(II))) &&
-        match(ValAssumedPoison, m_ExtractValue(m_Specific(II))))
+        (match(ValAssumedPoison, m_ExtractValue(m_Specific(II))) ||
+         llvm::is_contained(II->arg_operands(), ValAssumedPoison)))
       return true;
   }
   return false;
@@ -5226,6 +5274,18 @@ bool llvm::isGuaranteedToTransferExecutionToSuccessor(const Instruction *I) {
   if (isa<UnreachableInst>(I))
     return false;
 
+  if (isa<CatchPadInst>(I)) {
+    switch (classifyEHPersonality(I->getFunction()->getPersonalityFn())) {
+    default:
+      // A catchpad may invoke exception object constructors and such, which
+      // in some languages can be arbitrary code, so be conservative by default.
+      return false;
+    case EHPersonality::CoreCLR:
+      // For CoreCLR, it just involves a type test.
+      return true;
+    }
+  }
+
   // An instruction that returns without throwing must transfer control flow
   // to a successor.
   return !I->mayThrow() && I->willReturn();
@@ -5275,6 +5335,8 @@ bool llvm::propagatesPoison(const Operator *I) {
         // If an input is a vector containing a poison element, the
         // two output vectors (calculated results, overflow bits)'
         // corresponding lanes are poison.
+        return true;
+      case Intrinsic::ctpop:
         return true;
       }
     }
@@ -5382,6 +5444,9 @@ static bool programUndefinedIfUndefOrPoison(const Value *V,
     return false;
   }
 
+  // Limit number of instructions we look at, to avoid scanning through large
+  // blocks. The current limit is chosen arbitrarily.
+  unsigned ScanLimit = 32;
   BasicBlock::const_iterator End = BB->end();
 
   if (!PoisonOnly) {
@@ -5390,12 +5455,16 @@ static bool programUndefinedIfUndefOrPoison(const Value *V,
     // well-defined operands.
 
     for (auto &I : make_range(Begin, End)) {
+      if (isa<DbgInfoIntrinsic>(I))
+        continue;
+      if (--ScanLimit == 0)
+        break;
+
       SmallPtrSet<const Value *, 4> WellDefinedOps;
       getGuaranteedWellDefinedOps(&I, WellDefinedOps);
-      for (auto *Op : WellDefinedOps) {
-        if (Op == V)
-          return true;
-      }
+      if (WellDefinedOps.contains(V))
+        return true;
+
       if (!isGuaranteedToTransferExecutionToSuccessor(&I))
         break;
     }
@@ -5415,9 +5484,12 @@ static bool programUndefinedIfUndefOrPoison(const Value *V,
   for_each(V->users(), Propagate);
   Visited.insert(BB);
 
-  unsigned Iter = 0;
-  while (Iter++ < MaxAnalysisRecursionDepth) {
+  while (true) {
     for (auto &I : make_range(Begin, End)) {
+      if (isa<DbgInfoIntrinsic>(I))
+        continue;
+      if (--ScanLimit == 0)
+        return false;
       if (mustTriggerUB(&I, YieldsPoison))
         return true;
       if (!isGuaranteedToTransferExecutionToSuccessor(&I))
@@ -5428,16 +5500,12 @@ static bool programUndefinedIfUndefOrPoison(const Value *V,
         for_each(I.users(), Propagate);
     }
 
-    if (auto *NextBB = BB->getSingleSuccessor()) {
-      if (Visited.insert(NextBB).second) {
-        BB = NextBB;
-        Begin = BB->getFirstNonPHI()->getIterator();
-        End = BB->end();
-        continue;
-      }
-    }
+    BB = BB->getSingleSuccessor();
+    if (!BB || !Visited.insert(BB).second)
+      break;
 
-    break;
+    Begin = BB->getFirstNonPHI()->getIterator();
+    End = BB->end();
   }
   return false;
 }
@@ -6410,8 +6478,7 @@ isImpliedCondMatchingImmOperands(CmpInst::Predicate APred,
                                  const ConstantInt *C2) {
   ConstantRange DomCR =
       ConstantRange::makeExactICmpRegion(APred, C1->getValue());
-  ConstantRange CR =
-      ConstantRange::makeAllowedICmpRegion(BPred, C2->getValue());
+  ConstantRange CR = ConstantRange::makeExactICmpRegion(BPred, C2->getValue());
   ConstantRange Intersection = DomCR.intersectWith(CR);
   ConstantRange Difference = DomCR.difference(CR);
   if (Intersection.isEmptySet())

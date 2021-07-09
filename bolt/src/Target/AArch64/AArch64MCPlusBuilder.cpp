@@ -569,12 +569,13 @@ public:
            OpNum != OpEnd; ++OpNum) {
         if (!Instr.getOperand(OpNum).isReg())
           continue;
-        Uses[&Instr].push_back(RegAliasTable[Instr.getOperand(OpNum).getReg()]);
+        unsigned Reg = Instr.getOperand(OpNum).getReg();
+        MCInst* AliasInst = RegAliasTable[Reg];
+        Uses[&Instr].push_back(AliasInst);
         LLVM_DEBUG({
-          dbgs() << "Adding reg operand " << Instr.getOperand(OpNum).getReg()
-                 << " refs ";
-          if (RegAliasTable[Instr.getOperand(OpNum).getReg()] != nullptr)
-            RegAliasTable[Instr.getOperand(OpNum).getReg()]->dump();
+          dbgs() << "Adding reg operand " << Reg << " refs ";
+          if (AliasInst != nullptr)
+            AliasInst->dump();
           else
             dbgs() << "\n";
         });
@@ -586,7 +587,7 @@ public:
     for (auto II = Begin; II != End; ++II) {
       MCInst &Instr = *II;
       // Ignore nops and CFIs
-      if (Info->get(Instr.getOpcode()).isPseudo() || isNoop(Instr))
+      if (isPseudo(Instr) || isNoop(Instr))
         continue;
       if (TerminatorSeen) {
         RegAliasTable.clear();
@@ -807,7 +808,7 @@ public:
       --I;
 
       // Ignore nops and CFIs
-      if (Info->get(I->getOpcode()).isPseudo() || isNoop(*I))
+      if (isPseudo(*I) || isNoop(*I))
         continue;
 
       // Stop when we find the first non-terminator

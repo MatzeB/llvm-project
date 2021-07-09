@@ -61,7 +61,6 @@ public:
   // Any relocations already associated with the symbol will be re-resolved.
   void reassignSectionAddress(unsigned SectionID, uint64_t Addr);
 
-public:
   using NotifyStubEmittedFunction = std::function<void(
       StringRef FileName, StringRef SectionName, StringRef SymbolName,
       unsigned SectionID, uint32_t StubOffset)>;

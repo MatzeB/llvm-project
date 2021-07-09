@@ -27,7 +27,7 @@
 //          TYPE (uint4)
 //            0 - block probe, 1 - indirect call, 2 - direct call
 //          ATTRIBUTE (uint3)
-//            1 - reserved, 2 - dangling
+//            1 - reserved
 //          ADDRESS_TYPE (uint1)
 //            0 - code address, 1 - address delta
 //          CODE_ADDRESS (uint64 or ULEB128)
@@ -121,10 +121,6 @@ public:
 
   bool isEntry() const { return Index == PseudoProbeFirstId; }
 
-  bool isDangling() const {
-    return Attributes & static_cast<uint8_t>(PseudoProbeAttributes::Dangling);
-  }
-
   bool isTailCall() const {
     // Reserved of bolt is equivalent to PseudoProbeAttributes::TailCall
     // defined in server-llvm (t/s/m)
@@ -152,6 +148,8 @@ public:
   }
 
   bool isCall() const { return isIndirectCall() || isDirectCall(); }
+
+  void setAttributes(uint8_t Attr) { Attributes = Attr; }
 };
 
 /// Instances of this class represent a pseudo probe instance for a pseudo probe
@@ -185,6 +183,8 @@ public:
         InlineTree(Tree){};
 
   uint64_t getAddress() const { return Address; }
+
+  void setAddress(uint64_t Addr) { Address = Addr; }
 
   MCDecodedPseudoProbeInlineTree *getInlineTreeNode() const {
     return InlineTree;
@@ -396,6 +396,8 @@ public:
   const AddressProbesMap &getAddress2ProbesMap() const {
     return Address2ProbesMap;
   }
+
+  AddressProbesMap &getAddress2ProbesMap() { return Address2ProbesMap; }
 
   const GUIDProbeFunctionMap &getGUID2FuncDescMap() const {
     return GUID2FuncDescMap;

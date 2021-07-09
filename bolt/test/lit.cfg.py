@@ -50,7 +50,6 @@ config.substitutions.append(('%cxxflags', '-no-pie'))
 tool_dirs = [config.llvm_tools_dir,
              config.test_source_root]
 
-linker_tool = llvm_config.use_llvm_tool('ld', required=True)
 tools = [
     ToolSubst('llvm-dwarfdump', unresolved='fatal'),
     ToolSubst('llvm-bolt', unresolved='fatal'),
@@ -60,7 +59,6 @@ tools = [
     ToolSubst('llvm-nm', unresolved='fatal'),
     ToolSubst('llvm-objdump', unresolved='fatal'),
     ToolSubst('llvm-strip', unresolved='fatal'),
-    ToolSubst('linker', command=linker_tool, unresolved='fatal'),
     ToolSubst('link_fdata', command=FindTool('link_fdata.sh'), unresolved='fatal'),
 ]
 llvm_config.add_tool_substitutions(tools, tool_dirs)

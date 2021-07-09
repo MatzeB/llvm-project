@@ -227,7 +227,7 @@ protected:
   MCSection *TOCBaseSection = nullptr;
 
 public:
-  void InitMCObjectFileInfo(const Triple &TT, bool PIC, MCContext &ctx,
+  void initMCObjectFileInfo(MCContext &MCCtx, bool PIC,
                             bool LargeCodeModel = false);
   MCContext &getContext() const { return *Ctx; }
 
@@ -417,16 +417,11 @@ public:
 
   MCSection *getEHFrameSection() const { return EHFrameSection; }
 
-  enum Environment { IsMachO, IsELF, IsCOFF, IsWasm, IsXCOFF };
-  Environment getObjectFileType() const { return Env; }
-
   bool isPositionIndependent() const { return PositionIndependent; }
 
 private:
-  Environment Env;
   bool PositionIndependent = false;
   MCContext *Ctx = nullptr;
-  Triple TT;
   VersionTuple SDKVersion;
 
   void initMachOMCObjectFileInfo(const Triple &T);
@@ -437,8 +432,6 @@ private:
   MCSection *getDwarfComdatSection(const char *Name, uint64_t Hash) const;
 
 public:
-  const Triple &getTargetTriple() const { return TT; }
-
   void setSDKVersion(const VersionTuple &TheSDKVersion) {
     SDKVersion = TheSDKVersion;
   }

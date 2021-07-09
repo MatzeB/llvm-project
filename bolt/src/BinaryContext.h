@@ -212,8 +212,11 @@ public:
   createBinaryContext(const ObjectFile *File, bool IsPIC,
                       std::unique_ptr<DWARFContext> DwCtx);
 
-  /// Given DWOId returns CU if it existss in DWOCUs.
+  /// Given DWOId returns CU if it exists in DWOCUs.
   Optional<DWARFUnit *> getDWOCU(uint64_t DWOId);
+
+  /// Returns DWOContext if it exists.
+  DWARFContext *getDWOContext();
 
   /// Get Number of DWOCUs in a map.
   uint32_t getNumDWOCUs() { return DWOCUs.size(); }
@@ -573,9 +576,6 @@ public:
   /// the execution of the binary is completed.
   Optional<uint64_t> FiniFunctionAddress;
 
-  Optional<uint64_t> DynamicRelocationsAddress;
-  Optional<uint64_t> DynamicRelocationsSize;
-
   /// Page alignment used for code layout.
   uint64_t PageAlign{HugePageSize};
 
@@ -719,6 +719,9 @@ public:
                                     uint64_t Size = 0,
                                     uint16_t Alignment = 0,
                                     unsigned Flags = 0);
+
+  /// Create a global symbol without registering an address.
+  MCSymbol *getOrCreateUndefinedGlobalSymbol(StringRef Name);
 
   /// Register a symbol with \p Name at a given \p Address using \p Size,
   /// \p Alignment, and \p Flags. See llvm::SymbolRef::Flags for the definition
@@ -1122,7 +1125,7 @@ public:
                            const MCCodeEmitter *Emitter = nullptr) const {
     uint64_t Size = 0;
     while (Beg != End) {
-      if (!MII->get(Beg->getOpcode()).isPseudo())
+      if (!MIB->isPseudo(*Beg))
         Size += computeInstructionSize(*Beg, Emitter);
       ++Beg;
     }
@@ -1204,12 +1207,12 @@ public:
   /// won't be used in the main code emitter.
   IndependentCodeEmitter createIndependentMCCodeEmitter() const {
     IndependentCodeEmitter MCEInstance;
-    MCEInstance.LocalMOFI = std::make_unique<MCObjectFileInfo>();
-    MCEInstance.LocalCtx = std::make_unique<MCContext>(
-        AsmInfo.get(), MRI.get(), MCEInstance.LocalMOFI.get());
-    MCEInstance.LocalMOFI->InitMCObjectFileInfo(*TheTriple,
-                                                /*PIC=*/!HasFixedLoadAddress,
-                                                *MCEInstance.LocalCtx);
+    MCEInstance.LocalCtx.reset(
+        new MCContext(*TheTriple, AsmInfo.get(), MRI.get(), STI.get()));
+    MCEInstance.LocalMOFI.reset(
+        TheTarget->createMCObjectFileInfo(*MCEInstance.LocalCtx.get(),
+                                          /*PIC=*/!HasFixedLoadAddress));
+    MCEInstance.LocalCtx->setObjectFileInfo(MCEInstance.LocalMOFI.get());
     MCEInstance.MCE.reset(
         TheTarget->createMCCodeEmitter(*MII, *MRI, *MCEInstance.LocalCtx));
     return MCEInstance;

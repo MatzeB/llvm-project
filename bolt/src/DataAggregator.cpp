@@ -407,7 +407,7 @@ std::error_code DataAggregator::writeAutoFDOData(StringRef OutputFilename) {
                      TimerGroupName, TimerGroupDesc, opts::TimeAggregator);
 
   std::error_code EC;
-  raw_fd_ostream OutFile(OutputFilename, EC, sys::fs::OpenFlags::F_None);
+  raw_fd_ostream OutFile(OutputFilename, EC, sys::fs::OpenFlags::OF_None);
   if (EC)
     return EC;
 
@@ -2190,7 +2190,7 @@ DataAggregator::getFileNameForBuildID(StringRef FileBuildID) {
 std::error_code
 DataAggregator::writeAggregatedFile(StringRef OutputFilename) const {
   std::error_code EC;
-  raw_fd_ostream OutFile(OutputFilename, EC, sys::fs::OpenFlags::F_None);
+  raw_fd_ostream OutFile(OutputFilename, EC, sys::fs::OpenFlags::OF_None);
   if (EC)
     return EC;
 
