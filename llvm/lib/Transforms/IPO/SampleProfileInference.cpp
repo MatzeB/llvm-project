@@ -86,7 +86,7 @@ struct FlowFunction {
 /// minimum total cost respecting the given edge capacities.
 class MinCostFlow {
 public:
-  // Initialize algorithm's data structures for a netwrok of a given size.
+  // Initialize algorithm's data structures for a network of a given size.
   void initialize(uint64_t NodeCount, uint64_t Source_, uint64_t Target_) {
     Source = Source_;
     Target = Target_;
@@ -170,19 +170,22 @@ public:
   }
 
   /// A cost of increasing a block's count by one.
-  static constexpr int64_t AuxCostInc = 1;
+  static constexpr int64_t AuxCostInc = 10;
   /// A cost of decreasing a block's count by one.
-  static constexpr int64_t AuxCostDec = 2;
+  static constexpr int64_t AuxCostDec = 20;
+  /// A cost of increasing a count of zero-weight block by one.
+  static constexpr int64_t AuxCostIncZero = 11;
   /// A cost of increasing the entry block's count by one.
-  static constexpr int64_t AuxCostIncEntry = ((int64_t)1) << 20;
+  static constexpr int64_t AuxCostIncEntry = 40;
   /// A cost of decreasing the entry block's count by one.
-  static constexpr int64_t AuxCostDecEntry = ((int64_t)1) << 20;
+  static constexpr int64_t AuxCostDecEntry = 10;
   /// A cost of taking an unlikely jump.
   static constexpr int64_t AuxCostUnlikely = ((int64_t)1) << 20;
 
 private:
   /// Check for existence of an augmenting path with a positive capacity.
   bool findAugmentingPath() {
+    // Initialize data structures
     for (auto &Node : Nodes) {
       Node.Distance = INF;
       Node.ParentNode = uint64_t(-1);
@@ -198,16 +201,35 @@ private:
       uint64_t Src = Queue.front();
       Queue.pop();
       Nodes[Src].Taken = false;
+      // Although the residual network contains edges with negative costs
+      // (in particular, backward edges), it can be shown that there are no
+      // negative-weight cycles and the following two invariants are maintained:
+      // (i) Dist[Source, V] >= 0 and (ii) Dist[V, Target] >= 0 for all nodes V,
+      // where Dist is the length of the shortest path between two nodes. This
+      // allows to prune the search-space of the path-finding algorithm using
+      // the following early-stop criteria:
+      // -- If we find a path with zero-distance from Source to Target, stop the
+      //    search, as the path is the shortest since Dist[Source, Target] >= 0;
+      // -- If we have Dist[Source, V] > Dist[Source, Target], then do not
+      //    process node V, as it is guaranteed _not_ to be on a shortest path
+      //    from Source to Target; it follows from inequalities
+      //    Dist[Source, Target] >= Dist[Source, V] + Dist[V, Target]
+      //                         >= Dist[Source, V]
+      if (Nodes[Target].Distance == 0)
+        break;
+      if (Nodes[Src].Distance > Nodes[Target].Distance)
+        continue;
+
       // Process adjacent edges
-      for (uint64_t I = 0; I < Edges[Src].size(); I++) {
-        auto &Edge = Edges[Src][I];
+      for (uint64_t EdgeIdx = 0; EdgeIdx < Edges[Src].size(); EdgeIdx++) {
+        auto &Edge = Edges[Src][EdgeIdx];
         if (Edge.Flow < Edge.Capacity) {
           uint64_t Dst = Edge.Dst;
           if (Nodes[Dst].Distance > Nodes[Src].Distance + Edge.Cost) {
             // Update the distance and the parent node/edge
             Nodes[Dst].Distance = Nodes[Src].Distance + Edge.Cost;
             Nodes[Dst].ParentNode = Src;
-            Nodes[Dst].ParentEdgeIndex = I;
+            Nodes[Dst].ParentEdgeIndex = EdgeIdx;
             // Add the node to the queue, if it is not there yet
             if (!Nodes[Dst].Taken) {
               Queue.push(Dst);
@@ -376,7 +398,7 @@ private:
     return Result;
   }
 
-  /// Apply the dijkstra algorithm to find the shortest path from a given
+  /// Apply the Dijkstra algorithm to find the shortest path from a given
   /// Source to a given Target block.
   /// If Target == -1, then the path ends at an exit block.
   std::vector<FlowJump *> findShortestPath(uint64_t Source, uint64_t Target) {
@@ -393,7 +415,7 @@ private:
     std::set<std::pair<uint64_t, uint64_t>> Queue;
     Queue.insert(std::make_pair(Distance[Source], Source));
 
-    // Run the dijkstra algorithm
+    // Run the Dijkstra algorithm
     while (!Queue.empty()) {
       uint64_t Src = Queue.begin()->second;
       Queue.erase(Queue.begin());
@@ -442,7 +464,7 @@ private:
 
   /// A distance of a path for a given jump.
   /// In order to incite the path to use blocks/jumps with large positive flow,
-  /// and avoid changing branch probabiliy of outging edges drastically,
+  /// and avoid changing branch probability of outgoing edges drastically,
   /// set the distance as follows:
   ///   if Jump.Flow > 0, then distance = max(100 - Jump->Flow, 0)
   ///   if Block.Weight > 0, then distance = 1
@@ -527,7 +549,7 @@ private:
     // If the list of dangling blocks is empty, we don't need rebalancing
     if (DanglingSuccs.empty())
       return false;
-    // If there is no unique non-dangling destination block, skip rebalancing
+    // If all reachable nodes from SrcBlock are dangling, skip rebalancing
     if (DstBlock == nullptr)
       return false;
     // If any of the dangling blocks is an exit block, skip rebalancing
@@ -617,7 +639,7 @@ private:
     }
   }
 
-  /// A constant indicating an aribtrary exit block of a function.
+  /// A constant indicating an arbitrary exit block of a function.
   static constexpr uint64_t AnyExitBlock = uint64_t(-1);
 
   /// The function.
@@ -659,6 +681,7 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
     // Split every block into two nodes
     uint64_t Bin = 3 * B;
     uint64_t Bout = 3 * B + 1;
+    uint64_t Baux = 3 * B + 2;
     if (Block.Weight > 0) {
       Network.addEdge(S1, Bout, Block.Weight, 0);
       Network.addEdge(Bin, T1, Block.Weight, 0);
@@ -677,21 +700,26 @@ void initializeNetwork(MinCostFlow &Network, FlowFunction &Func) {
     // We assume that decreasing block counts is more expensive than increasing,
     // and thus, setting separate costs here. In the future we may want to tune
     // the relative costs so as to maximize the quality of generated profiles.
-    uint64_t Baux = 3 * B + 2;
     int64_t AuxCostInc = MinCostFlow::AuxCostInc;
     int64_t AuxCostDec = MinCostFlow::AuxCostDec;
-    // Do not penalize changing weights of dangling blocks
     if (Block.Dangling) {
+      // Do not penalize changing weights of dangling blocks
       AuxCostInc = 0;
       AuxCostDec = 0;
+    } else {
+      // Increasing the count for "cold" blocks with zero initial count is more
+      // expensive than for "hot" ones
+      if (Block.Weight == 0) {
+        AuxCostInc = MinCostFlow::AuxCostIncZero;
+      }
+      // Modifying the count of the entry block is expensive
+      if (Block.isEntry()) {
+        AuxCostInc = MinCostFlow::AuxCostIncEntry;
+        AuxCostDec = MinCostFlow::AuxCostDecEntry;
+      }
     }
-    // Modifying the weight of the entry block is expensive unless it's dangling
-    if (Block.isEntry() && !Block.Dangling) {
-      AuxCostDec = MinCostFlow::AuxCostDecEntry;
-      AuxCostInc = MinCostFlow::AuxCostIncEntry;
-    }
-    // For blocks with self-edges, do not penalize a reduction of the weight,
-    // as all of the weight can be attributed to the self-edge
+    // For blocks with self-edges, do not penalize a reduction of the count,
+    // as all of the increase can be attributed to the self-edge
     if (Block.HasSelfEdge) {
       AuxCostDec = 0;
     }
