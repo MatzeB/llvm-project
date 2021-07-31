@@ -26,6 +26,7 @@
 #include "llvm/CodeGen/LiveIntervalCalc.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/LiveRangeEdit.h"
+#include "llvm/CodeGen/LiveRegMatrix.h"
 #include "llvm/CodeGen/LiveStacks.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
@@ -168,6 +169,8 @@ class InlineSpiller : public Spiller {
   const TargetInstrInfo &TII;
   const TargetRegisterInfo &TRI;
   const MachineBlockFrequencyInfo &MBFI;
+  const RegisterClassInfo& RegClassInfo;
+  LiveRegMatrix& Matrix;
 
   // Variables that are valid during spill(), but used by multiple methods.
   LiveRangeEdit *Edit;
@@ -198,7 +201,8 @@ class InlineSpiller : public Spiller {
 
 public:
   InlineSpiller(MachineFunctionPass &Pass, MachineFunction &MF, VirtRegMap &VRM,
-                VirtRegAuxInfo &VRAI)
+                VirtRegAuxInfo &VRAI, const RegisterClassInfo& RegClassInfo,
+                LiveRegMatrix& Matrix)
       : MF(MF), LIS(Pass.getAnalysis<LiveIntervals>()),
         LSS(Pass.getAnalysis<LiveStacks>()),
         AA(&Pass.getAnalysis<AAResultsWrapperPass>().getAAResults()),
@@ -207,6 +211,8 @@ public:
         MRI(MF.getRegInfo()), TII(*MF.getSubtarget().getInstrInfo()),
         TRI(*MF.getSubtarget().getRegisterInfo()),
         MBFI(Pass.getAnalysis<MachineBlockFrequencyInfo>()),
+        RegClassInfo(RegClassInfo),
+        Matrix(Matrix),
         HSpiller(Pass, MF, VRM), VRAI(VRAI) {}
 
   void spill(LiveRangeEdit &) override;
@@ -235,6 +241,9 @@ private:
 
   void spillAroundUses(Register Reg);
   void spillAll();
+
+  void spillToOtherClass();
+  bool spillRegToOtherClass(Register Reg);
 };
 
 } // end anonymous namespace
@@ -245,8 +254,10 @@ void Spiller::anchor() {}
 
 Spiller *llvm::createInlineSpiller(MachineFunctionPass &Pass,
                                    MachineFunction &MF, VirtRegMap &VRM,
-                                   VirtRegAuxInfo &VRAI) {
-  return new InlineSpiller(Pass, MF, VRM, VRAI);
+                                   VirtRegAuxInfo &VRAI,
+                                   const RegisterClassInfo& RegClassInfo,
+                                   LiveRegMatrix& Matrix) {
+  return new InlineSpiller(Pass, MF, VRM, VRAI, RegClassInfo, Matrix);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1179,6 +1190,122 @@ void InlineSpiller::spillAll() {
     Edit->eraseVirtReg(Reg);
 }
 
+void InlineSpiller::spillToOtherClass() {
+  unsigned ResultPos = 0;
+  for (Register Reg : RegsToSpill) {
+    if (spillRegToOtherClass(Reg))
+      continue;
+
+    RegsToSpill[ResultPos++] = Reg;
+  }
+  RegsToSpill.erase(RegsToSpill.begin() + ResultPos, RegsToSpill.end());
+}
+
+bool InlineSpiller::spillRegToOtherClass(Register Reg) {
+  const TargetRegisterClass* SpillRC = TRI.spillToOtherClass(MRI, Reg);
+  if (SpillRC == nullptr)
+    return false;
+
+  LiveInterval& LI = LIS.getInterval(Reg);
+  if (LI.hasSubRanges())
+    return false;
+
+  Register SpillReg = MRI.createVirtualRegister(SpillRC);
+  LiveInterval& TargetLI = LIS.createEmptyInterval(SpillReg);
+  TargetLI.assign(LI, LIS.getVNInfoAllocator());
+
+  // TODO: Can we perform the interference check without actually creating
+  // a new VReg?
+  ArrayRef<MCPhysReg> Order = RegClassInfo.getOrder(SpillRC);
+  Register SpillPhysReg = MCRegister::NoRegister;
+  for (MCPhysReg PhysReg : Order) {
+    if (Matrix.checkInterference(TargetLI, PhysReg) == LiveRegMatrix::IK_Free) {
+      SpillPhysReg = PhysReg;
+      break;
+    }
+  }
+  if (SpillPhysReg == MCRegister::NoRegister) {
+    Edit->eraseVirtReg(SpillReg);
+    return false;
+  }
+  LLVM_DEBUG(dbgs() << "Copying to " << printReg(SpillPhysReg, &TRI) << '\n');
+  VRM.assignVirt2Phys(SpillReg, SpillPhysReg);
+
+  // Force recomputation of the liveranges when we have wired up the actual
+  // COPYs.
+  LIS.removeInterval(SpillReg);
+
+  // Iterate over instructions using Reg.
+  for (MachineRegisterInfo::reg_bundle_iterator
+       RegI = MRI.reg_bundle_begin(Reg), E = MRI.reg_bundle_end();
+       RegI != E; ) {
+    MachineInstr &MI = *(RegI++);
+    if (MI.isDebugValue()) {
+      // TODO
+      abort();
+    }
+    assert(!MI.isDebugInstr() && "Did not expect to find a use in debug "
+           "instruction that isn't a DBG_VALUE");
+
+    // Ignore copies to/from snippets. We'll delete them.
+    if (SnippetCopies.count(&MI))
+      continue;
+
+    // Analyze instruction.
+    SmallVector<std::pair<MachineInstr*, unsigned>, 8> Ops;
+    VirtRegInfo RI = AnalyzeVirtRegInBundle(MI, Reg, &Ops);
+
+    Register NewVReg = Edit->createFrom(Reg);
+    assert((!RI.Reads || !RI.Writes) && "both Read+Write not supported");
+    if (RI.Reads) {
+      // Insert copy before use.
+      MachineBasicBlock &MBB = *MI.getParent();
+      const MCInstrDesc &Desc = TII.get(TargetOpcode::COPY);
+      MachineInstr* CopyMI = BuildMI(MBB, MI.getIterator(), DebugLoc(), Desc)
+        .addReg(NewVReg, RegState::Define)
+        .addReg(SpillReg);
+
+      LIS.InsertMachineInstrInMaps(*CopyMI);
+      LLVM_DEBUG(dumpMachineInstrRangeWithSlotIndex(CopyMI->getIterator(),
+                                                    MI.getIterator(), LIS,
+                                                    "copy from other",
+                                                    NewVReg));
+    }
+
+    // Rewrite instruction operands.
+    bool hasLiveDef = false;
+    for (const auto &OpPair : Ops) {
+      MachineOperand &MO = OpPair.first->getOperand(OpPair.second);
+      MO.setReg(NewVReg);
+      if (MO.isUse()) {
+        if (!OpPair.first->isRegTiedToDefOperand(OpPair.second))
+          MO.setIsKill();
+      } else {
+        if (!MO.isDead())
+          hasLiveDef = true;
+      }
+    }
+
+    if (hasLiveDef) {
+      // Insert COPY from def to newvreg.
+      MachineBasicBlock &MBB = *MI.getParent();
+      const MCInstrDesc &Desc = TII.get(TargetOpcode::COPY);
+      MachineInstr* CopyMI = BuildMI(MBB, std::next(MI.getIterator()),
+                                     DebugLoc(), Desc)
+        .addReg(SpillReg, RegState::Define)
+        .addReg(NewVReg);
+
+      LIS.InsertMachineInstrInMaps(*CopyMI);
+      LLVM_DEBUG(dumpMachineInstrRangeWithSlotIndex(MI.getIterator(),
+                                                    std::next(CopyMI->getIterator()), LIS,
+                                                    "copy to other",
+                                                    NewVReg));
+    }
+  }
+
+  return true;
+}
+
 void InlineSpiller::spill(LiveRangeEdit &edit) {
   ++NumSpilledRanges;
   Edit = &edit;
@@ -1199,6 +1326,10 @@ void InlineSpiller::spill(LiveRangeEdit &edit) {
 
   collectRegsToSpill();
   reMaterializeAll();
+
+  // Switch domains.
+  if (!RegsToSpill.empty())
+    spillToOtherClass();
 
   // Remat may handle everything.
   if (!RegsToSpill.empty())

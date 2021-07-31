@@ -149,19 +149,29 @@ void RegAllocBase::allocatePhysRegs() {
     for (Register Reg : SplitVRegs) {
       assert(LIS->hasInterval(Reg));
 
-      LiveInterval *SplitVirtReg = &LIS->getInterval(Reg);
-      assert(!VRM->hasPhys(SplitVirtReg->reg()) && "Register already assigned");
-      if (MRI->reg_nodbg_empty(SplitVirtReg->reg())) {
-        assert(SplitVirtReg->empty() && "Non-empty but used interval");
-        LLVM_DEBUG(dbgs() << "not queueing unused  " << *SplitVirtReg << '\n');
-        aboutToRemoveInterval(*SplitVirtReg);
-        LIS->removeInterval(SplitVirtReg->reg());
+      LiveInterval &SplitVirtReg = LIS->getInterval(Reg);
+      if (MRI->reg_nodbg_empty(SplitVirtReg.reg())) {
+        assert(SplitVirtReg.empty() && "Non-empty but used interval");
+        LLVM_DEBUG(dbgs() << "not queueing unused  " << SplitVirtReg << '\n');
+        aboutToRemoveInterval(SplitVirtReg);
+        LIS->removeInterval(Reg);
         continue;
       }
-      LLVM_DEBUG(dbgs() << "queuing new interval: " << *SplitVirtReg << "\n");
-      assert(Register::isVirtualRegister(SplitVirtReg->reg()) &&
+
+      // Strategies like copying to an alternate register have already picked a
+      // physreg ahead of time.
+      Register Assigned = VRM->getPhys(Reg);
+      if (Assigned != VirtRegMap::NO_PHYS_REG) {
+        assert(Matrix->checkInterference(SplitVirtReg, Assigned) == LiveRegMatrix::IK_Free &&
+               "expected free register");
+        Matrix->assign(SplitVirtReg, Assigned);
+        continue;
+      }
+
+      LLVM_DEBUG(dbgs() << "queuing new interval: " << SplitVirtReg << "\n");
+      assert(Register::isVirtualRegister(Reg) &&
              "expect split value in virtual register");
-      enqueue(SplitVirtReg);
+      enqueue(&SplitVirtReg);
       ++NumNewQueued;
     }
   }

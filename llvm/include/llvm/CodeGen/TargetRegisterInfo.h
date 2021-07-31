@@ -615,6 +615,11 @@ public:
     return RC;
   }
 
+  virtual const TargetRegisterClass* spillToOtherClass(const MachineRegisterInfo& MRI,
+                                                       Register Reg) const {
+    return nullptr;
+  }
+
   /// Return the subregister index you get from composing
   /// two subregister indices.
   ///

@@ -264,6 +264,7 @@ bool VirtRegRewriter::runOnMachineFunction(MachineFunction &fn) {
   DebugVars = getAnalysisIfAvailable<LiveDebugVariables>();
   LLVM_DEBUG(dbgs() << "********** REWRITE VIRTUAL REGISTERS **********\n"
                     << "********** Function: " << MF->getName() << '\n');
+  LLVM_DEBUG(LIS->dump());
   LLVM_DEBUG(VRM->dump());
 
   // Add kill flags while we still have virtual registers.

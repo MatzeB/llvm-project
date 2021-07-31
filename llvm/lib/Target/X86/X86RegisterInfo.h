@@ -149,6 +149,8 @@ public:
                              SmallVectorImpl<MCPhysReg> &Hints,
                              const MachineFunction &MF, const VirtRegMap *VRM,
                              const LiveRegMatrix *Matrix) const override;
+
+  virtual const TargetRegisterClass* spillToOtherClass(const MachineRegisterInfo& MRI, Register Reg) const override;
 };
 
 } // End llvm namespace

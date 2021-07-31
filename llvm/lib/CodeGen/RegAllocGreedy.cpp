@@ -745,6 +745,7 @@ void RAGreedy::enqueue(PQueue &CurQueue, LiveInterval *LI) {
   if (ExtraRegInfo[Reg].Stage == RS_New)
     ExtraRegInfo[Reg].Stage = RS_Assign;
 
+  const TargetRegisterClass &RC = *MRI->getRegClass(Reg);
   if (ExtraRegInfo[Reg].Stage == RS_Split) {
     // Unsplit ranges that couldn't be allocated immediately are deferred until
     // everything else has been allocated.
@@ -760,7 +761,6 @@ void RAGreedy::enqueue(PQueue &CurQueue, LiveInterval *LI) {
     // Giant live ranges fall back to the global assignment heuristic, which
     // prevents excessive spilling in pathological cases.
     bool ReverseLocal = TRI->reverseLocalAssignment();
-    const TargetRegisterClass &RC = *MRI->getRegClass(Reg);
     bool ForceGlobal = !ReverseLocal &&
       (Size / SlotIndex::InstrDist) > (2 * RC.getNumRegs());
 
@@ -777,22 +777,20 @@ void RAGreedy::enqueue(PQueue &CurQueue, LiveInterval *LI) {
         // large blocks on targets with many physical registers.
         Prio = Indexes->getZeroIndex().getInstrDistance(LI->endIndex());
       }
-      Prio |= RC.AllocationPriority << 24;
     } else {
       // Allocate global and split ranges in long->short order. Long ranges that
       // don't fit should be spilled (or split) ASAP so they don't create
       // interference.  Mark a bit to prioritize global above local ranges.
-      Prio = (1u << 29) + Size;
-
-      Prio |= RC.AllocationPriority << 24;
+      Prio = (1u << 21) + Size;
     }
     // Mark a higher bit to prioritize global and local above RS_Split.
-    Prio |= (1u << 31);
+    Prio |= (1u << 23);
 
     // Boost ranges that have a physical register hint.
     if (VRM->hasKnownPreference(Reg))
-      Prio |= (1u << 30);
+      Prio |= (1u << 22);
   }
+  Prio |= RC.AllocationPriority << 24;
   // The virtual register number is a tie breaker for same-sized ranges.
   // Give lower vreg numbers higher priority to assign them first.
   CurQueue.push(std::make_pair(Prio, ~Reg));
@@ -3364,7 +3362,7 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   RegCosts = TRI->getRegisterCosts(*MF);
 
   VRAI = std::make_unique<VirtRegAuxInfo>(*MF, *LIS, *VRM, *Loops, *MBFI);
-  SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM, *VRAI));
+  SpillerInstance.reset(createInlineSpiller(*this, *MF, *VRM, *VRAI, RegClassInfo, *Matrix));
 
   VRAI->calculateSpillWeightsAndHints();
 

@@ -806,8 +806,9 @@ bool RegAllocPBQP::runOnMachineFunction(MachineFunction &MF) {
   // LiveRangeEdit make its own VirtRegAuxInfo object.
   VirtRegAuxInfo DefaultVRAI(MF, LIS, VRM, getAnalysis<MachineLoopInfo>(),
                              MBFI);
-  std::unique_ptr<Spiller> VRegSpiller(
-      createInlineSpiller(*this, MF, VRM, DefaultVRAI));
+  // TODO! FIXME!
+  std::unique_ptr<Spiller> VRegSpiller(nullptr);
+  //    createInlineSpiller(*this, MF, VRM, DefaultVRAI), RegClassInfo, *Matrix);
 
   MF.getRegInfo().freezeReservedRegs(MF);
 

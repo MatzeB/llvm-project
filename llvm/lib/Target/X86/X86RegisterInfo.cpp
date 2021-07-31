@@ -958,3 +958,10 @@ bool X86RegisterInfo::getRegAllocationHints(Register VirtReg,
 
   return true;
 }
+
+const TargetRegisterClass* X86RegisterInfo::spillToOtherClass(const MachineRegisterInfo& MRI, Register Reg) const {
+  if (MRI.getRegClass(Reg) == &X86::GR64RegClass) {
+    return &X86::FR64RegClass;
+  }
+  return nullptr;
+}

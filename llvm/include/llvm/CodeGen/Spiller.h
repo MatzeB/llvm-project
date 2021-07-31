@@ -12,10 +12,12 @@
 namespace llvm {
 
 class LiveRangeEdit;
+class LiveRegMatrix;
 class MachineFunction;
 class MachineFunctionPass;
-class VirtRegMap;
+class RegisterClassInfo;
 class VirtRegAuxInfo;
+class VirtRegMap;
 
 /// Spiller interface.
 ///
@@ -36,7 +38,9 @@ public:
 /// Create and return a spiller that will insert spill code directly instead
 /// of deferring though VirtRegMap.
 Spiller *createInlineSpiller(MachineFunctionPass &Pass, MachineFunction &MF,
-                             VirtRegMap &VRM, VirtRegAuxInfo &VRAI);
+                             VirtRegMap &VRM, VirtRegAuxInfo &VRAI,
+                             const RegisterClassInfo& RegClassInfo,
+                             LiveRegMatrix& Matrix);
 
 } // end namespace llvm
 
