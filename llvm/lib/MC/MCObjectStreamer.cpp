@@ -641,6 +641,10 @@ void MCObjectStreamer::emitCodeAlignment(unsigned ByteAlignment,
   cast<MCAlignFragment>(getCurrentFragment())->setEmitNops(true);
 }
 
+void MCObjectStreamer::emitNeverAlignCodeAtEnd(unsigned ByteAlignment) {
+  insert(new MCNeverAlignFragment(ByteAlignment));
+}
+
 void MCObjectStreamer::emitValueToOffset(const MCExpr *Offset,
                                          unsigned char Value,
                                          SMLoc Loc) {

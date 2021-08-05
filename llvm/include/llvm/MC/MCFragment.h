@@ -34,6 +34,7 @@ class MCFragment : public ilist_node_with_parent<MCFragment, MCSection> {
 public:
   enum FragmentType : uint8_t {
     FT_Align,
+    FT_NeverAlign,
     FT_Data,
     FT_CompactEncodedInst,
     FT_Fill,
@@ -330,6 +331,21 @@ public:
 
   static bool classof(const MCFragment *F) {
     return F->getKind() == MCFragment::FT_Align;
+  }
+};
+
+class MCNeverAlignFragment : public MCFragment {
+  /// The alignment the end of the next fragment should avoid.
+  unsigned Alignment;
+
+public:
+  MCNeverAlignFragment(unsigned Alignment, MCSection *Sec = nullptr)
+      : MCFragment(FT_NeverAlign, false, Sec), Alignment(Alignment) {}
+
+  unsigned getAlignment() const { return Alignment; }
+
+  static bool classof(const MCFragment *F) {
+    return F->getKind() == MCFragment::FT_NeverAlign;
   }
 };
 

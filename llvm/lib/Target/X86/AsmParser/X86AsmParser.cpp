@@ -1128,6 +1128,7 @@ private:
   bool parseDirectiveArch();
   bool parseDirectiveNops(SMLoc L);
   bool parseDirectiveEven(SMLoc L);
+  bool parseDirectiveAvoidEndAlign(SMLoc L);
   bool ParseDirectiveCode(StringRef IDVal, SMLoc L);
 
   /// CodeView FPO data directives.
@@ -4632,6 +4633,8 @@ bool X86AsmParser::ParseDirective(AsmToken DirectiveID) {
     return false;
   } else if (IDVal == ".nops")
     return parseDirectiveNops(DirectiveID.getLoc());
+  else if (IDVal == ".avoid_end_align")
+    return parseDirectiveAvoidEndAlign(DirectiveID.getLoc());
   else if (IDVal == ".even")
     return parseDirectiveEven(DirectiveID.getLoc());
   else if (IDVal == ".cv_fpo_proc")
@@ -4678,7 +4681,6 @@ bool X86AsmParser::parseDirectiveArch() {
 bool X86AsmParser::parseDirectiveNops(SMLoc L) {
   int64_t NumBytes = 0, Control = 0;
   SMLoc NumBytesLoc, ControlLoc;
-  const MCSubtargetInfo STI = getSTI();
   NumBytesLoc = getTok().getLoc();
   if (getParser().checkForValidSection() ||
       getParser().parseAbsoluteExpression(NumBytes))
@@ -4724,6 +4726,27 @@ bool X86AsmParser::parseDirectiveEven(SMLoc L) {
     getStreamer().emitCodeAlignment(2, 0);
   else
     getStreamer().emitValueToAlignment(2, 0, 1, 0);
+  return false;
+}
+
+/// Directive for NeverAlign fragment testing, not for general usage!
+/// parseDirectiveAvoidEndAlign
+///  ::= .avoid_end_align alignment
+bool X86AsmParser::parseDirectiveAvoidEndAlign(SMLoc L) {
+  int64_t Alignment = 0;
+  SMLoc AlignmentLoc;
+  AlignmentLoc = getTok().getLoc();
+  if (getParser().checkForValidSection() ||
+      getParser().parseAbsoluteExpression(Alignment))
+    return true;
+
+  if (getParser().parseEOL("unexpected token in directive"))
+    return true;
+
+  if (Alignment <= 0)
+    return Error(AlignmentLoc, "expected a positive alignment");
+
+  getParser().getStreamer().emitNeverAlignCodeAtEnd(Alignment);
   return false;
 }
 
