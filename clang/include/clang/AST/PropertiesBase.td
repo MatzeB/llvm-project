@@ -543,7 +543,13 @@ let Class = PropertyTypeCase<APValue, "LValue"> in {
     auto pathLength = lvaluePath->Path.size();
     APValue::LValuePathEntry *path = result.setLValueUninit(
         base, offset, pathLength, isLValueOnePastTheEnd, isNullPtr).data();
-    assert(lvaluePath->getType() == elemTy && "Unexpected type reference!");
+    QualType lvalueTy = lvaluePath->getType();
+    if (!elemTy.isNull() && !lvalueTy.isNull()) {
+      if (elemTy.isConstQualified() && !lvalueTy.isConstQualified()) {
+        lvalueTy.addConst();
+      }
+    }
+    assert(lvalueTy == elemTy && "Unexpected type reference!");
     llvm::copy(lvaluePath->Path, path);
     return result;
   }]>;
