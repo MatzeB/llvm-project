@@ -82,6 +82,10 @@ RestrictStatepointRemat("restrict-statepoint-remat",
                        cl::init(false), cl::Hidden,
                        cl::desc("Restrict remat for statepoint operands"));
 
+static cl::opt<bool> DisableSpillOtherClass("disable-spill-other-class",
+                                      cl::init(false), cl::Hidden,
+                                      cl::desc("Disable spilling to other register classes"));
+
 namespace {
 
 class HoistSpillHelper : private LiveRangeEdit::Delegate {
@@ -242,8 +246,7 @@ private:
   void spillAroundUses(Register Reg);
   void spillAll();
 
-  void spillToOtherClass();
-  bool spillRegToOtherClass(Register Reg);
+  bool spillToOtherClass();
 };
 
 } // end anonymous namespace
@@ -1190,45 +1193,55 @@ void InlineSpiller::spillAll() {
     Edit->eraseVirtReg(Reg);
 }
 
-void InlineSpiller::spillToOtherClass() {
-  unsigned ResultPos = 0;
-  for (Register Reg : RegsToSpill) {
-    if (spillRegToOtherClass(Reg))
-      continue;
+bool InlineSpiller::spillToOtherClass() {
+  if (DisableSpillOtherClass)
+    return false;
 
-    RegsToSpill[ResultPos++] = Reg;
-  }
-  RegsToSpill.erase(RegsToSpill.begin() + ResultPos, RegsToSpill.end());
-}
-
-bool InlineSpiller::spillRegToOtherClass(Register Reg) {
-  const TargetRegisterClass* SpillRC = TRI.spillToOtherClass(MRI, Reg);
+  const TargetRegisterClass* SpillRC = TRI.spillToOtherClass(MRI, Original);
   if (SpillRC == nullptr)
     return false;
 
-  LiveInterval& LI = LIS.getInterval(Reg);
-  if (LI.hasSubRanges())
-    return false;
+  // Don't deal with subranges for now.
+  for (Register Reg : RegsToSpill) {
+    LiveInterval& LI = LIS.getInterval(Reg);
+    if (LI.hasSubRanges()) {
+      return false;
+    }
+  }
 
   Register SpillReg = MRI.createVirtualRegister(SpillRC);
   LiveInterval& TargetLI = LIS.createEmptyInterval(SpillReg);
-  TargetLI.assign(LI, LIS.getVNInfoAllocator());
 
-  // TODO: Can we perform the interference check without actually creating
-  // a new VReg?
+  // TODO: Find a way to do the interference check without creating new
+  // LiveInterval objects.
   ArrayRef<MCPhysReg> Order = RegClassInfo.getOrder(SpillRC);
-  Register SpillPhysReg = MCRegister::NoRegister;
-  for (MCPhysReg PhysReg : Order) {
-    if (Matrix.checkInterference(TargetLI, PhysReg) == LiveRegMatrix::IK_Free) {
-      SpillPhysReg = PhysReg;
-      break;
+  VNInfo::Allocator VNIAllocator = LIS.getVNInfoAllocator();
+  bool TargetLIIsOriginal = false;
+  MCRegister SpillPhysReg = MCRegister::NoRegister;
+  for (MCPhysReg Candidate : Order) {
+    for (Register Reg : RegsToSpill) {
+      if (Reg != Original || !TargetLIIsOriginal) {
+        TargetLI.clear();
+        LiveInterval& LI = LIS.getInterval(Reg);
+        TargetLI.assign(LI, LIS.getVNInfoAllocator());
+        TargetLIIsOriginal = Reg == Original;
+      }
+      if (Matrix.checkInterference(TargetLI, Candidate) == LiveRegMatrix::IK_Free) {
+        SpillPhysReg = Candidate;
+        break;
+      }
     }
+    if (SpillPhysReg != MCRegister::NoRegister)
+      break;
   }
+  TargetLI.clear();
   if (SpillPhysReg == MCRegister::NoRegister) {
+abort:
     Edit->eraseVirtReg(SpillReg);
     return false;
   }
-  LLVM_DEBUG(dbgs() << "Copying to " << printReg(SpillPhysReg, &TRI) << '\n');
+
+  LLVM_DEBUG(dbgs() << "Spill by copying to " << printReg(SpillPhysReg, &TRI) << ".\n");
   VRM.assignVirt2Phys(SpillReg, SpillPhysReg);
 
   // Force recomputation of the liveranges when we have wired up the actual
@@ -1236,70 +1249,71 @@ bool InlineSpiller::spillRegToOtherClass(Register Reg) {
   LIS.removeInterval(SpillReg);
 
   // Iterate over instructions using Reg.
-  for (MachineRegisterInfo::reg_bundle_iterator
-       RegI = MRI.reg_bundle_begin(Reg), E = MRI.reg_bundle_end();
-       RegI != E; ) {
-    MachineInstr &MI = *(RegI++);
-    if (MI.isDebugValue()) {
-      // TODO
-      abort();
-    }
-    assert(!MI.isDebugInstr() && "Did not expect to find a use in debug "
-           "instruction that isn't a DBG_VALUE");
-
-    // Ignore copies to/from snippets. We'll delete them.
-    if (SnippetCopies.count(&MI))
-      continue;
-
-    // Analyze instruction.
-    SmallVector<std::pair<MachineInstr*, unsigned>, 8> Ops;
-    VirtRegInfo RI = AnalyzeVirtRegInBundle(MI, Reg, &Ops);
-
-    Register NewVReg = Edit->createFrom(Reg);
-    assert((!RI.Reads || !RI.Writes) && "both Read+Write not supported");
-    if (RI.Reads) {
-      // Insert copy before use.
-      MachineBasicBlock &MBB = *MI.getParent();
-      const MCInstrDesc &Desc = TII.get(TargetOpcode::COPY);
-      MachineInstr* CopyMI = BuildMI(MBB, MI.getIterator(), DebugLoc(), Desc)
-        .addReg(NewVReg, RegState::Define)
-        .addReg(SpillReg);
-
-      LIS.InsertMachineInstrInMaps(*CopyMI);
-      LLVM_DEBUG(dumpMachineInstrRangeWithSlotIndex(CopyMI->getIterator(),
-                                                    MI.getIterator(), LIS,
-                                                    "copy from other",
-                                                    NewVReg));
-    }
-
-    // Rewrite instruction operands.
-    bool hasLiveDef = false;
-    for (const auto &OpPair : Ops) {
-      MachineOperand &MO = OpPair.first->getOperand(OpPair.second);
-      MO.setReg(NewVReg);
-      if (MO.isUse()) {
-        if (!OpPair.first->isRegTiedToDefOperand(OpPair.second))
-          MO.setIsKill();
-      } else {
-        if (!MO.isDead())
-          hasLiveDef = true;
+  for (Register Reg : RegsToSpill) {
+    for (MachineRegisterInfo::reg_bundle_iterator
+         RegI = MRI.reg_bundle_begin(Reg), E = MRI.reg_bundle_end();
+         RegI != E; ) {
+      MachineInstr &MI = *(RegI++);
+      if (MI.isDebugValue()) {
+        // TODO
+        abort();
       }
-    }
+      assert(!MI.isDebugInstr() && "Did not expect to find a use in debug "
+             "instruction that isn't a DBG_VALUE");
 
-    if (hasLiveDef) {
-      // Insert COPY from def to newvreg.
-      MachineBasicBlock &MBB = *MI.getParent();
-      const MCInstrDesc &Desc = TII.get(TargetOpcode::COPY);
-      MachineInstr* CopyMI = BuildMI(MBB, std::next(MI.getIterator()),
-                                     DebugLoc(), Desc)
-        .addReg(SpillReg, RegState::Define)
-        .addReg(NewVReg);
+      // Ignore copies to/from snippets. We'll delete them.
+      if (SnippetCopies.count(&MI))
+        continue;
 
-      LIS.InsertMachineInstrInMaps(*CopyMI);
-      LLVM_DEBUG(dumpMachineInstrRangeWithSlotIndex(MI.getIterator(),
-                                                    std::next(CopyMI->getIterator()), LIS,
-                                                    "copy to other",
-                                                    NewVReg));
+      // Analyze instruction.
+      SmallVector<std::pair<MachineInstr*, unsigned>, 8> Ops;
+      VirtRegInfo RI = AnalyzeVirtRegInBundle(MI, Reg, &Ops);
+
+      Register NewVReg = Edit->createFrom(Reg);
+      if (RI.Reads) {
+        // Insert copy before use.
+        MachineBasicBlock &MBB = *MI.getParent();
+        const MCInstrDesc &Desc = TII.get(TargetOpcode::COPY);
+        MachineInstr* CopyMI = BuildMI(MBB, MI.getIterator(), DebugLoc(), Desc)
+          .addReg(NewVReg, RegState::Define)
+          .addReg(SpillReg);
+
+        LIS.InsertMachineInstrInMaps(*CopyMI);
+        LLVM_DEBUG(dumpMachineInstrRangeWithSlotIndex(CopyMI->getIterator(),
+                                                      MI.getIterator(), LIS,
+                                                      "copy from other",
+                                                      NewVReg));
+      }
+
+      // Rewrite instruction operands.
+      bool hasLiveDef = false;
+      for (const auto &OpPair : Ops) {
+        MachineOperand &MO = OpPair.first->getOperand(OpPair.second);
+        MO.setReg(NewVReg);
+        if (MO.isUse()) {
+          if (!OpPair.first->isRegTiedToDefOperand(OpPair.second))
+            MO.setIsKill();
+        } else {
+          if (!MO.isDead())
+            hasLiveDef = true;
+        }
+      }
+
+      if (hasLiveDef) {
+        // Insert COPY from def to newvreg.
+        MachineBasicBlock &MBB = *MI.getParent();
+        const MCInstrDesc &Desc = TII.get(TargetOpcode::COPY);
+        MachineInstr* CopyMI = BuildMI(MBB, std::next(MI.getIterator()),
+                                       DebugLoc(), Desc)
+          .addReg(SpillReg, RegState::Define)
+          .addReg(NewVReg);
+
+        LIS.InsertMachineInstrInMaps(*CopyMI);
+        LLVM_DEBUG(dumpMachineInstrRangeWithSlotIndex(MI.getIterator(),
+                                                      std::next(CopyMI->getIterator()), LIS,
+                                                      "copy to other",
+                                                      NewVReg));
+      }
     }
   }
 
