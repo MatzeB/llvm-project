@@ -162,8 +162,6 @@ void RegAllocBase::allocatePhysRegs() {
       // physreg ahead of time.
       Register Assigned = VRM->getPhys(Reg);
       if (Assigned != VirtRegMap::NO_PHYS_REG) {
-        assert(Matrix->checkInterference(SplitVirtReg, Assigned) == LiveRegMatrix::IK_Free &&
-               "expected free register");
         Matrix->assign(SplitVirtReg, Assigned);
         continue;
       }

@@ -1148,26 +1148,30 @@ void InlineSpiller::spillAroundUses(Register Reg) {
 
 /// spillAll - Spill all registers remaining after rematerialization.
 void InlineSpiller::spillAll() {
-  // Update LiveStacks now that we are committed to spilling.
-  if (StackSlot == VirtRegMap::NO_STACK_SLOT) {
-    StackSlot = VRM.assignVirt2StackSlot(Original);
-    StackInt = &LSS.getOrCreateInterval(StackSlot, MRI.getRegClass(Original));
-    StackInt->getNextValue(SlotIndex(), LSS.getVNInfoAllocator());
-  } else
-    StackInt = &LSS.getInterval(StackSlot);
+  if (spillToOtherClass()) {
+    // Succeeded in copying value to a different register class.
+  } else {
+    // Update LiveStacks now that we are committed to spilling.
+    if (StackSlot == VirtRegMap::NO_STACK_SLOT) {
+      StackSlot = VRM.assignVirt2StackSlot(Original);
+      StackInt = &LSS.getOrCreateInterval(StackSlot, MRI.getRegClass(Original));
+      StackInt->getNextValue(SlotIndex(), LSS.getVNInfoAllocator());
+    } else
+      StackInt = &LSS.getInterval(StackSlot);
 
-  if (Original != Edit->getReg())
-    VRM.assignVirt2StackSlot(Edit->getReg(), StackSlot);
+    if (Original != Edit->getReg())
+      VRM.assignVirt2StackSlot(Edit->getReg(), StackSlot);
 
-  assert(StackInt->getNumValNums() == 1 && "Bad stack interval values");
-  for (Register Reg : RegsToSpill)
-    StackInt->MergeSegmentsInAsValue(LIS.getInterval(Reg),
-                                     StackInt->getValNumInfo(0));
-  LLVM_DEBUG(dbgs() << "Merged spilled regs: " << *StackInt << '\n');
+    assert(StackInt->getNumValNums() == 1 && "Bad stack interval values");
+    for (Register Reg : RegsToSpill)
+      StackInt->MergeSegmentsInAsValue(LIS.getInterval(Reg),
+                                       StackInt->getValNumInfo(0));
+    LLVM_DEBUG(dbgs() << "Merged spilled regs: " << *StackInt << '\n');
 
-  // Spill around uses of all RegsToSpill.
-  for (Register Reg : RegsToSpill)
-    spillAroundUses(Reg);
+    // Spill around uses of all RegsToSpill.
+    for (Register Reg : RegsToSpill)
+      spillAroundUses(Reg);
+  }
 
   // Hoisted spills may cause dead code.
   if (!DeadDefs.empty()) {
@@ -1209,44 +1213,34 @@ bool InlineSpiller::spillToOtherClass() {
     }
   }
 
-  Register SpillReg = MRI.createVirtualRegister(SpillRC);
-  LiveInterval& TargetLI = LIS.createEmptyInterval(SpillReg);
 
   // TODO: Find a way to do the interference check without creating new
   // LiveInterval objects.
   ArrayRef<MCPhysReg> Order = RegClassInfo.getOrder(SpillRC);
   VNInfo::Allocator VNIAllocator = LIS.getVNInfoAllocator();
-  bool TargetLIIsOriginal = false;
   MCRegister SpillPhysReg = MCRegister::NoRegister;
   for (MCPhysReg Candidate : Order) {
+    bool RegFree = true;
     for (Register Reg : RegsToSpill) {
-      if (Reg != Original || !TargetLIIsOriginal) {
-        TargetLI.clear();
-        LiveInterval& LI = LIS.getInterval(Reg);
-        TargetLI.assign(LI, LIS.getVNInfoAllocator());
-        TargetLIIsOriginal = Reg == Original;
-      }
-      if (Matrix.checkInterference(TargetLI, Candidate) == LiveRegMatrix::IK_Free) {
-        SpillPhysReg = Candidate;
+      const LiveInterval& LI = LIS.getInterval(Reg);
+      if (Matrix.checkInterferenceWithRange(LI, Candidate) != LiveRegMatrix::IK_Free) {
+        RegFree = false;
         break;
       }
     }
-    if (SpillPhysReg != MCRegister::NoRegister)
+    if (RegFree) {
+      SpillPhysReg = Candidate;
       break;
+    }
   }
-  TargetLI.clear();
   if (SpillPhysReg == MCRegister::NoRegister) {
-abort:
-    Edit->eraseVirtReg(SpillReg);
     return false;
   }
 
+  Register SpillReg = MRI.createVirtualRegister(SpillRC);
+
   LLVM_DEBUG(dbgs() << "Spill by copying to " << printReg(SpillPhysReg, &TRI) << ".\n");
   VRM.assignVirt2Phys(SpillReg, SpillPhysReg);
-
-  // Force recomputation of the liveranges when we have wired up the actual
-  // COPYs.
-  LIS.removeInterval(SpillReg);
 
   // Iterate over instructions using Reg.
   for (Register Reg : RegsToSpill) {
@@ -1340,10 +1334,6 @@ void InlineSpiller::spill(LiveRangeEdit &edit) {
 
   collectRegsToSpill();
   reMaterializeAll();
-
-  // Switch domains.
-  if (!RegsToSpill.empty())
-    spillToOtherClass();
 
   // Remat may handle everything.
   if (!RegsToSpill.empty())

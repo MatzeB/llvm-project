@@ -50,9 +50,9 @@ define i32 @stack_fold_bzhi_u32(i32 %a0, i32 %a1)   {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i32 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = tail call i32 @llvm.x86.bmi.bzhi.32(i32 %a0, i32 %a1)
-  ret i32 %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = tail call i32 @llvm.x86.bmi.bzhi.32(i32 %a0, i32 %a1)
+  ret i32 %1
 }
 declare i32 @llvm.x86.bmi.bzhi.32(i32, i32)
 
@@ -97,9 +97,9 @@ define i64 @stack_fold_bzhi_u64(i64 %a0, i64 %a1)   {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = tail call i64 @llvm.x86.bmi.bzhi.64(i64 %a0, i64 %a1)
-  ret i64 %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = tail call i64 @llvm.x86.bmi.bzhi.64(i64 %a0, i64 %a1)
+  ret i64 %1
 }
 declare i64 @llvm.x86.bmi.bzhi.64(i64, i64)
 
@@ -144,9 +144,9 @@ define i32 @stack_fold_pdep_u32(i32 %a0, i32 %a1)   {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i32 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = tail call i32 @llvm.x86.bmi.pdep.32(i32 %a0, i32 %a1)
-  ret i32 %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = tail call i32 @llvm.x86.bmi.pdep.32(i32 %a0, i32 %a1)
+  ret i32 %1
 }
 declare i32 @llvm.x86.bmi.pdep.32(i32, i32)
 
@@ -191,9 +191,9 @@ define i64 @stack_fold_pdep_u64(i64 %a0, i64 %a1)   {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = tail call i64 @llvm.x86.bmi.pdep.64(i64 %a0, i64 %a1)
-  ret i64 %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = tail call i64 @llvm.x86.bmi.pdep.64(i64 %a0, i64 %a1)
+  ret i64 %1
 }
 declare i64 @llvm.x86.bmi.pdep.64(i64, i64)
 
@@ -238,9 +238,9 @@ define i32 @stack_fold_pext_u32(i32 %a0, i32 %a1)   {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i32 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = tail call i32 @llvm.x86.bmi.pext.32(i32 %a0, i32 %a1)
-  ret i32 %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = tail call i32 @llvm.x86.bmi.pext.32(i32 %a0, i32 %a1)
+  ret i32 %1
 }
 declare i32 @llvm.x86.bmi.pext.32(i32, i32)
 
@@ -285,8 +285,8 @@ define i64 @stack_fold_pext_u64(i64 %a0, i64 %a1)   {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = tail call i64 @llvm.x86.bmi.pext.64(i64 %a0, i64 %a1)
-  ret i64 %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = tail call i64 @llvm.x86.bmi.pext.64(i64 %a0, i64 %a1)
+  ret i64 %1
 }
 declare i64 @llvm.x86.bmi.pext.64(i64, i64)

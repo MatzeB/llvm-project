@@ -141,11 +141,11 @@ define <4 x i32> @stack_fold_movd_load(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = insertelement <4 x i32> zeroinitializer, i32 %a0, i32 0
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = insertelement <4 x i32> zeroinitializer, i32 %a0, i32 0
   ; add forces execution domain
-  %3 = add <4 x i32> %2, <i32 1, i32 1, i32 1, i32 1>
-  ret <4 x i32> %3
+  %2 = add <4 x i32> %1, <i32 1, i32 1, i32 1, i32 1>
+  ret <4 x i32> %2
 }
 
 define i32 @stack_fold_movd_store(<4 x i32> %a0, <4 x i32> %a1) {
@@ -191,7 +191,7 @@ define i32 @stack_fold_movd_store(<4 x i32> %a0, <4 x i32> %a1) {
   ; add forces execution domain
   %1 = add <4 x i32> %a0, %a1
   %2 = extractelement <4 x i32> %1, i32 0
-  %3 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
   ret i32 %2
 }
 
@@ -257,7 +257,7 @@ define i64 @stack_fold_movq_store(<2 x i64> %a0, <2 x i64> %a1) {
   ; add forces execution domain
   %1 = add <2 x i64> %a0, %a1
   %2 = extractelement <2 x i64> %1, i32 0
-  %3 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
   ret i64 %2
 }
 
@@ -866,7 +866,7 @@ define i32 @stack_fold_pextrd(<4 x i32> %a0, <4 x i32> %a1) {
   ; add forces execution domain
   %1 = add <4 x i32> %a0, %a1
   %2 = extractelement <4 x i32> %1, i32 1
-  %3 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
   ret i32 %2
 }
 
@@ -910,7 +910,7 @@ define i64 @stack_fold_pextrq(<2 x i64> %a0) {
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
   %1 = extractelement <2 x i64> %a0, i32 1
-  %2 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
   ret i64 %1
 }
 
@@ -1060,9 +1060,9 @@ define <16 x i8> @stack_fold_pinsrb(<16 x i8> %a0, i8 %a1) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = insertelement <16 x i8> %a0, i8 %a1, i32 1
-  ret <16 x i8> %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = insertelement <16 x i8> %a0, i8 %a1, i32 1
+  ret <16 x i8> %1
 }
 
 define <4 x i32> @stack_fold_pinsrd(<4 x i32> %a0, i32 %a1) {
@@ -1104,9 +1104,9 @@ define <4 x i32> @stack_fold_pinsrd(<4 x i32> %a0, i32 %a1) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = insertelement <4 x i32> %a0, i32 %a1, i32 1
-  ret <4 x i32> %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = insertelement <4 x i32> %a0, i32 %a1, i32 1
+  ret <4 x i32> %1
 }
 
 define <2 x i64> @stack_fold_pinsrq(<2 x i64> %a0, i64 %a1) {
@@ -1148,9 +1148,9 @@ define <2 x i64> @stack_fold_pinsrq(<2 x i64> %a0, i64 %a1) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = insertelement <2 x i64> %a0, i64 %a1, i32 1
-  ret <2 x i64> %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = insertelement <2 x i64> %a0, i64 %a1, i32 1
+  ret <2 x i64> %1
 }
 
 define <8 x i16> @stack_fold_pinsrw(<8 x i16> %a0, i16 %a1) {
@@ -1192,9 +1192,9 @@ define <8 x i16> @stack_fold_pinsrw(<8 x i16> %a0, i16 %a1) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = insertelement <8 x i16> %a0, i16 %a1, i32 1
-  ret <8 x i16> %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = insertelement <8 x i16> %a0, i16 %a1, i32 1
+  ret <8 x i16> %1
 }
 
 define <8 x i16> @stack_fold_pmaddubsw(<16 x i8> %a0, <16 x i8> %a1) {

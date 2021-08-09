@@ -990,7 +990,8 @@ define double @stack_fold_cvtsi2sd(i32 %a0) {
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    #NO_APP
-; CHECK-NEXT:    vcvtsi2sdl {{[-0-9]+}}(%r{{[sb]}}p), %xmm1, %xmm0 # 4-byte Folded Reload
+; CHECK-NEXT:    vxorps %xmm0, %xmm0, %xmm0
+; CHECK-NEXT:    vcvtsi2sdl {{[-0-9]+}}(%r{{[sb]}}p), %xmm0, %xmm0 # 4-byte Folded Reload
 ; CHECK-NEXT:    popq %rbx
 ; CHECK-NEXT:    .cfi_def_cfa_offset 48
 ; CHECK-NEXT:    popq %r12
@@ -1004,9 +1005,9 @@ define double @stack_fold_cvtsi2sd(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sitofp i32 %a0 to double
-  ret double %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sitofp i32 %a0 to double
+  ret double %1
 }
 
 define <2 x double> @stack_fold_cvtsi2sd_int(i32 %a0) {
@@ -1034,7 +1035,8 @@ define <2 x double> @stack_fold_cvtsi2sd_int(i32 %a0) {
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    #NO_APP
-; CHECK-NEXT:    vcvtsi2sdl {{[-0-9]+}}(%r{{[sb]}}p), %xmm1, %xmm0 # 4-byte Folded Reload
+; CHECK-NEXT:    vxorps %xmm0, %xmm0, %xmm0
+; CHECK-NEXT:    vcvtsi2sdl {{[-0-9]+}}(%r{{[sb]}}p), %xmm0, %xmm0 # 4-byte Folded Reload
 ; CHECK-NEXT:    vmovq {{.*#+}} xmm0 = xmm0[0],zero
 ; CHECK-NEXT:    popq %rbx
 ; CHECK-NEXT:    .cfi_def_cfa_offset 48
@@ -1049,10 +1051,10 @@ define <2 x double> @stack_fold_cvtsi2sd_int(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sitofp i32 %a0 to double
-  %3 = insertelement <2 x double> zeroinitializer, double %2, i64 0
-  ret <2 x double> %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sitofp i32 %a0 to double
+  %2 = insertelement <2 x double> zeroinitializer, double %1, i64 0
+  ret <2 x double> %2
 }
 
 define double @stack_fold_cvtsi642sd(i64 %a0) {
@@ -1080,7 +1082,8 @@ define double @stack_fold_cvtsi642sd(i64 %a0) {
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    #NO_APP
-; CHECK-NEXT:    vcvtsi2sdq {{[-0-9]+}}(%r{{[sb]}}p), %xmm1, %xmm0 # 8-byte Folded Reload
+; CHECK-NEXT:    vxorps %xmm0, %xmm0, %xmm0
+; CHECK-NEXT:    vcvtsi2sdq {{[-0-9]+}}(%r{{[sb]}}p), %xmm0, %xmm0 # 8-byte Folded Reload
 ; CHECK-NEXT:    popq %rbx
 ; CHECK-NEXT:    .cfi_def_cfa_offset 48
 ; CHECK-NEXT:    popq %r12
@@ -1094,9 +1097,9 @@ define double @stack_fold_cvtsi642sd(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sitofp i64 %a0 to double
-  ret double %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sitofp i64 %a0 to double
+  ret double %1
 }
 
 define <2 x double> @stack_fold_cvtsi642sd_int(i64 %a0) {
@@ -1124,7 +1127,8 @@ define <2 x double> @stack_fold_cvtsi642sd_int(i64 %a0) {
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    #NO_APP
-; CHECK-NEXT:    vcvtsi2sdq {{[-0-9]+}}(%r{{[sb]}}p), %xmm1, %xmm0 # 8-byte Folded Reload
+; CHECK-NEXT:    vxorps %xmm0, %xmm0, %xmm0
+; CHECK-NEXT:    vcvtsi2sdq {{[-0-9]+}}(%r{{[sb]}}p), %xmm0, %xmm0 # 8-byte Folded Reload
 ; CHECK-NEXT:    vmovq {{.*#+}} xmm0 = xmm0[0],zero
 ; CHECK-NEXT:    popq %rbx
 ; CHECK-NEXT:    .cfi_def_cfa_offset 48
@@ -1139,10 +1143,10 @@ define <2 x double> @stack_fold_cvtsi642sd_int(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sitofp i64 %a0 to double
-  %3 = insertelement <2 x double> zeroinitializer, double %2, i64 0
-  ret <2 x double> %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sitofp i64 %a0 to double
+  %2 = insertelement <2 x double> zeroinitializer, double %1, i64 0
+  ret <2 x double> %2
 }
 
 define float @stack_fold_cvtsi2ss(i32 %a0) {
@@ -1261,7 +1265,8 @@ define float @stack_fold_cvtsi642ss(i64 %a0) {
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    #NO_APP
-; CHECK-NEXT:    vcvtsi2ssq {{[-0-9]+}}(%r{{[sb]}}p), %xmm1, %xmm0 # 8-byte Folded Reload
+; CHECK-NEXT:    vxorps %xmm0, %xmm0, %xmm0
+; CHECK-NEXT:    vcvtsi2ssq {{[-0-9]+}}(%r{{[sb]}}p), %xmm0, %xmm0 # 8-byte Folded Reload
 ; CHECK-NEXT:    popq %rbx
 ; CHECK-NEXT:    .cfi_def_cfa_offset 48
 ; CHECK-NEXT:    popq %r12
@@ -1275,9 +1280,9 @@ define float @stack_fold_cvtsi642ss(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sitofp i64 %a0 to float
-  ret float %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sitofp i64 %a0 to float
+  ret float %1
 }
 
 define <4 x float> @stack_fold_cvtsi642ss_int(i64 %a0) {
@@ -1305,7 +1310,8 @@ define <4 x float> @stack_fold_cvtsi642ss_int(i64 %a0) {
 ; CHECK-NEXT:    #APP
 ; CHECK-NEXT:    nop
 ; CHECK-NEXT:    #NO_APP
-; CHECK-NEXT:    vcvtsi2ssq {{[-0-9]+}}(%r{{[sb]}}p), %xmm1, %xmm0 # 8-byte Folded Reload
+; CHECK-NEXT:    vxorps %xmm0, %xmm0, %xmm0
+; CHECK-NEXT:    vcvtsi2ssq {{[-0-9]+}}(%r{{[sb]}}p), %xmm0, %xmm0 # 8-byte Folded Reload
 ; CHECK-NEXT:    vxorps %xmm1, %xmm1, %xmm1
 ; CHECK-NEXT:    vblendps {{.*#+}} xmm0 = xmm0[0],xmm1[1,2,3]
 ; CHECK-NEXT:    popq %rbx
@@ -1321,10 +1327,10 @@ define <4 x float> @stack_fold_cvtsi642ss_int(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call <2 x i64> asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sitofp i64 %a0 to float
-  %3 = insertelement <4 x float> zeroinitializer, float %2, i64 0
-  ret <4 x float> %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sitofp i64 %a0 to float
+  %2 = insertelement <4 x float> zeroinitializer, float %1, i64 0
+  ret <4 x float> %2
 }
 
 ; TODO stack_fold_cvtss2si

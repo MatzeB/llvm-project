@@ -49,9 +49,9 @@ define i32 @stack_fold_bextri_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = tail call i32 @llvm.x86.tbm.bextri.u32(i32 %a0, i32 3841)
-  ret i32 %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = tail call i32 @llvm.x86.tbm.bextri.u32(i32 %a0, i32 3841)
+  ret i32 %1
 }
 declare i32 @llvm.x86.tbm.bextri.u32(i32, i32)
 
@@ -95,9 +95,9 @@ define i64 @stack_fold_bextri_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = tail call i64 @llvm.x86.tbm.bextri.u64(i64 %a0, i64 3841)
-  ret i64 %2
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = tail call i64 @llvm.x86.tbm.bextri.u64(i64 %a0, i64 3841)
+  ret i64 %1
 }
 declare i64 @llvm.x86.tbm.bextri.u64(i64, i64)
 
@@ -140,10 +140,10 @@ define i32 @stack_fold_blcfill_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i32 %a0, 1
-  %3 = and i32 %a0, %2
-  ret i32 %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i32 %a0, 1
+  %2 = and i32 %a0, %1
+  ret i32 %2
 }
 
 define i64 @stack_fold_blcfill_u64(i64 %a0) {
@@ -185,10 +185,10 @@ define i64 @stack_fold_blcfill_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i64 %a0, 1
-  %3 = and i64 %a0, %2
-  ret i64 %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i64 %a0, 1
+  %2 = and i64 %a0, %1
+  ret i64 %2
 }
 
 define i32 @stack_fold_blci_u32(i32 %a0) {
@@ -230,11 +230,11 @@ define i32 @stack_fold_blci_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i32 %a0, 1
-  %3 = xor i32 %2, -1
-  %4 = or i32 %a0, %3
-  ret i32 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i32 %a0, 1
+  %2 = xor i32 %1, -1
+  %3 = or i32 %a0, %2
+  ret i32 %3
 }
 
 define i64 @stack_fold_blci_u64(i64 %a0) {
@@ -276,11 +276,11 @@ define i64 @stack_fold_blci_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i64 %a0, 1
-  %3 = xor i64 %2, -1
-  %4 = or i64 %a0, %3
-  ret i64 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i64 %a0, 1
+  %2 = xor i64 %1, -1
+  %3 = or i64 %a0, %2
+  ret i64 %3
 }
 
 define i32 @stack_fold_blcic_u32(i32 %a0) {
@@ -322,11 +322,11 @@ define i32 @stack_fold_blcic_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i32 %a0, 1
-  %3 = xor i32 %a0, -1
-  %4 = and i32 %2, %3
-  ret i32 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i32 %a0, 1
+  %2 = xor i32 %a0, -1
+  %3 = and i32 %1, %2
+  ret i32 %3
 }
 
 define i64 @stack_fold_blcic_u64(i64 %a0) {
@@ -368,11 +368,11 @@ define i64 @stack_fold_blcic_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i64 %a0, 1
-  %3 = xor i64 %a0, -1
-  %4 = and i64 %2, %3
-  ret i64 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i64 %a0, 1
+  %2 = xor i64 %a0, -1
+  %3 = and i64 %1, %2
+  ret i64 %3
 }
 
 define i32 @stack_fold_blcmsk_u32(i32 %a0) {
@@ -414,10 +414,10 @@ define i32 @stack_fold_blcmsk_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i32 %a0, 1
-  %3 = xor i32 %a0, %2
-  ret i32 %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i32 %a0, 1
+  %2 = xor i32 %a0, %1
+  ret i32 %2
 }
 
 define i64 @stack_fold_blcmsk_u64(i64 %a0) {
@@ -459,10 +459,10 @@ define i64 @stack_fold_blcmsk_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i64 %a0, 1
-  %3 = xor i64 %a0, %2
-  ret i64 %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i64 %a0, 1
+  %2 = xor i64 %a0, %1
+  ret i64 %2
 }
 
 define i32 @stack_fold_blcs_u32(i32 %a0) {
@@ -504,10 +504,10 @@ define i32 @stack_fold_blcs_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i32 %a0, 1
-  %3 = or i32 %a0, %2
-  ret i32 %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i32 %a0, 1
+  %2 = or i32 %a0, %1
+  ret i32 %2
 }
 
 define i64 @stack_fold_blcs_u64(i64 %a0) {
@@ -549,10 +549,10 @@ define i64 @stack_fold_blcs_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i64 %a0, 1
-  %3 = or i64 %a0, %2
-  ret i64 %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i64 %a0, 1
+  %2 = or i64 %a0, %1
+  ret i64 %2
 }
 
 define i32 @stack_fold_blsfill_u32(i32 %a0) {
@@ -594,10 +594,10 @@ define i32 @stack_fold_blsfill_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sub i32 %a0, 1
-  %3 = or i32 %a0, %2
-  ret i32 %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sub i32 %a0, 1
+  %2 = or i32 %a0, %1
+  ret i32 %2
 }
 
 define i64 @stack_fold_blsfill_u64(i64 %a0) {
@@ -639,10 +639,10 @@ define i64 @stack_fold_blsfill_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sub i64 %a0, 1
-  %3 = or i64 %a0, %2
-  ret i64 %3
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sub i64 %a0, 1
+  %2 = or i64 %a0, %1
+  ret i64 %2
 }
 
 define i32 @stack_fold_blsic_u32(i32 %a0) {
@@ -684,11 +684,11 @@ define i32 @stack_fold_blsic_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sub i32 %a0, 1
-  %3 = xor i32 %a0, -1
-  %4 = or i32 %2, %3
-  ret i32 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sub i32 %a0, 1
+  %2 = xor i32 %a0, -1
+  %3 = or i32 %1, %2
+  ret i32 %3
 }
 
 define i64 @stack_fold_blsic_u64(i64 %a0) {
@@ -730,11 +730,11 @@ define i64 @stack_fold_blsic_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sub i64 %a0, 1
-  %3 = xor i64 %a0, -1
-  %4 = or i64 %2, %3
-  ret i64 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sub i64 %a0, 1
+  %2 = xor i64 %a0, -1
+  %3 = or i64 %1, %2
+  ret i64 %3
 }
 
 define i32 @stack_fold_t1mskc_u32(i32 %a0) {
@@ -776,11 +776,11 @@ define i32 @stack_fold_t1mskc_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i32 %a0, 1
-  %3 = xor i32 %a0, -1
-  %4 = or i32 %2, %3
-  ret i32 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i32 %a0, 1
+  %2 = xor i32 %a0, -1
+  %3 = or i32 %1, %2
+  ret i32 %3
 }
 
 define i64 @stack_fold_t1mskc_u64(i64 %a0) {
@@ -822,11 +822,11 @@ define i64 @stack_fold_t1mskc_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = add i64 %a0, 1
-  %3 = xor i64 %a0, -1
-  %4 = or i64 %2, %3
-  ret i64 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = add i64 %a0, 1
+  %2 = xor i64 %a0, -1
+  %3 = or i64 %1, %2
+  ret i64 %3
 }
 
 define i32 @stack_fold_tzmsk_u32(i32 %a0) {
@@ -868,11 +868,11 @@ define i32 @stack_fold_tzmsk_u32(i32 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sub i32 %a0, 1
-  %3 = xor i32 %a0, -1
-  %4 = and i32 %2, %3
-  ret i32 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sub i32 %a0, 1
+  %2 = xor i32 %a0, -1
+  %3 = and i32 %1, %2
+  ret i32 %3
 }
 
 define i64 @stack_fold_tzmsk_u64(i64 %a0) {
@@ -914,9 +914,9 @@ define i64 @stack_fold_tzmsk_u64(i64 %a0) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = sub i64 %a0, 1
-  %3 = xor i64 %a0, -1
-  %4 = and i64 %2, %3
-  ret i64 %4
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = sub i64 %a0, 1
+  %2 = xor i64 %a0, -1
+  %3 = and i64 %1, %2
+  ret i64 %3
 }

@@ -154,7 +154,7 @@ define i64 @stack_fold_movq_store(x86_mmx %a0) nounwind {
 ; CHECK-NEXT:    retq
   %1 = call x86_mmx @llvm.x86.mmx.padd.b(x86_mmx %a0, x86_mmx %a0)
   %2 = bitcast x86_mmx %1 to i64
-  %3 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
   ret i64 %2
 }
 

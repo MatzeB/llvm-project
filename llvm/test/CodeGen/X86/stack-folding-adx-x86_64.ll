@@ -58,13 +58,13 @@ define i8 @stack_fold_addcarry_u32(i8 %a0, i32 %a1, i32 %a2, i8* %a3) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = call { i8, i32 } @llvm.x86.addcarry.32(i8 %a0, i32 %a1, i32 %a2)
-  %3 = extractvalue { i8, i32 } %2, 1
-  %4 = bitcast i8* %a3 to i32*
-  store i32 %3, i32* %4, align 1
-  %5 = extractvalue { i8, i32 } %2, 0
-  ret i8 %5
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = call { i8, i32 } @llvm.x86.addcarry.32(i8 %a0, i32 %a1, i32 %a2)
+  %2 = extractvalue { i8, i32 } %1, 1
+  %3 = bitcast i8* %a3 to i32*
+  store i32 %2, i32* %3, align 1
+  %4 = extractvalue { i8, i32 } %1, 0
+  ret i8 %4
 }
 
 define i8 @stack_fold_addcarry_u64(i8 %a0, i64 %a1, i64 %a2, i8* %a3) {
@@ -115,13 +115,13 @@ define i8 @stack_fold_addcarry_u64(i8 %a0, i64 %a1, i64 %a2, i8* %a3) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = call { i8, i64 } @llvm.x86.addcarry.64(i8 %a0, i64 %a1, i64 %a2)
-  %3 = extractvalue { i8, i64 } %2, 1
-  %4 = bitcast i8* %a3 to i64*
-  store i64 %3, i64* %4, align 1
-  %5 = extractvalue { i8, i64 } %2, 0
-  ret i8 %5
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = call { i8, i64 } @llvm.x86.addcarry.64(i8 %a0, i64 %a1, i64 %a2)
+  %2 = extractvalue { i8, i64 } %1, 1
+  %3 = bitcast i8* %a3 to i64*
+  store i64 %2, i64* %3, align 1
+  %4 = extractvalue { i8, i64 } %1, 0
+  ret i8 %4
 }
 
 define i8 @stack_fold_addcarryx_u32(i8 %a0, i32 %a1, i32 %a2, i8* %a3) {
@@ -172,13 +172,13 @@ define i8 @stack_fold_addcarryx_u32(i8 %a0, i32 %a1, i32 %a2, i8* %a3) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = call { i8, i32 } @llvm.x86.addcarry.32(i8 %a0, i32 %a1, i32 %a2)
-  %3 = extractvalue { i8, i32 } %2, 1
-  %4 = bitcast i8* %a3 to i32*
-  store i32 %3, i32* %4, align 1
-  %5 = extractvalue { i8, i32 } %2, 0
-  ret i8 %5
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = call { i8, i32 } @llvm.x86.addcarry.32(i8 %a0, i32 %a1, i32 %a2)
+  %2 = extractvalue { i8, i32 } %1, 1
+  %3 = bitcast i8* %a3 to i32*
+  store i32 %2, i32* %3, align 1
+  %4 = extractvalue { i8, i32 } %1, 0
+  ret i8 %4
 }
 
 define i8 @stack_fold_addcarryx_u64(i8 %a0, i64 %a1, i64 %a2, i8* %a3) {
@@ -229,13 +229,13 @@ define i8 @stack_fold_addcarryx_u64(i8 %a0, i64 %a1, i64 %a2, i8* %a3) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = call { i8, i64 } @llvm.x86.addcarry.64(i8 %a0, i64 %a1, i64 %a2)
-  %3 = extractvalue { i8, i64 } %2, 1
-  %4 = bitcast i8* %a3 to i64*
-  store i64 %3, i64* %4, align 1
-  %5 = extractvalue { i8, i64 } %2, 0
-  ret i8 %5
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = call { i8, i64 } @llvm.x86.addcarry.64(i8 %a0, i64 %a1, i64 %a2)
+  %2 = extractvalue { i8, i64 } %1, 1
+  %3 = bitcast i8* %a3 to i64*
+  store i64 %2, i64* %3, align 1
+  %4 = extractvalue { i8, i64 } %1, 0
+  ret i8 %4
 }
 
 define i8 @stack_fold_subborrow_u32(i8 %a0, i32 %a1, i32 %a2, i8* %a3) {
@@ -286,13 +286,13 @@ define i8 @stack_fold_subborrow_u32(i8 %a0, i32 %a1, i32 %a2, i8* %a3) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = call { i8, i32 } @llvm.x86.subborrow.32(i8 %a0, i32 %a1, i32 %a2)
-  %3 = extractvalue { i8, i32 } %2, 1
-  %4 = bitcast i8* %a3 to i32*
-  store i32 %3, i32* %4, align 1
-  %5 = extractvalue { i8, i32 } %2, 0
-  ret i8 %5
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = call { i8, i32 } @llvm.x86.subborrow.32(i8 %a0, i32 %a1, i32 %a2)
+  %2 = extractvalue { i8, i32 } %1, 1
+  %3 = bitcast i8* %a3 to i32*
+  store i32 %2, i32* %3, align 1
+  %4 = extractvalue { i8, i32 } %1, 0
+  ret i8 %4
 }
 
 define i8 @stack_fold_subborrow_u64(i8 %a0, i64 %a1, i64 %a2, i8* %a3) {
@@ -343,13 +343,13 @@ define i8 @stack_fold_subborrow_u64(i8 %a0, i64 %a1, i64 %a2, i8* %a3) {
 ; CHECK-NEXT:    popq %rbp
 ; CHECK-NEXT:    .cfi_def_cfa_offset 8
 ; CHECK-NEXT:    retq
-  %1 = tail call i64 asm sideeffect "nop", "=x,~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15}"()
-  %2 = call { i8, i64 } @llvm.x86.subborrow.64(i8 %a0, i64 %a1, i64 %a2)
-  %3 = extractvalue { i8, i64 } %2, 1
-  %4 = bitcast i8* %a3 to i64*
-  store i64 %3, i64* %4, align 1
-  %5 = extractvalue { i8, i64 } %2, 0
-  ret i8 %5
+  call void asm sideeffect "nop", "~{rax},~{rbx},~{rcx},~{rdx},~{rsi},~{rdi},~{rbp},~{r8},~{r9},~{r10},~{r11},~{r12},~{r13},~{r14},~{r15},~{xmm0},~{xmm1},~{xmm2},~{xmm3},~{xmm4},~{xmm5},~{xmm6},~{xmm7},~{xmm8},~{xmm9},~{xmm10},~{xmm11},~{xmm12},~{xmm13},~{xmm14},~{xmm15}"()
+  %1 = call { i8, i64 } @llvm.x86.subborrow.64(i8 %a0, i64 %a1, i64 %a2)
+  %2 = extractvalue { i8, i64 } %1, 1
+  %3 = bitcast i8* %a3 to i64*
+  store i64 %2, i64* %3, align 1
+  %4 = extractvalue { i8, i64 } %1, 0
+  ret i8 %4
 }
 
 declare { i8, i32 } @llvm.x86.addcarry.32(i8, i32, i32)
