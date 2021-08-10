@@ -618,7 +618,7 @@ void RegAllocPBQP::initializeGraph(PBQPRAGraph &G, VirtRegMap &VRM,
 
     // Record any overlaps with regmask operands.
     BitVector RegMaskOverlaps;
-    LIS.checkRegMaskInterference(VRegLI, RegMaskOverlaps);
+    LIS.checkRegMaskInterference(VRegLI, VRegLI.reg(), RegMaskOverlaps);
 
     // Compute an initial allowed set for the current vreg.
     std::vector<MCRegister> VRegAllowed;

@@ -2178,7 +2178,7 @@ bool RegisterCoalescer::joinReservedPhysReg(CoalescerPair &CP) {
 
     // We must also check for overlaps with regmask clobbers.
     BitVector RegMaskUsable;
-    if (LIS->checkRegMaskInterference(RHS, RegMaskUsable) &&
+    if (LIS->checkRegMaskInterference(RHS, RHS.reg(), RegMaskUsable) &&
         !RegMaskUsable.test(DstReg)) {
       LLVM_DEBUG(dbgs() << "\t\tRegMask interference\n");
       return false;

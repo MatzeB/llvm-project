@@ -2281,7 +2281,7 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
   // If VirtReg is live across any register mask operands, compute a list of
   // gaps with register masks.
   SmallVector<unsigned, 8> RegMaskGaps;
-  if (Matrix->checkRegMaskInterference(VirtReg)) {
+  if (Matrix->checkRegMaskInterference(VirtReg, VirtReg.reg())) {
     // Get regmask slots for the whole block.
     ArrayRef<SlotIndex> RMS = LIS->getRegMaskSlotsInBlock(BI.MBB->getNumber());
     LLVM_DEBUG(dbgs() << RMS.size() << " regmasks in block:");
@@ -2346,7 +2346,7 @@ unsigned RAGreedy::tryLocalSplit(LiveInterval &VirtReg, AllocationOrder &Order,
     calcGapWeights(PhysReg, GapWeight);
 
     // Remove any gaps with regmask clobbers.
-    if (Matrix->checkRegMaskInterference(VirtReg, PhysReg))
+    if (Matrix->checkRegMaskInterference(VirtReg, VirtReg.reg(), PhysReg))
       for (unsigned I = 0, E = RegMaskGaps.size(); I != E; ++I)
         GapWeight[RegMaskGaps[I]] = huge_valf;
 

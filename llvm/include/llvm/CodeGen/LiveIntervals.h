@@ -292,9 +292,9 @@ class VirtRegMap;
     /// Implement the dump method.
     void print(raw_ostream &O, const Module* = nullptr) const override;
 
-    /// If LI is confined to a single basic block, return a pointer to that
-    /// block.  If LI is live in to or out of any block, return NULL.
-    MachineBasicBlock *intervalIsInOneMBB(const LiveInterval &LI) const;
+    /// If LR is confined to a single basic block, return a pointer to that
+    /// block.  If LR is live in to or out of any block, return NULL.
+    MachineBasicBlock *intervalIsInOneMBB(const LiveRange &LR) const;
 
     /// Returns true if VNI is killed by any PHI-def values in LI.
     /// This may conservatively return true to avoid expensive computations.
@@ -374,7 +374,7 @@ class VirtRegMap;
     ///
     /// Returns false if \p LI doesn't cross any register mask instructions. In
     /// that case, the bit vector is not filled in.
-    bool checkRegMaskInterference(LiveInterval &LI,
+    bool checkRegMaskInterference(const LiveRange &LR, Register VirtReg,
                                   BitVector &UsableRegs);
 
     // Register unit functions.

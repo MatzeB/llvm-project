@@ -143,16 +143,18 @@ bool LiveRegMatrix::isPhysRegUsed(MCRegister PhysReg) const {
   return false;
 }
 
-bool LiveRegMatrix::checkRegMaskInterference(LiveInterval &VirtReg,
+bool LiveRegMatrix::checkRegMaskInterference(const LiveRange &LR,
+                                             Register VirtReg,
                                              MCRegister PhysReg) {
   // Check if the cached information is valid.
   // The same BitVector can be reused for all PhysRegs.
   // We could cache multiple VirtRegs if it becomes necessary.
-  if (RegMaskVirtReg != VirtReg.reg() || RegMaskTag != UserTag) {
-    RegMaskVirtReg = VirtReg.reg();
+  if (VirtReg == MCRegister::NoRegister || RegMaskVirtReg != VirtReg ||
+      RegMaskTag != UserTag) {
+    RegMaskVirtReg = VirtReg;
     RegMaskTag = UserTag;
     RegMaskUsable.clear();
-    LIS->checkRegMaskInterference(VirtReg, RegMaskUsable);
+    LIS->checkRegMaskInterference(LR, VirtReg, RegMaskUsable);
   }
 
   // The BitVector is indexed by PhysReg, not register unit.
@@ -188,7 +190,7 @@ LiveRegMatrix::checkInterference(LiveInterval &VirtReg, MCRegister PhysReg) {
     return IK_Free;
 
   // Regmask interference is the fastest check.
-  if (checkRegMaskInterference(VirtReg, PhysReg))
+  if (checkRegMaskInterference(VirtReg, VirtReg.reg(), PhysReg))
     return IK_RegMask;
 
   // Check for fixed interference.
@@ -231,6 +233,26 @@ bool LiveRegMatrix::checkInterference(SlotIndex Start, SlotIndex End,
     LiveIntervalUnion::Query Q;
     Q.reset(UserTag, LR, Matrix[*Units]);
     if (Q.checkInterference())
+      return true;
+  }
+  return false;
+}
+
+bool LiveRegMatrix::checkInterferenceWithRange(const LiveRange& LR, MCRegister PhysReg) {
+  if (LR.empty())
+    return false;
+
+  // Regmask interference is the fastest check.
+  if (checkRegMaskInterference(LR, MCRegister::NoRegister, PhysReg))
+    return true;
+
+  for (MCRegUnitIterator Units(PhysReg, TRI); Units.isValid(); ++Units) {
+    // Check for fixed interference.
+    const LiveRange &UnitRange = LIS->getRegUnit(*Units);
+    if (LR.overlaps(UnitRange))
+      return true;
+    // Check for interference with current assignments.
+    if (query(LR, *Units).checkInterference())
       return true;
   }
   return false;

@@ -113,6 +113,8 @@ public:
   /// the segment [Start, End).
   bool checkInterference(SlotIndex Start, SlotIndex End, MCRegister PhysReg);
 
+  bool checkInterferenceWithRange(const LiveRange& Range, MCRegister PhysReg);
+
   /// Assign VirtReg to PhysReg.
   /// This will mark VirtReg's live range as occupied in the LiveRegMatrix and
   /// update VirtRegMap. The live range is expected to be available in PhysReg.
@@ -134,9 +136,10 @@ public:
   //
 
   /// Check for regmask interference only.
-  /// Return true if VirtReg crosses a regmask operand that clobbers PhysReg.
-  /// If PhysReg is null, check if VirtReg crosses any regmask operands.
-  bool checkRegMaskInterference(LiveInterval &VirtReg,
+  /// Return true if live range LR crosses a regmask operand that clobbers
+  /// PhysReg.  If PhysReg is NoRegister, check if LR crosses any regmask
+  /// operands.
+  bool checkRegMaskInterference(const LiveRange& LR, Register VirtReg,
                                 MCRegister PhysReg = MCRegister::NoRegister);
 
   /// Check for regunit interference only.

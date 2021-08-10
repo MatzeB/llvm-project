@@ -826,7 +826,7 @@ CancelKill:
 }
 
 MachineBasicBlock*
-LiveIntervals::intervalIsInOneMBB(const LiveInterval &LI) const {
+LiveIntervals::intervalIsInOneMBB(const LiveRange &LR) const {
   // A local live range must be fully contained inside the block, meaning it is
   // defined and killed at instructions, not at block boundaries. It is not
   // live in or out of any block.
@@ -834,11 +834,11 @@ LiveIntervals::intervalIsInOneMBB(const LiveInterval &LI) const {
   // It is technically possible to have a PHI-defined live range identical to a
   // single block, but we are going to return false in that case.
 
-  SlotIndex Start = LI.beginIndex();
+  SlotIndex Start = LR.beginIndex();
   if (Start.isBlock())
     return nullptr;
 
-  SlotIndex Stop = LI.endIndex();
+  SlotIndex Stop = LR.endIndex();
   if (Stop.isBlock())
     return nullptr;
 
@@ -911,16 +911,16 @@ static bool hasLiveThroughUse(const MachineInstr *MI, Register Reg) {
   return false;
 }
 
-bool LiveIntervals::checkRegMaskInterference(LiveInterval &LI,
+bool LiveIntervals::checkRegMaskInterference(const LiveRange &LR, Register VirtReg,
                                              BitVector &UsableRegs) {
-  if (LI.empty())
+  if (LR.empty())
     return false;
-  LiveInterval::iterator LiveI = LI.begin(), LiveE = LI.end();
+  LiveRange::const_iterator LiveI = LR.begin(), LiveE = LR.end();
 
   // Use a smaller arrays for local live ranges.
   ArrayRef<SlotIndex> Slots;
   ArrayRef<const uint32_t*> Bits;
-  if (MachineBasicBlock *MBB = intervalIsInOneMBB(LI)) {
+  if (MachineBasicBlock *MBB = intervalIsInOneMBB(LR)) {
     Slots = getRegMaskSlotsInBlock(MBB->getNumber());
     Bits = getRegMaskBitsInBlock(MBB->getNumber());
   } else {
@@ -928,12 +928,12 @@ bool LiveIntervals::checkRegMaskInterference(LiveInterval &LI,
     Bits = getRegMaskBits();
   }
 
-  // We are going to enumerate all the register mask slots contained in LI.
+  // We are going to enumerate all the register mask slots contained in LR.
   // Start with a binary search of RegMaskSlots to find a starting point.
   ArrayRef<SlotIndex>::iterator SlotI = llvm::lower_bound(Slots, LiveI->start);
   ArrayRef<SlotIndex>::iterator SlotE = Slots.end();
 
-  // No slots in range, LI begins after the last call.
+  // No slots in range, LR begins after the last call.
   if (SlotI == SlotE)
     return false;
 
@@ -953,19 +953,19 @@ bool LiveIntervals::checkRegMaskInterference(LiveInterval &LI,
     assert(*SlotI >= LiveI->start);
     // Loop over all slots overlapping this segment.
     while (*SlotI < LiveI->end) {
-      // *SlotI overlaps LI. Collect mask bits.
+      // *SlotI overlaps LR. Collect mask bits.
       unionBitMask(SlotI - Slots.begin());
       if (++SlotI == SlotE)
         return Found;
     }
     // If segment ends with live-through use we need to collect its regmask.
-    if (*SlotI == LiveI->end)
+    if (*SlotI == LiveI->end && VirtReg != MCRegister::NoRegister)
       if (MachineInstr *MI = getInstructionFromIndex(*SlotI))
-        if (hasLiveThroughUse(MI, LI.reg()))
+        if (hasLiveThroughUse(MI, VirtReg))
           unionBitMask(SlotI++ - Slots.begin());
-    // *SlotI is beyond the current LI segment.
+    // *SlotI is beyond the current LR segment.
     // Special advance implementation to not miss next LiveI->end.
-    if (++LiveI == LiveE || SlotI == SlotE || *SlotI > LI.endIndex())
+    if (++LiveI == LiveE || SlotI == SlotE || *SlotI > LR.endIndex())
       return Found;
     while (LiveI->end < *SlotI)
       ++LiveI;
