@@ -55,6 +55,8 @@
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Support/FormattedStream.h" // facebook T96340746
+#include "llvm/Support/ScopedPrinter.h" // facebook T96340746
 #include <algorithm>
 
 using namespace llvm;
@@ -95,8 +97,77 @@ static std::string getLocation(InputSectionBase &s, const Symbol &sym,
   return msg + s.getObjMsg(off);
 }
 
+// facebook begin T96340746
+// Prints sections layout following same format as llvm-readelf
+// The code and data structures are adopted/ported from ELFDumper.cpp
+static bool printSectionInfo() {
+  unsigned bias = config->is64 ? 0 : 8;
+  ScopedPrinter w(ferrs());
+  auto &os = static_cast<formatted_raw_ostream &>(w.getOStream());
+  struct Field {
+    std::string str;
+    unsigned column;
+
+    Field(StringRef s, unsigned col) : str(std::string(s)), column(col) {}
+    Field(unsigned col) : column(col) {}
+  };
+  auto printField = [&](struct Field f) -> void {
+    if (f.column != 0)
+      os.PadToColumn(f.column);
+    os << f.str;
+    os.flush();
+    ;
+  };
+  Field fields[11] = {
+      {"[Nr]", 2},        {"Name", 7},        {"Type", 25},
+      {"Address", 41},    {"Off", 58 - bias}, {"Size", 65 - bias},
+      {"ES", 72 - bias},  {"Flg", 75 - bias}, {"Lk", 79 - bias},
+      {"Inf", 82 - bias}, {"Al", 86 - bias}};
+
+  os << "Section Headers:\n";
+  os.flush();
+  for (const auto &f : fields) {
+    printField(f);
+  }
+  os << "\n";
+  for (const OutputSection *out : outputSections) {
+    fields[0].str = to_string(out->sectionIndex);
+    fields[1].str = out->name.str();
+    fields[2].str = "not printed";
+    fields[3].str =
+        to_string(format_hex_no_prefix(out->addr, config->is64 ? 16 : 8));
+    fields[4].str = to_string(format_hex_no_prefix(out->offset, 6));
+    fields[5].str = to_string(format_hex_no_prefix(out->size, 6));
+    fields[6].str = to_string(format_hex_no_prefix(out->entsize, 2));
+    fields[7].str = "not printed";
+    fields[8].str = to_string(out->link);
+    fields[9].str = to_string(out->info);
+    fields[10].str = to_string(out->alignment);
+
+    os.PadToColumn(fields[0].column);
+    os << "[" << right_justify(fields[0].str, 2) << "]";
+    for (int i = 1; i < 7; i++)
+      printField(fields[i]);
+    os.PadToColumn(fields[7].column);
+    os << right_justify(fields[7].str, 3);
+    os.PadToColumn(fields[8].column);
+    os << right_justify(fields[8].str, 2);
+    os.PadToColumn(fields[9].column);
+    os << right_justify(fields[9].str, 3);
+    os.PadToColumn(fields[10].column);
+    os << right_justify(fields[10].str, 2);
+    os << "\n";
+  }
+  return true;
+}
+// facebook end T96340746
+
 void elf::reportRangeError(uint8_t *loc, const Relocation &rel, const Twine &v,
                            int64_t min, uint64_t max) {
+  // facebook begin T96340746
+  static bool relocationErrorOccured = printSectionInfo();
+  (void)relocationErrorOccured;
+  // facebook end T96340746
   ErrorPlace errPlace = getErrorPlace(loc);
   std::string hint;
   if (rel.sym && !rel.sym->isSection())
