@@ -56,7 +56,10 @@
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Support/FormattedStream.h" // facebook T96340746
+#include "llvm/Support/ScopedPrinter.h" // facebook T96340746
 #include <algorithm>
+#include <mutex>
 
 using namespace llvm;
 using namespace llvm::ELF;
@@ -96,6 +99,154 @@ static std::string getLocation(InputSectionBase &s, const Symbol &sym,
   return msg + s.getObjMsg(off);
 }
 
+// facebook begin T96340746
+// Prints sections layout following same format as llvm-readelf
+// The code and data structures are adopted/ported from ELFDumper.cpp
+void printSectionInfo() {
+  unsigned bias = config->is64 ? 0 : 8;
+  ScopedPrinter w(ferrs());
+  auto &os = static_cast<formatted_raw_ostream &>(w.getOStream());
+  struct Field {
+    std::string str;
+    unsigned column;
+
+    Field(StringRef s, unsigned col) : str(std::string(s)), column(col) {}
+    Field(unsigned col) : column(col) {}
+  };
+  auto printField = [&](struct Field f) -> void {
+    if (f.column != 0)
+      os.PadToColumn(f.column);
+    os << f.str;
+    os.flush();
+    ;
+  };
+  // clang-format off
+  Field fields[12] = {
+      {"[Nr]", 2},        {"Name", 7},        {"Type", 25},
+      {"Address", 41},    {"Off", 58 - bias}, {"Size", 67 - bias},
+      {"Size(Dec)", 77 - bias},{"ES", 86 - bias},  {"Flg", 89 - bias},
+      {"Lk", 95 - bias},{"     Inf", 98 - bias}, {"  Al", 110 - bias}};
+  // clang-format on
+
+  os << "Section Headers:\n";
+  os.flush();
+  for (const auto &f : fields) {
+    printField(f);
+  }
+  os << "\n";
+  for (const OutputSection *out : outputSections) {
+    fields[0].str = to_string(out->sectionIndex);
+    fields[1].str = out->name.str();
+    fields[2].str = "not printed";
+    fields[3].str =
+        to_string(format_hex_no_prefix(out->addr, config->is64 ? 16 : 8));
+    fields[4].str = to_string(format_hex_no_prefix(out->offset, 8));
+    fields[5].str = to_string(format_hex_no_prefix(out->size, 8));
+    fields[6].str = to_string(format_decimal(out->size, 8));
+    fields[7].str = to_string(format_hex_no_prefix(out->entsize, 2));
+    fields[8].str = "  ?";
+    fields[9].str = to_string(format_decimal(out->link, 2));
+    fields[10].str = to_string(format_decimal(out->info, 8));
+    fields[11].str = to_string(format_decimal(out->addralign, 4));
+
+    os.PadToColumn(fields[0].column);
+    os << "[" << right_justify(fields[0].str, 2) << "]";
+    for (int i = 1; i < 12; i++)
+      printField(fields[i]);
+    os << "\n";
+  }
+}
+
+template <class T> std::string numDecHex(T n) {
+  return Twine(n).str() + " (0x" + to_string(format_hex_no_prefix(n, 8)) + ")";
+}
+
+std::string addExtraHint(uint8_t *loc, const Relocation &rel) {
+  std::string hint;
+  ErrorPlace errPlace = getErrorPlace(loc);
+  auto addSectionHint = [&](SectionBase *sec) {
+    auto isec = dyn_cast_or_null<InputSection>(sec);
+    if (!isec)
+      return;
+    const OutputSection *out = isec->getOutputSection();
+    if (!out)
+      return;
+
+    size_t idx = 0;
+    size_t count = 0;
+    bool found = false;
+
+    for (SectionCommand *bc : out->commands) {
+      auto *isd = dyn_cast<InputSectionDescription>(bc);
+      if (!isd || isd->sections.empty())
+        continue;
+      for (const InputSection *i : isd->sections) {
+        if (i == isec)
+          found = true;
+        if (!found)
+          idx++;
+        count++;
+      }
+    }
+    hint += "\n- output section: " + out->name.str() +
+            "\n  - addr: " + numDecHex(out->addr) +
+            "\n  - offset in ELF file: " + numDecHex(out->offset) +
+            "\n  - size: " + numDecHex(out->size);
+
+    hint += "\n- input section:  " + isec->name.str() +
+            "\n  - input section's offset from start of output section: " +
+            numDecHex(isec->outSecOff) +
+            "\n  - size: " + numDecHex(isec->getSize()) +
+            "\n  - idx in output section: " + Twine(idx).str() +
+            " out of: " + Twine(count).str() + " sections";
+  };
+
+  hint += "\n\n- rel type: " + lld::toString(rel.type) +
+          "\n  - expr: " + Twine(rel.expr).str() +
+          "\n  - offset: " + numDecHex(rel.offset) +
+          "\n  - addend: " + numDecHex(rel.addend);
+  if (rel.sym) {
+    hint +=
+        "\n -- sym: " + lld::toString(*rel.sym) +
+        "\n  - sym.kind: " + Twine(rel.sym->kind()).str() +
+        "\n  - sym.getVA(0): " + numDecHex(rel.sym->getVA(0)) +
+        "\n  - sym.getVA(rel.addend): " + numDecHex(rel.sym->getVA(rel.addend));
+  }
+  if (const InputSection *isec =
+          dyn_cast_or_null<InputSection>(errPlace.isec)) {
+    auto addrLoc =
+        rel.offset + isec->outSecOff + isec->getOutputSection()->addr;
+    hint += "\n -- addrLoc={rel.offset " + numDecHex(rel.offset) +
+            " + isec->outSecOff " + numDecHex(isec->outSecOff) +
+            " + isec->getOutputSection()->addr " +
+            numDecHex(isec->getOutputSection()->addr) +
+            "}: " + numDecHex(addrLoc);
+    if (rel.expr == R_PC && rel.sym && !rel.sym->isUndefWeak()) {
+      hint += "\n -- getRelocTargetVA={rel.sym->getVA(rel.addend) " +
+              numDecHex(rel.sym->getVA(rel.addend)) + " - addrLoc " +
+              numDecHex(addrLoc) +
+              "}: " + numDecHex(rel.sym->getVA(rel.addend) - addrLoc) +
+              " // addrLoc is PC";
+    }
+  }
+
+  addSectionHint(errPlace.isec);
+  addSectionHint(dyn_cast_or_null<Defined>(rel.sym) &&
+                         dyn_cast_or_null<Defined>(rel.sym)->section
+                     ? dyn_cast_or_null<Defined>(rel.sym)->section
+                     : nullptr);
+  hint += R"DOC(
+  ------
+  For potential solutions please see: fburl.com/fbcode_build_size
+  If steps in above link do not apply.
+  Check if the problem has been reported in https://fb.workplace.com/groups/linker.support
+  ------
+  )DOC";
+
+  return hint;
+}
+// facebook end T96340746
+std::once_flag flagPrintSection;
 void elf::reportRangeError(uint8_t *loc, const Relocation &rel, const Twine &v,
                            int64_t min, uint64_t max) {
   ErrorPlace errPlace = getErrorPlace(loc);
@@ -115,6 +266,10 @@ void elf::reportRangeError(uint8_t *loc, const Relocation &rel, const Twine &v,
     hint += "; consider recompiling with -fdebug-types-section to reduce size "
             "of debug sections";
 
+  // facebook begin T96340746
+  std::call_once(flagPrintSection, []() { printSectionInfo(); });
+  hint += addExtraHint(loc, rel);
+  // facebook end T96340746
   errorOrWarn(errPlace.loc + "relocation " + lld::toString(rel.type) +
               " out of range: " + v.str() + " is not in [" + Twine(min).str() +
               ", " + Twine(max).str() + "]" + hint);
