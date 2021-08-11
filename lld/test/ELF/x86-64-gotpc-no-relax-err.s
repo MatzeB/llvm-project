@@ -10,7 +10,9 @@
 # CHECK:      error: {{.*}}:(.text+0x2): relocation R_X86_64_GOTPCRELX out of range: 2147483658 is not in [-2147483648, 2147483647]; references '__stop_data'
 # CHECK-NEXT: >>> defined in <internal>
 # CHECK-EMPTY:
-# CHECK-NEXT: error: {{.*}}:(.text+0x9): relocation R_X86_64_REX_GOTPCRELX out of range: 2147483651 is not in [-2147483648, 2147483647]; references '__stop_data'
+# facebook begin T96340746
+# CHECK: error: {{.*}}:(.text+0x9): relocation R_X86_64_REX_GOTPCRELX out of range: 2147483651 is not in [-2147483648, 2147483647]; references '__stop_data'
+# facebook end T96340746
 # CHECK-NEXT: >>> defined in <internal>
 
 #--- a.s
