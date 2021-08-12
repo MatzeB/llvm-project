@@ -470,6 +470,10 @@ void X86FrameLowering::emitCalleeSavedFrameMoves(
   // Calculate offsets.
   for (std::vector<CalleeSavedInfo>::const_iterator
          I = CSI.begin(), E = CSI.end(); I != E; ++I) {
+    // TODO
+    if (I->isSpilledToReg())
+      continue;
+
     int64_t Offset = MFI.getObjectOffset(I->getFrameIdx());
     unsigned Reg = I->getReg();
     unsigned DwarfReg = MRI->getDwarfRegNum(Reg, true);
@@ -1576,32 +1580,37 @@ void X86FrameLowering::emitPrologue(MachineFunction &MF,
   if (IsFunclet)
     NumBytes = getWinEHFuncletFrameSize(MF);
 
-  // Skip the callee-saved push instructions.
+  // Skip the callee-saved push and copy instructions.
   bool PushedRegs = false;
   int StackOffset = 2 * stackGrowth;
 
   while (MBBI != MBB.end() &&
-         MBBI->getFlag(MachineInstr::FrameSetup) &&
-         (MBBI->getOpcode() == X86::PUSH32r ||
-          MBBI->getOpcode() == X86::PUSH64r)) {
+         MBBI->getFlag(MachineInstr::FrameSetup)) {
+    unsigned Opcode = MBBI->getOpcode();
+    if (Opcode != X86::PUSH32r && Opcode != X86::PUSH64r &&
+        Opcode != TargetOpcode::COPY) {
+      break;
+    }
     PushedRegs = true;
     Register Reg = MBBI->getOperand(0).getReg();
     ++MBBI;
 
-    if (!HasFP && NeedsDwarfCFI) {
-      // Mark callee-saved push instruction.
-      // Define the current CFA rule to use the provided offset.
-      assert(StackSize);
-      BuildCFI(MBB, MBBI, DL,
-               MCCFIInstruction::cfiDefCfaOffset(nullptr, -StackOffset));
-      StackOffset += stackGrowth;
-    }
+    if (Opcode != TargetOpcode::COPY) {
+      if (!HasFP && NeedsDwarfCFI) {
+        // Mark callee-saved push instruction.
+        // Define the current CFA rule to use the provided offset.
+        assert(StackSize);
+        BuildCFI(MBB, MBBI, DL,
+                 MCCFIInstruction::cfiDefCfaOffset(nullptr, -StackOffset));
+        StackOffset += stackGrowth;
+      }
 
-    if (NeedsWinCFI) {
-      HasWinCFI = true;
-      BuildMI(MBB, MBBI, DL, TII.get(X86::SEH_PushReg))
-          .addImm(Reg)
-          .setMIFlag(MachineInstr::FrameSetup);
+      if (NeedsWinCFI) {
+        HasWinCFI = true;
+        BuildMI(MBB, MBBI, DL, TII.get(X86::SEH_PushReg))
+            .addImm(Reg)
+            .setMIFlag(MachineInstr::FrameSetup);
+      }
     }
   }
 
@@ -2089,7 +2098,8 @@ void X86FrameLowering::emitEpilogue(MachineFunction &MF,
       if ((Opc != X86::POP32r || !PI->getFlag(MachineInstr::FrameDestroy)) &&
           (Opc != X86::POP64r || !PI->getFlag(MachineInstr::FrameDestroy)) &&
           (Opc != X86::BTR64ri8 || !PI->getFlag(MachineInstr::FrameDestroy)) &&
-          (Opc != X86::ADD64ri8 || !PI->getFlag(MachineInstr::FrameDestroy)))
+          (Opc != X86::ADD64ri8 || !PI->getFlag(MachineInstr::FrameDestroy)) &&
+          (Opc != TargetOpcode::COPY || !PI->getFlag(MachineInstr::FrameDestroy)))
         break;
       FirstCSPop = PI;
     }
@@ -2458,12 +2468,35 @@ bool X86FrameLowering::assignCalleeSavedSpillSlots(
     }
   }
 
+  unsigned lastUsedXmm = 0;
+
   // Assign slots for GPRs. It increases frame size.
   for (unsigned i = CSI.size(); i != 0; --i) {
     unsigned Reg = CSI[i - 1].getReg();
 
     if (!X86::GR64RegClass.contains(Reg) && !X86::GR32RegClass.contains(Reg))
       continue;
+
+    // Try to spill to XMM register.
+    if (Reg != X86::RBP && X86::GR64RegClass.contains(Reg) && !MF.callsUnwindInit()) {
+      const MachineRegisterInfo &MRI = MF.getRegInfo();
+      MCRegister SpillReg = MCRegister::NoRegister;
+      for (unsigned NumRegs = X86::FR64RegClass.getNumRegs();
+           lastUsedXmm < NumRegs; lastUsedXmm++) {
+        MCRegister Candidate = X86::FR64RegClass.getRegister(lastUsedXmm);
+        if (!MRI.isPhysRegUsed(Candidate)) {
+          SpillReg = Candidate;
+          lastUsedXmm++;
+          break;
+        }
+      }
+      if (SpillReg != MCRegister::NoRegister) {
+        LLVM_DEBUG(dbgs() << "Save " << printReg(Reg, TRI)
+                   << " by copy to " << printReg(SpillReg, TRI) << '\n');
+        CSI[i - 1].setDstReg(SpillReg);
+        continue;
+      }
+    }
 
     SpillSlotOffset -= SlotSize;
     CalleeSavedFrameSize += SlotSize;
@@ -2523,7 +2556,8 @@ bool X86FrameLowering::spillCalleeSavedRegisters(
   const MachineFunction &MF = *MBB.getParent();
   unsigned Opc = STI.is64Bit() ? X86::PUSH64r : X86::PUSH32r;
   for (unsigned i = CSI.size(); i != 0; --i) {
-    unsigned Reg = CSI[i - 1].getReg();
+    const CalleeSavedInfo& CI = CSI[i - 1];
+    unsigned Reg = CI.getReg();
 
     if (!X86::GR64RegClass.contains(Reg) && !X86::GR32RegClass.contains(Reg))
       continue;
@@ -2543,6 +2577,14 @@ bool X86FrameLowering::spillCalleeSavedRegisters(
           break;
         }
       }
+    }
+
+    if (CI.isSpilledToReg()) {
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY),
+              CI.getDstReg())
+        .addReg(Reg, getKillRegState(CanKill))
+        .setMIFlag(MachineInstr::FrameSetup);
+      continue;
     }
 
     // Do not set a kill flag on values that are also marked as live-in. This
@@ -2652,11 +2694,18 @@ bool X86FrameLowering::restoreCalleeSavedRegisters(
 
   // POP GPRs.
   unsigned Opc = STI.is64Bit() ? X86::POP64r : X86::POP32r;
-  for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
-    unsigned Reg = CSI[i].getReg();
+  for (const CalleeSavedInfo& CI : CSI) {
+    unsigned Reg = CI.getReg();
     if (!X86::GR64RegClass.contains(Reg) &&
         !X86::GR32RegClass.contains(Reg))
       continue;
+
+    if (CI.isSpilledToReg()) {
+      BuildMI(MBB, MI, DL, TII.get(TargetOpcode::COPY), Reg)
+        .addReg(CI.getDstReg(), RegState::Kill)
+        .setMIFlag(MachineInstr::FrameDestroy);
+      continue;
+    }
 
     BuildMI(MBB, MI, DL, TII.get(Opc), Reg)
         .setMIFlag(MachineInstr::FrameDestroy);

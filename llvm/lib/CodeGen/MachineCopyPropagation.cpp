@@ -749,6 +749,10 @@ void MachineCopyPropagation::ForwardCopyPropagateBlock(MachineBasicBlock &MBB) {
   // since we don't want to trust live-in lists.
   if (MBB.succ_empty()) {
     for (MachineInstr *MaybeDead : MaybeDeadCopies) {
+      // Skip COPYs used as part of FrameDestroy, since the code here just
+      // assumes nothing is live-out in a block without successors...
+      if (MaybeDead->getFlag(MachineInstr::FrameDestroy))
+        continue;
       LLVM_DEBUG(dbgs() << "MCP: Removing copy due to no live-out succ: ";
                  MaybeDead->dump());
       assert(!MRI->isReserved(MaybeDead->getOperand(0).getReg()));
