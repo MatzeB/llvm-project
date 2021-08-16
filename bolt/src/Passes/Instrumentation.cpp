@@ -27,6 +27,12 @@ cl::opt<std::string> InstrumentationFilename(
              "/tmp/prof.fdata)"),
     cl::init("/tmp/prof.fdata"), cl::Optional, cl::cat(BoltInstrCategory));
 
+cl::opt<std::string> InstrumentationBinpath(
+    "instrumentation-binpath",
+    cl::desc("path to instumented binary in case if /proc/self/map_files "
+             "is not accessible due to access restriction issues"),
+    cl::Optional, cl::cat(BoltInstrCategory));
+
 cl::opt<bool> InstrumentationFileAppendPID(
     "instrumentation-file-append-pid",
     cl::desc("append PID to saved profile file name (default: false)"),
@@ -225,8 +231,8 @@ void Instrumentation::instrumentIndirectTarget(BinaryBasicBlock &BB,
   bool IsTailCall = BC.MIB->isTailCall(*Iter);
   std::vector<MCInst> CounterInstrs = BC.MIB->createInstrumentedIndirectCall(
       *Iter, IsTailCall,
-      IsTailCall ? Summary->IndTailCallHandlerFunc
-                 : Summary->IndCallHandlerFunc,
+      IsTailCall ? IndTailCallHandlerExitBBFunction->getSymbol()
+                 : IndCallHandlerExitBBFunction->getSymbol(),
       IndCallSiteID, &*BC.Ctx);
 
   Iter = BB.eraseInstruction(Iter);
@@ -531,10 +537,12 @@ void Instrumentation::runOnFunctions(BinaryContext &BC) {
                                   /*Alignment=*/1,
                                   /*IsReadOnly=*/true, ELF::SHT_NOTE);
 
-  Summary->IndCallHandlerFunc =
-      BC.Ctx->getOrCreateSymbol("__bolt_trampoline_ind_call");
-  Summary->IndTailCallHandlerFunc =
-      BC.Ctx->getOrCreateSymbol("__bolt_trampoline_ind_tailcall");
+  Summary->IndCallCounterFuncPtr =
+      BC.Ctx->getOrCreateSymbol("__bolt_ind_call_counter_func_pointer");
+  Summary->IndTailCallCounterFuncPtr =
+      BC.Ctx->getOrCreateSymbol("__bolt_ind_tailcall_counter_func_pointer");
+
+  createAuxiliaryFunctions(BC);
 
   ParallelUtilities::PredicateTy SkipPredicate = [&](const BinaryFunction &BF) {
     return (!BF.isSimple() || BF.isIgnored() ||
@@ -549,8 +557,6 @@ void Instrumentation::runOnFunctions(BinaryContext &BC) {
   ParallelUtilities::runOnEachFunctionWithUniqueAllocId(
       BC, ParallelUtilities::SchedulingPolicy::SP_INST_QUADRATIC, WorkFun,
       SkipPredicate, "instrumentation", /* ForceSequential=*/true);
-
-  createAuxiliaryFunctions(BC);
 
   if (BC.isMachO()) {
     if (BC.StartFunctionAddress) {
@@ -616,13 +622,32 @@ void Instrumentation::createAuxiliaryFunctions(BinaryContext &BC) {
     return Func;
   };
 
-  Summary->InitialIndCallHandlerFunction =
-      createSimpleFunction("__bolt_instr_default_ind_call_handler",
-                           BC.MIB->createInstrumentedNoopIndCallHandler());
+  // Here we are creating a set of functions to handle BB entry/exit.
+  // IndCallHandlerExitBB contains instructions to finish handling traffic to an
+  // indirect call. We pass it to createInstrumentedIndCallHandlerEntryBB(),
+  // which will check if a pointer to runtime library traffic accounting
+  // function was initialized (it is done during initialization of runtime
+  // library). If it is so - calls it. Then this routine returns to normal
+  // execution by jumping to exit BB.
+  BinaryFunction *IndCallHandlerExitBB =
+      createSimpleFunction("__bolt_instr_ind_call_handler",
+                           BC.MIB->createInstrumentedIndCallHandlerExitBB());
 
-  Summary->InitialIndTailCallHandlerFunction =
-      createSimpleFunction("__bolt_instr_default_ind_tailcall_handler",
-                           BC.MIB->createInstrumentedNoopIndTailCallHandler());
+  IndCallHandlerExitBBFunction =
+      createSimpleFunction("__bolt_instr_ind_call_handler_func",
+                           BC.MIB->createInstrumentedIndCallHandlerEntryBB(
+                               Summary->IndCallCounterFuncPtr,
+                               IndCallHandlerExitBB->getSymbol(), &*BC.Ctx));
+
+  BinaryFunction *IndTailCallHandlerExitBB = createSimpleFunction(
+      "__bolt_instr_ind_tail_call_handler",
+      BC.MIB->createInstrumentedIndTailCallHandlerExitBB());
+
+  IndTailCallHandlerExitBBFunction = createSimpleFunction(
+      "__bolt_instr_ind_tailcall_handler_func",
+      BC.MIB->createInstrumentedIndCallHandlerEntryBB(
+          Summary->IndTailCallCounterFuncPtr,
+          IndTailCallHandlerExitBB->getSymbol(), &*BC.Ctx));
 
   createSimpleFunction("__bolt_num_counters_getter",
                        BC.MIB->createNumCountersGetter(BC.Ctx.get()));
@@ -632,6 +657,33 @@ void Instrumentation::createAuxiliaryFunctions(BinaryContext &BC) {
                        BC.MIB->createInstrTablesGetter(BC.Ctx.get()));
   createSimpleFunction("__bolt_instr_num_funcs_getter",
                        BC.MIB->createInstrNumFuncsGetter(BC.Ctx.get()));
+
+  if (BC.isELF()) {
+    if (BC.StartFunctionAddress) {
+      BinaryFunction *Start =
+          BC.getBinaryFunctionAtAddress(*BC.StartFunctionAddress);
+      assert(Start && "Entry point function not found");
+      const MCSymbol *StartSym = Start->getSymbol();
+      createSimpleFunction(
+          "__bolt_start_trampoline",
+          BC.MIB->createSymbolTrampoline(StartSym, BC.Ctx.get()));
+    }
+    if (BC.FiniFunctionAddress) {
+      BinaryFunction *Fini =
+          BC.getBinaryFunctionAtAddress(*BC.FiniFunctionAddress);
+      assert(Fini && "Finalization function not found");
+      const MCSymbol *FiniSym = Fini->getSymbol();
+      createSimpleFunction(
+          "__bolt_fini_trampoline",
+          BC.MIB->createSymbolTrampoline(FiniSym, BC.Ctx.get()));
+    } else {
+      // Create dummy return function for trampoline to avoid issues
+      // with unknown symbol in runtime library. E.g. for static PIE
+      // executable
+      createSimpleFunction("__bolt_fini_trampoline",
+                           BC.MIB->createDummyReturnFunction(BC.Ctx.get()));
+    }
+  }
 }
 
 void Instrumentation::setupRuntimeLibrary(BinaryContext &BC) {

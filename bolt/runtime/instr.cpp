@@ -53,15 +53,16 @@
   {}
 #endif
 
+#pragma GCC visibility push(hidden)
+
+extern "C" {
 
 #if defined(__APPLE__)
-extern "C" {
 extern uint64_t* _bolt_instr_locations_getter();
 extern uint32_t _bolt_num_counters_getter();
 
 extern uint8_t* _bolt_instr_tables_getter();
 extern uint32_t _bolt_instr_num_funcs_getter();
-}
 
 #else
 
@@ -90,6 +91,8 @@ extern bool __bolt_instr_no_counters_clear;
 extern bool __bolt_instr_wait_forks;
 // Filename to dump data to
 extern char __bolt_instr_filename[];
+// Instumented binary file path
+extern char __bolt_instr_binpath[];
 // If true, append current PID to the fdata filename when creating it so
 // different invocations of the same program can be differentiated.
 extern bool __bolt_instr_use_pid;
@@ -100,14 +103,15 @@ extern bool __bolt_instr_use_pid;
 // only support resolving dependencies from this file to the output of BOLT,
 // *not* the other way around.
 // TODO: We need better linking support to make that happen.
-extern void (*__bolt_trampoline_ind_call)();
-extern void (*__bolt_trampoline_ind_tailcall)();
-// Function pointers to init/fini routines in the binary, so we can resume
-// regular execution of these functions that we hooked
-extern void (*__bolt_instr_init_ptr)();
-extern void (*__bolt_instr_fini_ptr)();
+extern void (*__bolt_ind_call_counter_func_pointer)();
+extern void (*__bolt_ind_tailcall_counter_func_pointer)();
+// Function pointers to init/fini trampoline routines in the binary, so we can
+// resume regular execution of these functions that we hooked
+extern void __bolt_start_trampoline();
+extern void __bolt_fini_trampoline();
 
 #endif
+}
 
 namespace {
 
@@ -566,12 +570,85 @@ FunctionDescription::FunctionDescription(const uint8_t *FuncDesc) {
 /// Read and mmap descriptions written by BOLT from the executable's notes
 /// section
 #if defined(HAVE_ELF_H) and !defined(__APPLE__)
+
+void *__attribute__((noinline)) __get_pc() {
+  return __builtin_extract_return_addr(__builtin_return_address(0));
+}
+
+/// Get string with address and parse it to hex pair <StartAddress, EndAddress>
+bool parseAddressRange(const char *Str, uint64_t &StartAddress,
+                       uint64_t &EndAddress) {
+  if (!Str)
+    return false;
+  // Parsed string format: <hex1>-<hex2>
+  StartAddress = hexToLong(Str, '-');
+  while (*Str && *Str != '-')
+    ++Str;
+  if (!*Str)
+    return false;
+  ++Str; // swallow '-'
+  EndAddress = hexToLong(Str);
+  return true;
+}
+
+/// Get full path to the real binary by getting current virtual address
+/// and searching for the appropriate link in address range in
+/// /proc/self/map_files
+static char *getBinaryPath() {
+  const uint32_t BufSize = 1024;
+  const uint32_t NameMax = 256;
+  const char DirPath[] = "/proc/self/map_files/";
+  static char TargetPath[NameMax] = {};
+  char Buf[BufSize];
+
+  if (__bolt_instr_binpath[0] != '\0')
+    return __bolt_instr_binpath;
+
+  if (TargetPath[0] != '\0')
+    return TargetPath;
+
+  unsigned long CurAddr = (unsigned long)__get_pc();
+  uint64_t FDdir = __open(DirPath,
+                          /*flags=*/0 /*O_RDONLY*/,
+                          /*mode=*/0666);
+  assert(static_cast<int64_t>(FDdir) > 0,
+         "failed to open /proc/self/map_files");
+
+  while (long Nread = __getdents(FDdir, (struct dirent *)Buf, BufSize)) {
+    assert(static_cast<int64_t>(Nread) != -1, "failed to get folder entries");
+
+    struct dirent *d;
+    for (long Bpos = 0; Bpos < Nread; Bpos += d->d_reclen) {
+      d = (struct dirent *)(Buf + Bpos);
+
+      uint64_t StartAddress, EndAddress;
+      if (!parseAddressRange(d->d_name, StartAddress, EndAddress))
+        continue;
+      if (CurAddr < StartAddress || CurAddr > EndAddress)
+        continue;
+      char FindBuf[NameMax];
+      char *C = strCopy(FindBuf, DirPath, NameMax);
+      C = strCopy(C, d->d_name, NameMax - (C - FindBuf));
+      *C = '\0';
+      uint32_t Ret = __readlink(FindBuf, TargetPath, sizeof(TargetPath));
+      assert(Ret != -1 && Ret != BufSize, "readlink error");
+      TargetPath[Ret] = '\0';
+      return TargetPath;
+    }
+  }
+  return nullptr;
+}
+
 ProfileWriterContext readDescriptions() {
   ProfileWriterContext Result;
-  uint64_t FD = __open("/proc/self/exe",
+  char *BinPath = getBinaryPath();
+  assert(BinPath && BinPath[0] != '\0', "failed to find binary path");
+
+  uint64_t FD = __open(BinPath,
                        /*flags=*/0 /*O_RDONLY*/,
                        /*mode=*/0666);
-  assert(static_cast<int64_t>(FD) > 0, "Failed to open /proc/self/exe");
+  assert(static_cast<int64_t>(FD) > 0, "failed to open binary path");
+
   Result.FileDesc = FD;
 
   // mmap our binary to memory
@@ -1366,7 +1443,8 @@ extern "C" void __bolt_instr_clear_counters() {
 ///    call this function directly to get your profile written to disk
 ///    on demand.
 ///
-extern "C" void __bolt_instr_data_dump() {
+extern "C" void __attribute((force_align_arg_pointer))
+__bolt_instr_data_dump() {
   // Already dumping
   if (!GlobalWriteProfileMutex->acquire())
     return;
@@ -1451,7 +1529,7 @@ extern "C" void __bolt_instr_indirect_call();
 extern "C" void __bolt_instr_indirect_tailcall();
 
 /// Initialization code
-extern "C" void __bolt_instr_setup() {
+extern "C" void __attribute((force_align_arg_pointer)) __bolt_instr_setup() {
   const uint64_t CountersStart =
       reinterpret_cast<uint64_t>(&__bolt_instr_locations[0]);
   const uint64_t CountersEnd = alignTo(
@@ -1466,8 +1544,8 @@ extern "C" void __bolt_instr_setup() {
          0x3 /*PROT_READ|PROT_WRITE*/,
          0x31 /*MAP_ANONYMOUS | MAP_SHARED | MAP_FIXED*/, -1, 0);
 
-  __bolt_trampoline_ind_call = __bolt_instr_indirect_call;
-  __bolt_trampoline_ind_tailcall = __bolt_instr_indirect_tailcall;
+  __bolt_ind_call_counter_func_pointer = __bolt_instr_indirect_call;
+  __bolt_ind_tailcall_counter_func_pointer = __bolt_instr_indirect_tailcall;
   // Conservatively reserve 100MiB shared pages
   GlobalAlloc.setMaxSize(0x6400000);
   GlobalAlloc.setShared(true);
@@ -1487,7 +1565,8 @@ extern "C" void __bolt_instr_setup() {
   }
 }
 
-extern "C" void instrumentIndirectCall(uint64_t Target, uint64_t IndCallID) {
+extern "C" __attribute((force_align_arg_pointer)) void
+instrumentIndirectCall(uint64_t Target, uint64_t IndCallID) {
   GlobalIndCallCounters[IndCallID].incrementVal(Target, GlobalAlloc);
 }
 
@@ -1496,27 +1575,22 @@ extern "C" void instrumentIndirectCall(uint64_t Target, uint64_t IndCallID) {
 extern "C" __attribute((naked)) void __bolt_instr_indirect_call()
 {
   __asm__ __volatile__(SAVE_ALL
-                       "mov 0x90(%%rsp), %%rdi\n"
-                       "mov 0x88(%%rsp), %%rsi\n"
+                       "mov 0xa0(%%rsp), %%rdi\n"
+                       "mov 0x98(%%rsp), %%rsi\n"
                        "call instrumentIndirectCall\n"
                        RESTORE_ALL
-                       "pop %%rdi\n"
-                       "add $16, %%rsp\n"
-                       "xchg (%%rsp), %%rdi\n"
-                       "jmp *-8(%%rsp)\n"
+                       "ret\n"
                        :::);
 }
 
 extern "C" __attribute((naked)) void __bolt_instr_indirect_tailcall()
 {
   __asm__ __volatile__(SAVE_ALL
-                       "mov 0x88(%%rsp), %%rdi\n"
-                       "mov 0x80(%%rsp), %%rsi\n"
+                       "mov 0x98(%%rsp), %%rdi\n"
+                       "mov 0x90(%%rsp), %%rsi\n"
                        "call instrumentIndirectCall\n"
                        RESTORE_ALL
-                       "add $16, %%rsp\n"
-                       "pop %%rdi\n"
-                       "jmp *-16(%%rsp)\n"
+                       "ret\n"
                        :::);
 }
 
@@ -1526,13 +1600,13 @@ extern "C" __attribute((naked)) void __bolt_instr_start()
   __asm__ __volatile__(SAVE_ALL
                        "call __bolt_instr_setup\n"
                        RESTORE_ALL
-                       "jmp *__bolt_instr_init_ptr(%%rip)\n"
+                       "jmp __bolt_start_trampoline\n"
                        :::);
 }
 
 /// This is hooking into ELF's DT_FINI
 extern "C" void __bolt_instr_fini() {
-  __bolt_instr_fini_ptr();
+  __bolt_fini_trampoline();
   if (__bolt_instr_sleep_time == 0)
     __bolt_instr_data_dump();
   DEBUG(report("Finished.\n"));

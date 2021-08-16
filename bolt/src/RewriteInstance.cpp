@@ -566,7 +566,8 @@ void RewriteInstance::discoverStorage() {
   ELF64LE::PhdrRange PHs =
       cantFail(Obj.program_headers(), "program_headers() failed");
   for (const ELF64LE::Phdr &Phdr : PHs) {
-    if (Phdr.p_type == ELF::PT_LOAD) {
+    switch (Phdr.p_type) {
+    case ELF::PT_LOAD:
       BC->FirstAllocAddress = std::min(BC->FirstAllocAddress,
                                        static_cast<uint64_t>(Phdr.p_vaddr));
       NextAvailableAddress = std::max(NextAvailableAddress,
@@ -579,6 +580,10 @@ void RewriteInstance::discoverStorage() {
                                                      Phdr.p_offset,
                                                      Phdr.p_filesz,
                                                      Phdr.p_align};
+      break;
+    case ELF::PT_INTERP:
+      BC->HasInterpHeader = true;
+      break;
     }
   }
 
@@ -1360,6 +1365,11 @@ void RewriteInstance::disassemblePLT() {
                  << Twine::utohexstr(InstrOffset) << '\n';
           exit(1);
         }
+
+        // Check if the entry size needs adjustment.
+        if (EntryOffset == 0 && BC->MIB->isTerminateBranch(Instruction) &&
+            EntrySize == 8)
+          EntrySize = 16;
 
         if (BC->MIB->isIndirectBranch(Instruction))
           break;
@@ -5010,6 +5020,15 @@ void RewriteInstance::patchELFDynamic(ELFObjectFile<ELFT> *File) {
           }
         }
       }
+      if (Dyn.getTag() == ELF::DT_INIT && !BC->HasInterpHeader) {
+        if (auto *RtLibrary = BC->getRuntimeLibrary()) {
+          if (auto Addr = RtLibrary->getRuntimeStartAddress()) {
+            LLVM_DEBUG(dbgs() << "BOLT-DEBUG: Set DT_INIT to 0x"
+                              << Twine::utohexstr(Addr) << '\n');
+            NewDE.d_un.d_ptr = Addr;
+          }
+        }
+      }
       break;
     case ELF::DT_FLAGS:
       if (BC->RequiresZNow) {
@@ -5056,6 +5075,7 @@ void RewriteInstance::readELFDynamic(ELFObjectFile<ELFT> *File) {
 
   if (!DynamicPhdr) {
     outs() << "BOLT-INFO: static input executable detected\n";
+    // TODO: static PIE executable might have dynamic header
     BC->IsStaticExecutable = true;
     return;
   }
@@ -5069,6 +5089,12 @@ void RewriteInstance::readELFDynamic(ELFObjectFile<ELFT> *File) {
 
   for (const Elf_Dyn &Dyn : DynamicEntries) {
     switch (Dyn.d_tag) {
+    case ELF::DT_INIT:
+      if (!BC->HasInterpHeader) {
+        LLVM_DEBUG(dbgs() << "BOLT-DEBUG: Set start function address\n");
+        BC->StartFunctionAddress = Dyn.getPtr();
+      }
+      break;
     case ELF::DT_FINI:
       BC->FiniFunctionAddress = Dyn.getPtr();
       break;
@@ -5233,8 +5259,7 @@ void RewriteInstance::rewriteFile() {
         continue;
       OS.seek(BF.getFileOffset());
       for (unsigned I = 0; I < BF.getMaxSize(); ++I)
-        OS.write((unsigned char)
-            Streamer->getContext().getAsmInfo()->getTrapFillValue());
+        OS.write((unsigned char)BC->MIB->getTrapFillValue());
     }
     OS.seek(SavedPos);
   }
@@ -5425,7 +5450,8 @@ bool RewriteInstance::willOverwriteSection(StringRef SectionName) {
 }
 
 bool RewriteInstance::isDebugSection(StringRef SectionName) {
-  if (SectionName.startswith(".debug_") || SectionName == ".gdb_index")
+  if (SectionName.startswith(".debug_") || SectionName == ".gdb_index" ||
+      SectionName == ".stab" || SectionName == ".stabstr")
     return true;
 
   return false;

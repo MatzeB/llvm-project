@@ -120,6 +120,19 @@ bool MCPlusBuilder::equals(const MCTargetExpr &A, const MCTargetExpr &B,
     llvm_unreachable("target-specific expressions are unsupported");
 }
 
+void MCPlusBuilder::setTailCall(MCInst &Inst) {
+  assert(!hasAnnotation(Inst, MCAnnotation::kTailCall));
+  setAnnotationOpValue(Inst, MCAnnotation::kTailCall, true);
+}
+
+bool MCPlusBuilder::isTailCall(const MCInst &Inst) const {
+  if (hasAnnotation(Inst, MCAnnotation::kTailCall))
+    return true;
+  if (getConditionalTailCall(Inst))
+    return true;
+  return false;
+}
+
 Optional<MCLandingPad> MCPlusBuilder::getEHInfo(const MCInst &Inst) const {
   if (!isCall(Inst))
     return NoneType();
@@ -240,12 +253,16 @@ bool MCPlusBuilder::removeAnnotation(MCInst &Inst, unsigned Index) {
   return false;
 }
 
-void MCPlusBuilder::stripAnnotations(MCInst &Inst) {
+void MCPlusBuilder::stripAnnotations(MCInst &Inst, bool KeepTC) {
   MCInst *AnnotationInst = getAnnotationInst(Inst);
   if (!AnnotationInst)
     return;
+  // Preserve TailCall annotation.
+  auto IsTC = hasAnnotation(Inst, MCAnnotation::kTailCall);
 
   Inst.erase(std::prev(Inst.end()));
+  if (KeepTC && IsTC)
+    setTailCall(Inst);
 }
 
 void

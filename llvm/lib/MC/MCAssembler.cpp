@@ -286,6 +286,43 @@ bool MCAssembler::evaluateFixup(const MCAsmLayout &Layout,
   return IsResolved;
 }
 
+/// Check if the branch crosses the boundary.
+///
+/// \param StartAddr start address of the fused/unfused branch.
+/// \param Size size of the fused/unfused branch.
+/// \param BoundaryAlignment alignment requirement of the branch.
+/// \returns true if the branch cross the boundary.
+static bool mayCrossBoundary(uint64_t StartAddr, uint64_t Size,
+                             Align BoundaryAlignment) {
+  uint64_t EndAddr = StartAddr + Size;
+  return (StartAddr >> Log2(BoundaryAlignment)) !=
+         ((EndAddr - 1) >> Log2(BoundaryAlignment));
+}
+
+/// Check if the branch is against the boundary.
+///
+/// \param StartAddr start address of the fused/unfused branch.
+/// \param Size size of the fused/unfused branch.
+/// \param BoundaryAlignment alignment requirement of the branch.
+/// \returns true if the branch is against the boundary.
+static bool isAgainstBoundary(uint64_t StartAddr, uint64_t Size,
+                              Align BoundaryAlignment) {
+  uint64_t EndAddr = StartAddr + Size;
+  return (EndAddr & (BoundaryAlignment.value() - 1)) == 0;
+}
+
+/// Check if the branch needs padding.
+///
+/// \param StartAddr start address of the fused/unfused branch.
+/// \param Size size of the fused/unfused branch.
+/// \param BoundaryAlignment alignment requirement of the branch.
+/// \returns true if the branch needs padding.
+static bool needPadding(uint64_t StartAddr, uint64_t Size,
+                        Align BoundaryAlignment) {
+  return mayCrossBoundary(StartAddr, Size, BoundaryAlignment) ||
+         isAgainstBoundary(StartAddr, Size, BoundaryAlignment);
+}
+
 uint64_t MCAssembler::computeFragmentSize(const MCAsmLayout &Layout,
                                           const MCFragment &F) const {
   assert(getBackendPtr() && "Requires assembler backend");
@@ -347,31 +384,38 @@ uint64_t MCAssembler::computeFragmentSize(const MCAsmLayout &Layout,
   }
 
   case MCFragment::FT_NeverAlign: {
+    // Disclaimer: NeverAlign fragment size depends on the size of its immediate
+    // successor, but NeverAlign need not be a MCRelaxableFragment.
+    // NeverAlign fragment size is recomputed if the successor is relaxed:
+    // - If RelaxableFragment is relaxed, it gets invalidated by marking its
+    // predecessor as LastValidFragment.
+    // - This forces the assembler to call MCAsmLayout::layoutFragment on that
+    // relaxable fragment, which in turn will always ask the predecessor to
+    // compute its size (see "computeFragmentSize(prev)" in layoutFragment).
+    //
+    // In short, the simplest way to ensure that computeFragmentSize() is sane
+    // is to establish the following rule: it should never examine fragments
+    // after the current fragment in the section. If we logically need to
+    // examine any fragment after the current fragment, we need to do that using
+    // relaxation, inside MCAssembler::layoutSectionOnce.
     const MCNeverAlignFragment &NAF = cast<MCNeverAlignFragment>(F);
+    const MCFragment *NF = F.getNextNode();
     uint64_t Offset = Layout.getFragmentOffset(&NAF);
-    unsigned Size = 0;
-    uint64_t OffsetToAvoid = 0;
-    // Calculate offset to avoid in order to avoid aligning the end of the
-    // next fragment
-    if (const auto *NextFrag = dyn_cast<MCRelaxableFragment>(F.getNextNode())) {
-      OffsetToAvoid = NAF.getAlignment() -
-        (NextFrag->getContents().size() % NAF.getAlignment());
-    } else if (const auto *NextFrag =
-        dyn_cast<MCDataFragment>(F.getNextNode())) {
-      OffsetToAvoid = NAF.getAlignment() -
-        (NextFrag->getContents().size() % NAF.getAlignment());
+    size_t NextFragSize = 0;
+    if (const auto *NextFrag = dyn_cast<MCRelaxableFragment>(NF)) {
+      NextFragSize = NextFrag->getContents().size();
+    } else if (const auto *NextFrag = dyn_cast<MCDataFragment>(NF)) {
+      NextFragSize = NextFrag->getContents().size();
+    } else {
+      llvm_unreachable("Didn't find the expected fragment after NeverAlign");
     }
-    // Check if the current offset matches the alignment plus offset we want to
-    // avoid
-    if (Offset % NAF.getAlignment() == OffsetToAvoid) {
-      // Avoid this alignment by introducing one extra byte
-      Size = 1;
-      if (Size > 0 && NAF.hasEmitNops()) {
-        while (Size % getBackend().getMinimumNopSize())
-          Size += 1;
-      }
+    // Check if the next fragment ends at the alignment we want to avoid.
+    if (isAgainstBoundary(Offset, NextFragSize, Align(NAF.getAlignment()))) {
+      // Avoid this alignment by introducing minimum nop.
+      assert(getBackend().getMinimumNopSize() != NAF.getAlignment());
+      return getBackend().getMinimumNopSize();
     }
-    return Size;
+    return 0;
   }
 
   case MCFragment::FT_Org: {
@@ -598,37 +642,9 @@ static void writeFragment(raw_ostream &OS, const MCAssembler &Asm,
   }
 
   case MCFragment::FT_NeverAlign: {
-    const MCNeverAlignFragment &NAF = cast<MCNeverAlignFragment>(F);
-    assert(NAF.getValueSize() && "Invalid virtual align in concrete fragment!");
-
-    uint64_t Count = FragmentSize / NAF.getValueSize();
-    if (Count == 0)
-      break;
-    assert(Count * NAF.getValueSize() == FragmentSize);
-
-    if (NAF.hasEmitNops()) {
-      if (!Asm.getBackend().writeNopData(OS, Count))
-        report_fatal_error("unable to write nop sequence of " +
-            Twine(Count) + " bytes");
-      break;
-    }
-
-    // Otherwise, write out in multiples of the value size.
-    for (uint64_t i = 0; i != Count; ++i) {
-      switch (NAF.getValueSize()) {
-        default: llvm_unreachable("Invalid size!");
-        case 1: OS << char(NAF.getValue()); break;
-        case 2:
-          support::endian::write<uint16_t>(OS, NAF.getValue(), Endian);
-          break;
-        case 4:
-          support::endian::write<uint32_t>(OS, NAF.getValue(), Endian);
-          break;
-        case 8:
-          support::endian::write<uint64_t>(OS, NAF.getValue(), Endian);
-          break;
-      }
-    }
+    if (!Asm.getBackend().writeNopData(OS, FragmentSize))
+      report_fatal_error("unable to write nop sequence of " +
+                         Twine(FragmentSize) + " bytes");
     break;
   }
 
@@ -819,11 +835,6 @@ void MCAssembler::writeSectionData(raw_ostream &OS, const MCSection *Sec,
         assert((cast<MCAlignFragment>(F).getValueSize() == 0 ||
                 cast<MCAlignFragment>(F).getValue() == 0) &&
                "Invalid align in virtual section!");
-        break;
-      case MCFragment::FT_NeverAlign:
-        assert((cast<MCNeverAlignFragment>(F).getValueSize() == 0 ||
-                cast<MCNeverAlignFragment>(F).getValue() == 0) &&
-            "Invalid neveralign in virtual section!");
         break;
       case MCFragment::FT_Fill:
         assert((cast<MCFillFragment>(F).getValue() == 0) &&
@@ -1084,43 +1095,6 @@ bool MCAssembler::relaxLEB(MCAsmLayout &Layout, MCLEBFragment &LF) {
   else
     encodeULEB128(Value, OSE, OldSize);
   return OldSize != LF.getContents().size();
-}
-
-/// Check if the branch crosses the boundary.
-///
-/// \param StartAddr start address of the fused/unfused branch.
-/// \param Size size of the fused/unfused branch.
-/// \param BoundaryAlignment alignment requirement of the branch.
-/// \returns true if the branch cross the boundary.
-static bool mayCrossBoundary(uint64_t StartAddr, uint64_t Size,
-                             Align BoundaryAlignment) {
-  uint64_t EndAddr = StartAddr + Size;
-  return (StartAddr >> Log2(BoundaryAlignment)) !=
-         ((EndAddr - 1) >> Log2(BoundaryAlignment));
-}
-
-/// Check if the branch is against the boundary.
-///
-/// \param StartAddr start address of the fused/unfused branch.
-/// \param Size size of the fused/unfused branch.
-/// \param BoundaryAlignment alignment requirement of the branch.
-/// \returns true if the branch is against the boundary.
-static bool isAgainstBoundary(uint64_t StartAddr, uint64_t Size,
-                              Align BoundaryAlignment) {
-  uint64_t EndAddr = StartAddr + Size;
-  return (EndAddr & (BoundaryAlignment.value() - 1)) == 0;
-}
-
-/// Check if the branch needs padding.
-///
-/// \param StartAddr start address of the fused/unfused branch.
-/// \param Size size of the fused/unfused branch.
-/// \param BoundaryAlignment alignment requirement of the branch.
-/// \returns true if the branch needs padding.
-static bool needPadding(uint64_t StartAddr, uint64_t Size,
-                        Align BoundaryAlignment) {
-  return mayCrossBoundary(StartAddr, Size, BoundaryAlignment) ||
-         isAgainstBoundary(StartAddr, Size, BoundaryAlignment);
 }
 
 bool MCAssembler::relaxBoundaryAlign(MCAsmLayout &Layout,

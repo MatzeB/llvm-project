@@ -264,6 +264,23 @@ void reportNumber(const char *Msg, uint64_t Num, uint32_t Base) {
 
 void report(const char *Msg) { __write(2, Msg, strLen(Msg)); }
 
+unsigned long hexToLong(const char *Str, char Terminator = '\0') {
+  unsigned long Res = 0;
+  while (*Str != Terminator) {
+    Res <<= 4;
+    if ('0' <= *Str && *Str <= '9')
+      Res += *Str++ - '0';
+    else if ('a' <= *Str && *Str <= 'f')
+      Res += *Str++ - 'a' + 10;
+    else if ('A' <= *Str && *Str <= 'F')
+      Res += *Str++ - 'A' + 10;
+    else {
+      return 0;
+    }
+  }
+  return Res;
+}
+
 #if !defined(__APPLE__)
 // We use a stack-allocated buffer for string manipulation in many pieces of
 // this code, including the code that prints each line of the fdata file. This
@@ -278,6 +295,35 @@ uint64_t __open(const char *pathname, uint64_t flags, uint64_t mode) {
                        "syscall"
                        : "=a"(ret)
                        : "D"(pathname), "S"(flags), "d"(mode)
+                       : "cc", "rcx", "r11", "memory");
+  return ret;
+}
+
+struct dirent {
+  unsigned long d_ino;     /* Inode number */
+  unsigned long d_off;     /* Offset to next linux_dirent */
+  unsigned short d_reclen; /* Length of this linux_dirent */
+  char d_name[];           /* Filename (null-terminated) */
+                           /* length is actually (d_reclen - 2 -
+                             offsetof(struct linux_dirent, d_name)) */
+};
+
+long __getdents(unsigned int fd, dirent *dirp, size_t count) {
+  long ret;
+  __asm__ __volatile__("movq $78, %%rax\n"
+                       "syscall"
+                       : "=a"(ret)
+                       : "D"(fd), "S"(dirp), "d"(count)
+                       : "cc", "rcx", "r11", "memory");
+  return ret;
+}
+
+uint64_t __readlink(const char *pathname, char *buf, size_t bufsize) {
+  uint64_t ret;
+  __asm__ __volatile__("movq $89, %%rax\n"
+                       "syscall"
+                       : "=a"(ret)
+                       : "D"(pathname), "S"(buf), "d"(bufsize)
                        : "cc", "rcx", "r11", "memory");
   return ret;
 }

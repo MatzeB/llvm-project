@@ -388,6 +388,14 @@ public:
                        const MCRegisterInfo *RegInfo)
     : MCPlusBuilder(Analysis, Info, RegInfo) {}
 
+  bool isBranch(const MCInst &Inst) const override {
+    return Analysis->isBranch(Inst) && !isTailCall(Inst);
+  }
+
+  bool isUnconditionalBranch(const MCInst &Inst) const override {
+    return Analysis->isUnconditionalBranch(Inst) && !isTailCall(Inst);
+  }
+
   bool isNoop(const MCInst &Inst) const override {
     switch (Inst.getOpcode()) {
     case X86::NOOP:
@@ -462,6 +470,10 @@ public:
 
   bool isPop(const MCInst &Inst) const override {
     return getPopSize(Inst) == 0 ? false : true;
+  }
+
+  bool isTerminateBranch(const MCInst &Inst) const override {
+    return Inst.getOpcode() == X86::ENDBR32 || Inst.getOpcode() == X86::ENDBR64;
   }
 
   int getPopSize(const MCInst &Inst) const override {
@@ -637,6 +649,8 @@ public:
     return (Inst.getOperand(0).getReg() ==
             Inst.getOperand(2).getReg());
   }
+
+  unsigned getTrapFillValue() const override { return 0xCC; }
 
   struct IndJmpMatcherFrag1 : MCInstMatcher {
     std::unique_ptr<MCInstMatcher> Base;
@@ -1963,20 +1977,6 @@ public:
     return Inst.getOperand(0).getReg() == Inst.getOperand(1).getReg();
   }
 
-  bool isTailCall(const MCInst &Inst) const override {
-    switch (Inst.getOpcode()) {
-    case X86::TAILJMPd:
-    case X86::TAILJMPm:
-    case X86::TAILJMPr:
-      return true;
-    }
-
-    if (getConditionalTailCall(Inst))
-      return true;
-
-    return false;
-  }
-
   bool requiresAlignedAddress(const MCInst &Inst) const override {
     const MCInstrDesc &Desc = Info->get(Inst.getOpcode());
     for (unsigned int I = 0; I < Desc.getNumOperands(); ++I) {
@@ -1990,6 +1990,9 @@ public:
   }
 
   bool convertJmpToTailCall(MCInst &Inst) override {
+    if (isTailCall(Inst))
+      return false;
+
     int NewOpcode;
     switch (Inst.getOpcode()) {
     default:
@@ -1997,21 +2000,22 @@ public:
     case X86::JMP_1:
     case X86::JMP_2:
     case X86::JMP_4:
-      NewOpcode = X86::TAILJMPd;
+      NewOpcode = X86::JMP_4;
       break;
     case X86::JMP16m:
     case X86::JMP32m:
     case X86::JMP64m:
-      NewOpcode = X86::TAILJMPm;
+      NewOpcode = X86::JMP32m;
       break;
     case X86::JMP16r:
     case X86::JMP32r:
     case X86::JMP64r:
-      NewOpcode = X86::TAILJMPr;
+      NewOpcode = X86::JMP32r;
       break;
     }
 
     Inst.setOpcode(NewOpcode);
+    setTailCall(Inst);
     return true;
   }
 
@@ -2020,50 +2024,54 @@ public:
     switch (Inst.getOpcode()) {
     default:
       return false;
-    case X86::TAILJMPd:
+    case X86::JMP_4:
       NewOpcode = X86::JMP_1;
       break;
-    case X86::TAILJMPm:
+    case X86::JMP32m:
       NewOpcode = X86::JMP64m;
       break;
-    case X86::TAILJMPr:
+    case X86::JMP32r:
       NewOpcode = X86::JMP64r;
       break;
     }
 
     Inst.setOpcode(NewOpcode);
+    removeAnnotation(Inst, MCPlus::MCAnnotation::kTailCall);
+    removeAnnotation(Inst, "Offset");
     return true;
   }
 
-  bool convertTailCallToCall(MCInst &Inst) const override {
+  bool convertTailCallToCall(MCInst &Inst) override {
     int NewOpcode;
     switch (Inst.getOpcode()) {
     default:
       return false;
-    case X86::TAILJMPd:
+    case X86::JMP_4:
       NewOpcode = X86::CALL64pcrel32;
       break;
-    case X86::TAILJMPm:
+    case X86::JMP32m:
       NewOpcode = X86::CALL64m;
       break;
-    case X86::TAILJMPr:
+    case X86::JMP32r:
       NewOpcode = X86::CALL64r;
       break;
     }
 
     Inst.setOpcode(NewOpcode);
+    removeAnnotation(Inst, MCPlus::MCAnnotation::kTailCall);
     return true;
   }
 
   bool convertCallToIndirectCall(MCInst &Inst,
                                  const MCSymbol *TargetLocation,
-                                 MCContext *Ctx) const override {
+                                 MCContext *Ctx) override {
+    bool IsTailCall = isTailCall(Inst);
     assert((Inst.getOpcode() == X86::CALL64pcrel32 ||
-            Inst.getOpcode() == X86::TAILJMPd) &&
+            (Inst.getOpcode() == X86::JMP_4 && IsTailCall)) &&
            "64-bit direct (tail) call instruction expected");
     const auto NewOpcode = (Inst.getOpcode() == X86::CALL64pcrel32)
       ? X86::CALL64m
-      : X86::TAILJMPm;
+      : X86::JMP32m;
     Inst.setOpcode(NewOpcode);
 
     // Replace the first operand and preserve auxiliary operands of
@@ -2086,15 +2094,18 @@ public:
     return true;
   }
 
-  void convertIndirectCallToLoad(MCInst &Inst, MCPhysReg Reg) const override {
+  void convertIndirectCallToLoad(MCInst &Inst, MCPhysReg Reg) override {
+    bool IsTailCall = isTailCall(Inst);
+    if (IsTailCall)
+      removeAnnotation(Inst, MCPlus::MCAnnotation::kTailCall);
     if (Inst.getOpcode() == X86::CALL64m ||
-        Inst.getOpcode() == X86::TAILJMPm) {
+        (Inst.getOpcode() == X86::JMP32m && IsTailCall)) {
       Inst.setOpcode(X86::MOV64rm);
       Inst.insert(Inst.begin(), MCOperand::createReg(Reg));
       return;
     }
     if (Inst.getOpcode() == X86::CALL64r ||
-        Inst.getOpcode() == X86::TAILJMPr) {
+        (Inst.getOpcode() == X86::JMP32r && IsTailCall)) {
       Inst.setOpcode(X86::MOV64rr);
       Inst.insert(Inst.begin(), MCOperand::createReg(Reg));
       return;
@@ -2151,8 +2162,9 @@ public:
   }
 
   bool lowerTailCall(MCInst &Inst) override {
-    if (Inst.getOpcode() == X86::TAILJMPd) {
+    if (Inst.getOpcode() == X86::JMP_4 && isTailCall(Inst)) {
       Inst.setOpcode(X86::JMP_1);
+      removeAnnotation(Inst, MCPlus::MCAnnotation::kTailCall);
       return true;
     }
     return false;
@@ -2204,9 +2216,10 @@ public:
         break;
 
       // Handle unconditional branches.
-      if (I->getOpcode() == X86::JMP_1 ||
-          I->getOpcode() == X86::JMP_2 ||
-          I->getOpcode() == X86::JMP_4) {
+      if ((I->getOpcode() == X86::JMP_1 ||
+           I->getOpcode() == X86::JMP_2 ||
+           I->getOpcode() == X86::JMP_4) &&
+          !isTailCall(*I)) {
         // If any code was seen after this unconditional branch, we've seen
         // unreachable code. Ignore them.
         CondBranch = nullptr;
@@ -2942,8 +2955,8 @@ public:
   }
 
   bool createIndirectCall(MCInst &Inst, const MCSymbol *TargetLocation,
-                          MCContext *Ctx, bool IsTailCall) const override {
-    Inst.setOpcode(IsTailCall ? X86::TAILJMPm : X86::CALL64m);
+                          MCContext *Ctx, bool IsTailCall) override {
+    Inst.setOpcode(IsTailCall ? X86::JMP32m : X86::CALL64m);
     Inst.addOperand(MCOperand::createReg(X86::RIP));        // BaseReg
     Inst.addOperand(MCOperand::createImm(1));               // ScaleAmt
     Inst.addOperand(MCOperand::createReg(X86::NoRegister)); // IndexReg
@@ -2951,15 +2964,14 @@ public:
         MCSymbolRefExpr::create(TargetLocation, MCSymbolRefExpr::VK_None,
                                 *Ctx)));
     Inst.addOperand(MCOperand::createReg(X86::NoRegister)); // AddrSegmentReg
+    if (IsTailCall)
+      setTailCall(Inst);
     return true;
   }
 
   bool createTailCall(MCInst &Inst, const MCSymbol *Target,
                       MCContext *Ctx) override {
-    Inst.setOpcode(X86::TAILJMPd);
-    Inst.addOperand(MCOperand::createExpr(
-        MCSymbolRefExpr::create(Target, MCSymbolRefExpr::VK_None, *Ctx)));
-    return true;
+    return createDirectCall(Inst, Target, Ctx, /*IsTailCall*/ true);
   }
 
   bool createTrap(MCInst &Inst) const override {
@@ -3048,12 +3060,14 @@ public:
     Inst.setOpcode(X86::LFENCE);
   }
 
-  bool createDirectCall(MCInst &Inst, const MCSymbol *Target,
-                        MCContext *Ctx) override {
+  bool createDirectCall(MCInst &Inst, const MCSymbol *Target, MCContext *Ctx,
+                        bool IsTailCall) override {
     Inst.clear();
-    Inst.setOpcode(X86::CALL64pcrel32);
+    Inst.setOpcode(IsTailCall ? X86::JMP_4 : X86::CALL64pcrel32);
     Inst.addOperand(MCOperand::createExpr(
         MCSymbolRefExpr::create(Target, MCSymbolRefExpr::VK_None, *Ctx)));
+    if (IsTailCall)
+      setTailCall(Inst);
     return true;
   }
 
@@ -3069,7 +3083,7 @@ public:
 
   bool isBranchOnMem(const MCInst &Inst) const override {
     unsigned OpCode = Inst.getOpcode();
-    if (OpCode == X86::CALL64m || OpCode == X86::TAILJMPm ||
+    if (OpCode == X86::CALL64m || (OpCode == X86::JMP32m && isTailCall(Inst)) ||
         OpCode == X86::JMP64m)
       return true;
 
@@ -3078,7 +3092,7 @@ public:
 
   bool isBranchOnReg(const MCInst &Inst) const override {
     unsigned OpCode = Inst.getOpcode();
-    if (OpCode == X86::CALL64r || OpCode == X86::TAILJMPr ||
+    if (OpCode == X86::CALL64r || (OpCode == X86::JMP32r && isTailCall(Inst)) ||
         OpCode == X86::JMP64r)
       return true;
 
@@ -3170,7 +3184,7 @@ public:
   std::vector<MCInst>
   createInstrumentedIndirectCall(const MCInst &CallInst, bool TailCall,
                                  MCSymbol *HandlerFuncAddr, int CallSiteID,
-                                 MCContext *Ctx) const override {
+                                 MCContext *Ctx) override {
     // Check if the target address expression used in the original indirect call
     // uses the stack pointer, which we are going to clobber.
     static BitVector SPAliases(getAliases(X86::RSP));
@@ -3195,7 +3209,7 @@ public:
     //   push %rdi
     //   movq $CallSiteID, %rdi
     //   push %rdi
-    //   callq/jmp *HandlerFuncAddr
+    //   callq/jmp HandlerFuncAddr
     Insts.emplace_back();
     createPushRegister(Insts.back(), TempReg, 8);
     if (UsesSP) { // Only adjust SP if we really need to
@@ -3203,6 +3217,9 @@ public:
       createStackPointerDecrement(Insts.back(), 8, /*NoFlagsClobber=*/false);
     }
     Insts.emplace_back(CallInst);
+    // Insts.back() and CallInst now share the same annotation instruction.
+    // Strip it from Insts.back(), only preserving tail call annotation.
+    stripAnnotations(Insts.back(), /*KeepTC=*/true);
     convertIndirectCallToLoad(Insts.back(), TempReg);
     if (UsesSP) {
       Insts.emplace_back();
@@ -3215,8 +3232,8 @@ public:
     Insts.emplace_back();
     createPushRegister(Insts.back(), TempReg, 8);
     Insts.emplace_back();
-    createIndirectCall(Insts.back(), HandlerFuncAddr, Ctx,
-                       /*TailCall=*/TailCall);
+    createDirectCall(Insts.back(), HandlerFuncAddr, Ctx,
+                     /*TailCall=*/TailCall);
     // Carry over metadata
     for (int I = MCPlus::getNumPrimeOperands(CallInst),
              E = CallInst.getNumOperands();
@@ -3226,35 +3243,65 @@ public:
     return Insts;
   }
 
-  std::vector<MCInst>
-  createInstrumentedNoopIndCallHandler() const override {
+  std::vector<MCInst> createInstrumentedIndCallHandlerExitBB() const override {
     const MCPhysReg TempReg = getIntArgRegister(0);
-    // For the default indirect call handler that is supposed to be a no-op,
-    // we just need to undo the sequence created for every ind call in
+    // We just need to undo the sequence created for every ind call in
     // instrumentIndirectTarget(), which can be accomplished minimally with:
+    //   popfq
     //   pop %rdi
     //   add $16, %rsp
     //   xchg (%rsp), %rdi
     //   jmp *-8(%rsp)
-    std::vector<MCInst> Insts(4);
-    createPopRegister(Insts[0], TempReg, 8);
-    createStackPointerDecrement(Insts[1], 16, /*NoFlagsClobber=*/false);
-    createSwap(Insts[2], TempReg, X86::RSP, 0);
-    createIndirectBranch(Insts[3], X86::RSP, -8);
+    std::vector<MCInst> Insts(5);
+    createPopFlags(Insts[0], 8);
+    createPopRegister(Insts[1], TempReg, 8);
+    createStackPointerDecrement(Insts[2], 16, /*NoFlagsClobber=*/false);
+    createSwap(Insts[3], TempReg, X86::RSP, 0);
+    createIndirectBranch(Insts[4], X86::RSP, -8);
     return Insts;
   }
 
   std::vector<MCInst>
-  createInstrumentedNoopIndTailCallHandler() const override {
+  createInstrumentedIndTailCallHandlerExitBB() const override {
     const MCPhysReg TempReg = getIntArgRegister(0);
     // Same thing as above, but for tail calls
+    //   popfq
     //   add $16, %rsp
     //   pop %rdi
     //   jmp *-16(%rsp)
-    std::vector<MCInst> Insts(3);
-    createStackPointerDecrement(Insts[0], 16, /*NoFlagsClobber=*/false);
-    createPopRegister(Insts[1], TempReg, 8);
-    createIndirectBranch(Insts[2], X86::RSP, -16);
+    std::vector<MCInst> Insts(4);
+    createPopFlags(Insts[0], 8);
+    createStackPointerDecrement(Insts[1], 16, /*NoFlagsClobber=*/false);
+    createPopRegister(Insts[2], TempReg, 8);
+    createIndirectBranch(Insts[3], X86::RSP, -16);
+    return Insts;
+  }
+
+  std::vector<MCInst>
+  createInstrumentedIndCallHandlerEntryBB(const MCSymbol *InstrTrampoline,
+                                          const MCSymbol *IndCallHandler,
+                                          MCContext *Ctx) override {
+    const MCPhysReg TempReg = getIntArgRegister(0);
+    // Code sequence used to check whether InstrTampoline was initialized
+    // and call it if so, returns via IndCallHandler.
+    //   pushfq
+    //   mov    InstrTrampoline,%rdi
+    //   cmp    $0x0,%rdi
+    //   je     IndCallHandler
+    //   callq  *%rdi
+    //   jmpq   IndCallHandler
+    std::vector<MCInst> Insts;
+    Insts.emplace_back();
+    createPushFlags(Insts.back(), 8);
+    Insts.emplace_back();
+    createMove(Insts.back(), InstrTrampoline, TempReg, Ctx);
+    std::vector<MCInst> cmpJmp = createCmpJE(TempReg, 0, IndCallHandler, Ctx);
+    Insts.insert(Insts.end(), cmpJmp.begin(), cmpJmp.end());
+    Insts.emplace_back();
+    Insts.back().setOpcode(X86::CALL64r);
+    Insts.back().addOperand(MCOperand::createReg(TempReg));
+    Insts.emplace_back();
+    createDirectCall(Insts.back(), IndCallHandler, Ctx, /*IsTailCall*/ true);
     return Insts;
   }
 
@@ -3266,7 +3313,8 @@ public:
     return Insts;
   }
 
-  std::vector<MCInst> createInstrLocationsGetter(MCContext *Ctx) const override {
+  std::vector<MCInst>
+  createInstrLocationsGetter(MCContext *Ctx) const override {
     std::vector<MCInst> Insts(2);
     MCSymbol *Locs = Ctx->getOrCreateSymbol("__bolt_instr_locations");
     createLea(Insts[0], Locs, X86::EAX, Ctx);
@@ -3287,6 +3335,19 @@ public:
     MCSymbol *NumFuncs = Ctx->getOrCreateSymbol("__bolt_instr_num_funcs");
     createMove(Insts[0], NumFuncs, X86::EAX, Ctx);
     createReturn(Insts[1]);
+    return Insts;
+  }
+
+  std::vector<MCInst> createSymbolTrampoline(const MCSymbol *TgtSym,
+                                             MCContext *Ctx) const override {
+    std::vector<MCInst> Insts(1);
+    createUncondBranch(Insts[0], TgtSym, Ctx);
+    return Insts;
+  }
+
+  std::vector<MCInst> createDummyReturnFunction(MCContext *Ctx) const override {
+    std::vector<MCInst> Insts(1);
+    createReturn(Insts[0]);
     return Insts;
   }
 
@@ -3474,10 +3535,10 @@ public:
         CallOrJmp.clear();
 
         if (MinimizeCodeSize && !LoadElim) {
-          CallOrJmp.setOpcode(IsTailCall ? X86::TAILJMPr : X86::CALL64r);
+          CallOrJmp.setOpcode(IsTailCall ? X86::JMP32r : X86::CALL64r);
           CallOrJmp.addOperand(MCOperand::createReg(FuncAddrReg));
         } else {
-          CallOrJmp.setOpcode(IsTailCall ? X86::TAILJMPd : X86::CALL64pcrel32);
+          CallOrJmp.setOpcode(IsTailCall ? X86::JMP_4 : X86::CALL64pcrel32);
 
           if (Targets[i].first) {
             CallOrJmp.addOperand(MCOperand::createExpr(MCSymbolRefExpr::create(
@@ -3486,6 +3547,8 @@ public:
             CallOrJmp.addOperand(MCOperand::createImm(Targets[i].second));
           }
         }
+        if (IsTailCall)
+          setTailCall(CallOrJmp);
 
         if (CallOrJmp.getOpcode() == X86::CALL64r ||
             CallOrJmp.getOpcode() == X86::CALL64pcrel32) {

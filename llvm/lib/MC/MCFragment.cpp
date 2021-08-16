@@ -341,7 +341,9 @@ LLVM_DUMP_METHOD void MCFragment::dump() const {
   OS << "<";
   switch (getKind()) {
   case MCFragment::FT_Align: OS << "MCAlignFragment"; break;
-  case MCFragment::FT_NeverAlign: OS << "MCNeverAlignFragment"; break;
+  case MCFragment::FT_NeverAlign:
+    OS << "MCNeverAlignFragment";
+    break;
   case MCFragment::FT_Data:  OS << "MCDataFragment"; break;
   case MCFragment::FT_CompactEncodedInst:
     OS << "MCCompactEncodedInstFragment"; break;
@@ -383,11 +385,8 @@ LLVM_DUMP_METHOD void MCFragment::dump() const {
   }
   case MCFragment::FT_NeverAlign: {
     const MCNeverAlignFragment *NAF = cast<MCNeverAlignFragment>(this);
-    if (NAF->hasEmitNops())
-      OS << " (emit nops)";
     OS << "\n       ";
-    OS << " Alignment:" << NAF->getAlignment()
-      << " Value:" << NAF->getValue() << " ValueSize:" << NAF->getValueSize();
+    OS << " Alignment:" << NAF->getAlignment() << ">";
     break;
   }
   case MCFragment::FT_Data:  {

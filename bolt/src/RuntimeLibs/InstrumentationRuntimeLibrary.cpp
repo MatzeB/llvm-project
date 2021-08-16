@@ -25,6 +25,7 @@ extern cl::OptionCategory BoltOptCategory;
 
 extern cl::opt<bool> InstrumentationFileAppendPID;
 extern cl::opt<std::string> InstrumentationFilename;
+extern cl::opt<std::string> InstrumentationBinpath;
 extern cl::opt<uint32_t> InstrumentationSleepTime;
 extern cl::opt<bool> InstrumentationNoCountersClear;
 extern cl::opt<bool> InstrumentationWaitForks;
@@ -59,42 +60,16 @@ void InstrumentationRuntimeLibrary::adjustCommandLineOptions(
               "the input binary\n";
     exit(1);
   }
-  if (!BC.FiniFunctionAddress) {
+  if (!BC.FiniFunctionAddress && !BC.IsStaticExecutable) {
     errs() << "BOLT-ERROR: input binary lacks DT_FINI entry in the dynamic "
               "section but instrumentation currently relies on patching "
               "DT_FINI to write the profile\n";
-    exit(1);
-  }
-  if (!BC.HasFixedLoadAddress) {
-    outs() << "BOLT-ERROR: shared object or position-independent executables "
-              "are not allowed in instrumentation mode\n";
     exit(1);
   }
 }
 
 void InstrumentationRuntimeLibrary::emitBinary(BinaryContext &BC,
                                                MCStreamer &Streamer) {
-  const BinaryFunction *StartFunction =
-      BC.getBinaryFunctionAtAddress(*BC.StartFunctionAddress);
-  assert(!StartFunction->isFragment() && "expected main function fragment");
-  if (!StartFunction) {
-    errs() << "BOLT-ERROR: failed to locate function at binary start address\n";
-    exit(1);
-  }
-
-  const BinaryFunction *FiniFunction =
-      BC.FiniFunctionAddress
-          ? BC.getBinaryFunctionAtAddress(*BC.FiniFunctionAddress)
-          : nullptr;
-  if (BC.isELF()) {
-    assert(!FiniFunction->isFragment() && "expected main function fragment");
-    if (!FiniFunction) {
-      errs()
-          << "BOLT-ERROR: failed to locate function at binary fini address\n";
-      exit(1);
-    }
-  }
-
   MCSection *Section = BC.isELF()
                            ? static_cast<MCSection *>(BC.Ctx->getELFSection(
                                  ".bolt.instr.counters", ELF::SHT_PROGBITS,
@@ -106,6 +81,13 @@ void InstrumentationRuntimeLibrary::emitBinary(BinaryContext &BC,
                            : static_cast<MCSection *>(BC.Ctx->getMachOSection(
                                  "__BOLT", "__counters", MachO::S_REGULAR,
                                  SectionKind::getData()));
+
+  if (BC.IsStaticExecutable && !opts::InstrumentationSleepTime) {
+    errs() << "BOLT-ERROR: instrumentation of static binary currently does not "
+              "support profile output on binary finalization, so it "
+              "requires -instrumentation-sleep-time=N (N>0) usage\n";
+    exit(1);
+  }
 
   Section->setAlignment(llvm::Align(BC.RegularPageSize));
   Streamer.SwitchSection(Section);
@@ -154,7 +136,10 @@ void InstrumentationRuntimeLibrary::emitBinary(BinaryContext &BC,
     const unsigned Psize = BC.AsmInfo->getCodePointerSize();
     emitDataPadding(Psize);
     emitLabel(Symbol);
-    Streamer.emitValue(Value, Psize);
+    if (Value)
+      Streamer.emitValue(Value, Psize);
+    else
+      Streamer.emitFill(Psize, 0);
   };
 
   auto emitIntValue = [&Streamer, emitDataPadding, emitLabelByName](
@@ -186,26 +171,16 @@ void InstrumentationRuntimeLibrary::emitBinary(BinaryContext &BC,
                !!opts::InstrumentationNoCountersClear, 1);
   emitIntValue("__bolt_instr_wait_forks", !!opts::InstrumentationWaitForks, 1);
   emitIntValue("__bolt_num_counters", Summary->Counters.size());
-  emitValue(Summary->IndCallHandlerFunc,
-            MCSymbolRefExpr::create(
-                Summary->InitialIndCallHandlerFunction->getSymbol(), *BC.Ctx));
-  emitValue(
-      Summary->IndTailCallHandlerFunc,
-      MCSymbolRefExpr::create(
-          Summary->InitialIndTailCallHandlerFunction->getSymbol(), *BC.Ctx));
+  emitValue(Summary->IndCallCounterFuncPtr, nullptr);
+  emitValue(Summary->IndTailCallCounterFuncPtr, nullptr);
   emitIntValue("__bolt_instr_num_ind_calls",
                Summary->IndCallDescriptions.size());
   emitIntValue("__bolt_instr_num_ind_targets",
                Summary->IndCallTargetDescriptions.size());
   emitIntValue("__bolt_instr_num_funcs", Summary->FunctionDescriptions.size());
   emitString("__bolt_instr_filename", opts::InstrumentationFilename);
+  emitString("__bolt_instr_binpath", opts::InstrumentationBinpath);
   emitIntValue("__bolt_instr_use_pid", !!opts::InstrumentationFileAppendPID, 1);
-  emitValue(BC.Ctx->getOrCreateSymbol("__bolt_instr_init_ptr"),
-            MCSymbolRefExpr::create(StartFunction->getSymbol(), *BC.Ctx));
-  if (FiniFunction) {
-    emitValue(BC.Ctx->getOrCreateSymbol("__bolt_instr_fini_ptr"),
-              MCSymbolRefExpr::create(FiniFunction->getSymbol(), *BC.Ctx));
-  }
 
   if (BC.isMachO()) {
     MCSection *TablesSection = BC.Ctx->getMachOSection(

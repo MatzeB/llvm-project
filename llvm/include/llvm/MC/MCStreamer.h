@@ -838,11 +838,10 @@ public:
   virtual void emitCodeAlignment(unsigned ByteAlignment,
                                  unsigned MaxBytesToEmit = 0);
 
-  /// If the end of the following fragment ever gets aligned to
-  /// \p ByteAlignment, emit a single nop or \t Value to break this alignment.
-  virtual void emitNeverAlignCodeAtEnd(unsigned ByteAlignment,
-                                       int64_t Value = 0,
-                                       unsigned ValueSize = 1);
+  /// If the end of the fragment following this NeverAlign fragment ever gets
+  /// aligned to \p ByteAlignment, this fragment emits a single nop before the
+  /// following fragment to break this end-alignment.
+  virtual void emitNeverAlignCodeAtEnd(unsigned ByteAlignment);
 
   /// Emit some number of copies of \p Value until the byte offset \p
   /// Offset is reached.

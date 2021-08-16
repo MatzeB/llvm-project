@@ -157,6 +157,10 @@ protected:
   /// Names of non-standard annotations.
   SmallVector<std::string, 8> AnnotationNames;
 
+  /// Allocate the TailCall annotation value. Clients of the target-specific
+  /// MCPlusBuilder classes must use convert/lower/create* interfaces instead.
+  void setTailCall(MCInst &Inst);
+
 public:
   class InstructionIterator
     : public std::iterator<std::bidirectional_iterator_tag, MCInst> {
@@ -409,7 +413,7 @@ public:
   }
 
   virtual bool createDirectCall(MCInst &Inst, const MCSymbol *Target,
-                                MCContext *Ctx) {
+                                MCContext *Ctx, bool IsTailCall) {
     llvm_unreachable("not implemented");
     return false;
   }
@@ -475,6 +479,12 @@ public:
   }
 
   virtual bool isPop(const MCInst &Inst) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
+  /// Return true if the instruction is used to terminate an indirect branch.
+  virtual bool isTerminateBranch(const MCInst &Inst) const {
     llvm_unreachable("not implemented");
     return false;
   }
@@ -557,6 +567,10 @@ public:
     llvm_unreachable("not implemented");
     return false;
   }
+
+  /// If non-zero, this is used to fill the executable space with instructions
+  /// that will trap. Defaults to 0.
+  virtual unsigned getTrapFillValue() const { return 0; }
 
   /// Interface and basic functionality of a MCInstMatcher. The idea is to make
   /// it easy to match one or more MCInsts against a tree-like pattern and
@@ -990,10 +1004,7 @@ public:
   }
 
   /// Return true if the instruction is a tail call.
-  virtual bool isTailCall(const MCInst &Inst) const {
-    llvm_unreachable("not implemented");
-    return false;
-  }
+  bool isTailCall(const MCInst &Inst) const;
 
   /// Return true if the instruction is a call with an exception handling info.
   virtual bool isInvoke(const MCInst &Inst) const {
@@ -1207,7 +1218,7 @@ public:
   }
 
   /// Replace instruction opcode to be a regural call instead of tail call.
-  virtual bool convertTailCallToCall(MCInst &Inst) const {
+  virtual bool convertTailCallToCall(MCInst &Inst) {
     llvm_unreachable("not implemented");
     return false;
   }
@@ -1216,13 +1227,13 @@ public:
   /// a destination from a memory location pointed by \p TargetLocation symbol.
   virtual bool convertCallToIndirectCall(MCInst &Inst,
                                          const MCSymbol *TargetLocation,
-                                         MCContext *Ctx) const {
+                                         MCContext *Ctx) {
     llvm_unreachable("not implemented");
     return false;
   }
 
   /// Morph an indirect call into a load where \p Reg holds the call target.
-  virtual void convertIndirectCallToLoad(MCInst &Inst, MCPhysReg Reg) const {
+  virtual void convertIndirectCallToLoad(MCInst &Inst, MCPhysReg Reg) {
     llvm_unreachable("not implemented");
   }
 
@@ -1358,7 +1369,7 @@ public:
   }
 
   virtual bool createIndirectCall(MCInst &Inst, const MCSymbol *TargetLocation,
-                                  MCContext *Ctx, bool IsTailCall) const {
+                                  MCContext *Ctx, bool IsTailCall) {
     llvm_unreachable("not implemented");
     return false;
   }
@@ -1714,22 +1725,31 @@ public:
   }
 
   /// Remove meta-data, but don't destroy it.
-  void stripAnnotations(MCInst &Inst);
+  void stripAnnotations(MCInst &Inst, bool KeepTC = false);
 
   virtual std::vector<MCInst>
   createInstrumentedIndirectCall(const MCInst &CallInst, bool TailCall,
                                  MCSymbol *HandlerFuncAddr, int CallSiteID,
-                                 MCContext *Ctx) const {
+                                 MCContext *Ctx) {
     llvm_unreachable("not implemented");
     return std::vector<MCInst>();
   }
 
-  virtual std::vector<MCInst> createInstrumentedNoopIndCallHandler() const {
+  virtual std::vector<MCInst> createInstrumentedIndCallHandlerExitBB() const {
     llvm_unreachable("not implemented");
     return std::vector<MCInst>();
   }
 
-  virtual std::vector<MCInst> createInstrumentedNoopIndTailCallHandler() const {
+  virtual std::vector<MCInst>
+  createInstrumentedIndTailCallHandlerExitBB() const {
+    llvm_unreachable("not implemented");
+    return std::vector<MCInst>();
+  }
+
+  virtual std::vector<MCInst>
+  createInstrumentedIndCallHandlerEntryBB(const MCSymbol *InstrTrampoline,
+                                          const MCSymbol *IndCallHandler,
+                                          MCContext *Ctx) {
     llvm_unreachable("not implemented");
     return std::vector<MCInst>();
   }
@@ -1752,6 +1772,17 @@ public:
   virtual std::vector<MCInst> createInstrNumFuncsGetter(MCContext *Ctx) const {
     llvm_unreachable("not implemented");
     return {};
+  }
+
+  virtual std::vector<MCInst> createSymbolTrampoline(const MCSymbol *TgtSym,
+                                                     MCContext *Ctx) const {
+    llvm_unreachable("not implemented");
+    return std::vector<MCInst>();
+  }
+
+  virtual std::vector<MCInst> createDummyReturnFunction(MCContext *Ctx) const {
+    llvm_unreachable("not implemented");
+    return std::vector<MCInst>();
   }
 
   /// This method takes an indirect call instruction and splits it up into an
