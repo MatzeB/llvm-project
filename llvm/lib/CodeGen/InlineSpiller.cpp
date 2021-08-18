@@ -1213,7 +1213,6 @@ bool InlineSpiller::spillToOtherClass() {
     }
   }
 
-
   // TODO: Find a way to do the interference check without creating new
   // LiveInterval objects.
   ArrayRef<MCPhysReg> Order = RegClassInfo.getOrder(SpillRC);

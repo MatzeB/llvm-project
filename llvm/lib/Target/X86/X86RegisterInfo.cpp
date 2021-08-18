@@ -960,8 +960,71 @@ bool X86RegisterInfo::getRegAllocationHints(Register VirtReg,
 }
 
 const TargetRegisterClass* X86RegisterInfo::spillToOtherClass(const MachineRegisterInfo& MRI, Register Reg) const {
-  if (MRI.getRegClass(Reg) == &X86::GR64RegClass) {
+  unsigned RCId = MRI.getRegClass(Reg)->getID();
+  // TODO: We should somehow compute a list of relevant classes
+  // (all classes that only have RxX registers as members)
+  switch (RCId) {
+  case X86::GR32RegClassID:
+  case X86::GR32_NOSPRegClassID:
+  case X86::GR32_NOREXRegClassID:
+  case X86::GR32_NOREX_NOSPRegClassID:
+  case X86::GR32_ABCDRegClassID:
+  case X86::GR32_TCRegClassID:
+  case X86::GR32_ABCD_and_GR32_TCRegClassID:
+  case X86::GR32_ADRegClassID:
+  case X86::GR32_BPSPRegClassID:
+  case X86::GR32_BSIRegClassID:
+  case X86::GR32_CBRegClassID:
+  case X86::GR32_DCRegClassID:
+  case X86::GR32_DIBPRegClassID:
+  case X86::GR32_SIDIRegClassID:
+  case X86::GR32_ABCD_and_GR32_BSIRegClassID:
+  case X86::GR32_AD_and_GR32_DCRegClassID:
+  case X86::GR32_BPSP_and_GR32_DIBPRegClassID:
+  case X86::GR32_BPSP_and_GR32_TCRegClassID:
+  case X86::GR32_BSI_and_GR32_SIDIRegClassID:
+  case X86::GR32_CB_and_GR32_DCRegClassID:
+  case X86::GR32_DIBP_and_GR32_SIDIRegClassID:
+  case X86::GR64RegClassID:
+  case X86::GR64_with_sub_8bitRegClassID:
+  case X86::GR64_NOSPRegClassID:
+  case X86::GR64_TCRegClassID:
+  case X86::GR64_NOREXRegClassID:
+  case X86::GR64_TCW64RegClassID:
+  case X86::GR64_TC_with_sub_8bitRegClassID:
+  case X86::GR64_NOSP_and_GR64_TCRegClassID:
+  case X86::GR64_TCW64_with_sub_8bitRegClassID:
+  case X86::GR64_TC_and_GR64_TCW64RegClassID:
+  case X86::GR64_with_sub_16bit_in_GR16_NOREXRegClassID:
+  case X86::GR64_NOREX_NOSPRegClassID:
+  case X86::GR64_NOREX_and_GR64_TCRegClassID:
+  case X86::GR64_NOSP_and_GR64_TCW64RegClassID:
+  case X86::GR64_TCW64_and_GR64_TC_with_sub_8bitRegClassID:
+  case X86::GR64_TC_and_GR64_NOSP_and_GR64_TCW64RegClassID:
+  case X86::GR64_TC_and_GR64_with_sub_16bit_in_GR16_NOREXRegClassID:
+  case X86::GR64_NOREX_NOSP_and_GR64_TCRegClassID:
+  case X86::GR64_NOREX_and_GR64_TCW64RegClassID:
+  case X86::GR64_ABCDRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_TCRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_ABCD_and_GR32_TCRegClassID:
+  case X86::GR64_ADRegClassID:
+  case X86::GR64_and_LOW32_ADDR_ACCESS_RBPRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_BPSPRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_BSIRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_CBRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_DCRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_DIBPRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_SIDIRegClassID:
+  case X86::GR64_and_LOW32_ADDR_ACCESSRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_ABCD_and_GR32_BSIRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_AD_and_GR32_DCRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_BPSP_and_GR32_DIBPRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_BPSP_and_GR32_TCRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_BSI_and_GR32_SIDIRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_CB_and_GR32_DCRegClassID:
+  case X86::GR64_with_sub_32bit_in_GR32_DIBP_and_GR32_SIDIRegClassID:
     return &X86::FR64RegClass;
+  default:
+    return nullptr;
   }
-  return nullptr;
 }
