@@ -43,11 +43,16 @@ static cl::opt<bool>
 EnableBasePointer("x86-use-base-pointer", cl::Hidden, cl::init(true),
           cl::desc("Enable use of a base pointer for complex stack frames"));
 
+static cl::opt<bool>
+EnableSpillToSSE("x86-spill-to-sse", cl::Hidden,
+          cl::desc("Enable spilling from GP to SSE registers"));
+
 X86RegisterInfo::X86RegisterInfo(const Triple &TT)
     : X86GenRegisterInfo((TT.isArch64Bit() ? X86::RIP : X86::EIP),
                          X86_MC::getDwarfRegFlavour(TT, false),
                          X86_MC::getDwarfRegFlavour(TT, true),
-                         (TT.isArch64Bit() ? X86::RIP : X86::EIP)) {
+                         (TT.isArch64Bit() ? X86::RIP : X86::EIP)),
+      SpillToSSE(EnableSpillToSSE) {
   X86_MC::initLLVMToSEHAndCVRegMapping(this);
 
   // Cache some information.
@@ -960,6 +965,8 @@ bool X86RegisterInfo::getRegAllocationHints(Register VirtReg,
 }
 
 const TargetRegisterClass* X86RegisterInfo::spillToOtherClass(const MachineRegisterInfo& MRI, Register Reg) const {
+  if (!SpillToSSE)
+    return nullptr;
   unsigned RCId = MRI.getRegClass(Reg)->getID();
   // TODO: We should somehow compute a list of relevant classes
   // (all classes that only have RxX registers as members)

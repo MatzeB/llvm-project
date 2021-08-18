@@ -82,10 +82,6 @@ RestrictStatepointRemat("restrict-statepoint-remat",
                        cl::init(false), cl::Hidden,
                        cl::desc("Restrict remat for statepoint operands"));
 
-static cl::opt<bool> DisableSpillOtherClass("disable-spill-other-class",
-                                      cl::init(false), cl::Hidden,
-                                      cl::desc("Disable spilling to other register classes"));
-
 namespace {
 
 class HoistSpillHelper : private LiveRangeEdit::Delegate {
@@ -1198,9 +1194,6 @@ void InlineSpiller::spillAll() {
 }
 
 bool InlineSpiller::spillToOtherClass() {
-  if (DisableSpillOtherClass)
-    return false;
-
   const TargetRegisterClass* SpillRC = TRI.spillToOtherClass(MRI, Original);
   if (SpillRC == nullptr)
     return false;

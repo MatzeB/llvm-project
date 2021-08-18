@@ -48,6 +48,8 @@ private:
   /// variable size stack objects.
   unsigned BasePtr;
 
+  bool SpillToSSE;
+
 public:
   explicit X86RegisterInfo(const Triple &TT);
 
@@ -144,6 +146,7 @@ public:
   Register getFramePtr() const { return FramePtr; }
   // FIXME: Move to FrameInfok
   unsigned getSlotSize() const { return SlotSize; }
+  bool getSpillToSSE() const { return SpillToSSE; }
 
   bool getRegAllocationHints(Register VirtReg, ArrayRef<MCPhysReg> Order,
                              SmallVectorImpl<MCPhysReg> &Hints,

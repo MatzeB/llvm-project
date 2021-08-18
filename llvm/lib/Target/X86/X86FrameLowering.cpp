@@ -2477,24 +2477,26 @@ bool X86FrameLowering::assignCalleeSavedSpillSlots(
     if (!X86::GR64RegClass.contains(Reg) && !X86::GR32RegClass.contains(Reg))
       continue;
 
-    // Try to spill to XMM register.
-    if (Reg != X86::RBP && X86::GR64RegClass.contains(Reg) && !MF.callsUnwindInit()) {
-      const MachineRegisterInfo &MRI = MF.getRegInfo();
-      MCRegister SpillReg = MCRegister::NoRegister;
-      for (unsigned NumRegs = X86::FR64RegClass.getNumRegs();
-           lastUsedXmm < NumRegs; lastUsedXmm++) {
-        MCRegister Candidate = X86::FR64RegClass.getRegister(lastUsedXmm);
-        if (!MRI.isPhysRegUsed(Candidate)) {
-          SpillReg = Candidate;
-          lastUsedXmm++;
-          break;
+    if (this->TRI->getSpillToSSE()) {
+      // Try to spill to XMM register.
+      if (Reg != X86::RBP && X86::GR64RegClass.contains(Reg) && !MF.callsUnwindInit()) {
+        const MachineRegisterInfo &MRI = MF.getRegInfo();
+        MCRegister SpillReg = MCRegister::NoRegister;
+        for (unsigned NumRegs = X86::FR64RegClass.getNumRegs();
+             lastUsedXmm < NumRegs; lastUsedXmm++) {
+          MCRegister Candidate = X86::FR64RegClass.getRegister(lastUsedXmm);
+          if (!MRI.isPhysRegUsed(Candidate)) {
+            SpillReg = Candidate;
+            lastUsedXmm++;
+            break;
+          }
         }
-      }
-      if (SpillReg != MCRegister::NoRegister) {
-        LLVM_DEBUG(dbgs() << "Save " << printReg(Reg, TRI)
-                   << " by copy to " << printReg(SpillReg, TRI) << '\n');
-        CSI[i - 1].setDstReg(SpillReg);
-        continue;
+        if (SpillReg != MCRegister::NoRegister) {
+          LLVM_DEBUG(dbgs() << "Save " << printReg(Reg, TRI)
+                     << " by copy to " << printReg(SpillReg, TRI) << '\n');
+          CSI[i - 1].setDstReg(SpillReg);
+          continue;
+        }
       }
     }
 
