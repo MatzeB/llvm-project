@@ -5830,6 +5830,10 @@ def fopenmp_is_device : Flag<["-"], "fopenmp-is-device">,
   HelpText<"Generate code only for an OpenMP target device.">;
 def fopenmp_host_ir_file_path : Separate<["-"], "fopenmp-host-ir-file-path">,
   HelpText<"Path to the IR file produced by the frontend for the host.">;
+// facebook begin T99227533
+def fopenmp_skip_deferred_diags : Flag<["-"], "fopenmp-skip-deferred-diags">,
+  HelpText<"Do not generate deferred diagnostics for function host/device availability. Use this flag only when no offloading or omp target directive is used.">;
+// facebook end T99227533
 
 //===----------------------------------------------------------------------===//
 // SYCL Options

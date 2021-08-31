@@ -3502,6 +3502,11 @@ void CompilerInvocation::GenerateLangArgs(const LangOptions &Opts,
   if (Opts.OpenMPCUDAForceFullRuntime)
     GenerateArg(Args, OPT_fopenmp_cuda_force_full_runtime, SA);
 
+  // facebook begin T99227533
+  if (Opts.OpenMPSkipDeferredDiags)
+    GenerateArg(Args, OPT_fopenmp_skip_deferred_diags, SA);
+  // facebook end T99227533
+
   // The arguments used to set Optimize, OptimizeSize and NoInlineDefine are
   // generated from CodeGenOptions.
 
@@ -3940,6 +3945,12 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.OpenMPCUDAForceFullRuntime =
       Opts.OpenMPIsDevice && (T.isNVPTX() || T.isAMDGCN()) &&
       Args.hasArg(options::OPT_fopenmp_cuda_force_full_runtime);
+
+  // facebook begin T99227533
+  Opts.OpenMPSkipDeferredDiags =
+      Opts.OpenMP && !Opts.OpenMPSimd && !IsTargetSpecified &&
+      Args.hasArg(options::OPT_fopenmp_skip_deferred_diags);
+  // facebook end T99227533
 
   // FIXME: Eliminate this dependency.
   unsigned Opt = getOptimizationLevel(Args, IK, Diags),

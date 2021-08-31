@@ -12609,7 +12609,10 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit) {
     VDecl->setInitStyle(VarDecl::ListInit);
   }
 
-  if (LangOpts.OpenMP && VDecl->isFileVarDecl())
+  // facebook begin T99227533
+  if (LangOpts.OpenMP && !LangOpts.OpenMPSkipDeferredDiags &&
+      VDecl->isFileVarDecl())
+  // facebook end T99227533
     DeclsToCheckForDeferredDiags.insert(VDecl);
   CheckCompleteVariableDeclaration(VDecl);
 }
@@ -14839,7 +14842,10 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body,
     DiscardCleanupsInEvaluationContext();
   }
 
-  if (FD && (LangOpts.OpenMP || LangOpts.CUDA || LangOpts.SYCLIsDevice)) {
+  // facebook begin T99227533
+  if (FD && ((LangOpts.OpenMP && !LangOpts.OpenMPSkipDeferredDiags) ||
+             LangOpts.CUDA || LangOpts.SYCLIsDevice)) {
+  // facebook end T99227533
     auto ES = getEmissionStatus(FD);
     if (ES == Sema::FunctionEmissionStatus::Emitted ||
         ES == Sema::FunctionEmissionStatus::Unknown)
