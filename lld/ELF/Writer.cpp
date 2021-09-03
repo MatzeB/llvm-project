@@ -45,6 +45,10 @@
 
 #define DEBUG_TYPE "lld"
 
+// facebook begin T71528069
+#include "llvm/ADT/SmallSet.h"
+// facebook end T71528069
+
 using namespace llvm;
 using namespace llvm::ELF;
 using namespace llvm::object;
@@ -1746,6 +1750,72 @@ template <class ELFT> void Writer<ELFT>::reorderSectionByRelocationAddend() {
                               return true;
                             });
     }
+  }
+
+  // FB: liblazy_cudart.a has a function with a R_X86_64_PC32 into .nv_fatbin:
+  //   $ llvm-objdump lazy_cudart.o —disassemble —reloc
+  //   0000000000000d49 <init_impls>:
+  //   2759: 48 8d 05 00 00 00 00 leaq (%rip), %rax # 2760 <init_impls+0x1a17>
+  //   000000000000275c: R_X86_64_PC32 .nv_fatbin-0x4
+  //
+  // - At FB the output .nv_fatbin can grow large (over 1.5GB).
+  //
+  // - The distance between the relocation from above @init_impls
+  //   (.text) and this specific input .nv_fatbin must be at most 2GB
+  //   (R_X86_64_PC32).
+  //
+  // - If the input .nv_fatbin section referenced by the above
+  //   relocation is placed at the bottom it can easily overflow.
+  //
+  // - Move the input .nv_fatbin section referenced by this relocation
+  //   towards the top of the output .nv_fatbin - implicitly placing
+  //   it closer to the .text where it's referenced from.
+
+  const OutputSection *nv_fatbin = nullptr;
+  const OutputSection *text = nullptr;
+  for (auto *base : script->sectionCommands) {
+    auto *sec = dyn_cast<OutputDesc>(base);
+    if (!sec)
+      continue;
+    if (sec->osec.name == ".nv_fatbin")
+      nv_fatbin = &sec->osec;
+    if (sec->osec.name == ".text")
+      text = &sec->osec;
+  }
+
+  if (nv_fatbin == nullptr || text == nullptr)
+    return;
+
+  llvm::SmallSet<const SectionBase *, 1> nvFatBinReferencedFromText;
+  for (auto *b : text->commands) {
+    auto *isd = dyn_cast<InputSectionDescription>(b);
+    if (!isd)
+      continue;
+    for (const InputSection *s : isd->sections) {
+      for (const auto &rel : s->relocations) {
+        if ((rel.expr == R_PC || rel.expr == R_PLT_PC ||
+             rel.expr == R_GOT_PC) &&
+            rel.sym && rel.sym->kind() == Symbol::DefinedKind &&
+            cast<Defined>(*rel.sym).section &&
+            cast<Defined>(*rel.sym).section->name == ".nv_fatbin") {
+          nvFatBinReferencedFromText.insert(
+              cast<Defined>(*rel.sym).section);
+        }
+      }
+    }
+  }
+
+  if (nvFatBinReferencedFromText.empty())
+    return;
+  for (SectionCommand *b : nv_fatbin->commands) {
+    auto *isd = dyn_cast<InputSectionDescription>(b);
+    if (!isd)
+      continue;
+    // Move nvFatBinReferencedFromText towards the top of .nv_fatbin
+    std::stable_partition(isd->sections.begin(), isd->sections.end(),
+                          [&](const InputSection *s) {
+                            return nvFatBinReferencedFromText.count(s) != 0;
+                          });
   }
 }
 // facebook end T71528069
