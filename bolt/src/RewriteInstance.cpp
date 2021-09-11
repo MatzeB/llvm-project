@@ -997,7 +997,8 @@ void RewriteInstance::discoverFileObjects() {
         [](const SymbolRef &Symbol) {
           StringRef Name = cantFail(Symbol.getName());
           return !(cantFail(Symbol.getType()) == SymbolRef::ST_Unknown &&
-                   (Name == "$d" || Name == "$x"));
+                   (Name == "$d" || Name.startswith("$d.") || Name == "$x" ||
+                    Name.startswith("$x.")));
         });
     --LastSymbol;
   }
@@ -1508,8 +1509,6 @@ void RewriteInstance::adjustFunctionBoundaries() {
 void RewriteInstance::relocateEHFrameSection() {
   assert(EHFrameSection && "non-empty .eh_frame section expected");
 
-  DWARFDebugFrame EHFrame(BC->TheTriple->getArch(), true,
-                          EHFrameSection->getAddress());
   DWARFDataExtractor DE(EHFrameSection->getContents(),
                         BC->AsmInfo->isLittleEndian(),
                         BC->AsmInfo->getCodePointerSize());
@@ -1550,8 +1549,9 @@ void RewriteInstance::relocateEHFrameSection() {
     EHFrameSection->addRelocation(Offset, nullptr, RelType, Value);
   };
 
-  Error E = EHFrame.parse(DE, createReloc);
-  check_error(std::move(E), "failed to parse EH frame");
+  Error E =
+      EHFrameParser::parse(DE, EHFrameSection->getAddress(), createReloc);
+  check_error(std::move(E), "failed to patch EH frame");
 }
 
 ArrayRef<uint8_t> RewriteInstance::getLSDAData() {
@@ -1984,6 +1984,10 @@ void RewriteInstance::processRelocations() {
       readRelocations(Section);
     }
   }
+
+  if (NumFailedRelocations)
+    errs() << "BOLT-WARNING: Failed to analyze " << NumFailedRelocations
+           << " relocations\n";
 }
 
 void RewriteInstance::insertLKMarker(uint64_t PC, uint64_t SectionOffset,
@@ -2340,6 +2344,7 @@ void RewriteInstance::readRelocations(const SectionRef &Section) {
       LLVM_DEBUG(dbgs() << "BOLT-DEBUG: skipping relocation @ offset = 0x"
                         << Twine::utohexstr(Rel.getOffset())
                         << "; type name = " << TypeName << '\n');
+      ++NumFailedRelocations;
       continue;
     }
 
@@ -2979,13 +2984,6 @@ void RewriteInstance::runOptimizationPasses() {
 }
 
 namespace {
-
-template <typename T>
-std::vector<T> singletonSet(T t) {
-  std::vector<T> Vec;
-  Vec.push_back(std::move(t));
-  return Vec;
-}
 
 class BOLTSymbolResolver : public JITSymbolResolver {
   BinaryContext &BC;

@@ -11,6 +11,7 @@
 #include "Instrumentation.h"
 #include "ParallelUtilities.h"
 #include "RuntimeLibs/InstrumentationRuntimeLibrary.h"
+#include "Utils.h"
 #include "llvm/Support/CommandLine.h"
 #include <stack>
 
@@ -42,9 +43,8 @@ cl::opt<bool> InstrumentationFileAppendPID(
 
 cl::opt<bool> ConservativeInstrumentation(
     "conservative-instrumentation",
-    cl::desc(
-        "don't trust our CFG and disable spanning trees and any counter "
-        "inference, put a counter everywhere (for debugging, default: false)"),
+    cl::desc("disable instrumentation optimizations that sacrifice profile "
+             "accuracy (for debugging, default: false)"),
     cl::init(false), cl::Optional, cl::cat(BoltInstrCategory));
 
 cl::opt<uint32_t> InstrumentationSleepTime(
@@ -90,7 +90,7 @@ uint32_t Instrumentation::getFunctionNameIndex(const BinaryFunction &Function) {
     return Iter->second;
   size_t Idx = Summary->StringTable.size();
   FuncToStringIdx.emplace(std::make_pair(&Function, Idx));
-  Summary->StringTable.append(std::string(Function.getOneName()));
+  Summary->StringTable.append(getEscapedName(Function.getOneName()));
   Summary->StringTable.append(1, '\0');
   return Idx;
 }

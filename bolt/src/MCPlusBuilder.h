@@ -355,6 +355,12 @@ public:
     return Analysis->isConditionalBranch(Inst);
   }
 
+  /// Returns true if Inst is a condtional move instruction
+  virtual bool isConditionalMove(const MCInst &Inst) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
   virtual bool isUnconditionalBranch(const MCInst &Inst) const {
     return Analysis->isUnconditionalBranch(Inst);
   }
@@ -469,6 +475,11 @@ public:
     return false;
   }
 
+  virtual bool isRep(const MCInst &Inst) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
   virtual bool deleteREPPrefix(MCInst &Inst) const {
     llvm_unreachable("not implemented");
     return false;
@@ -548,6 +559,10 @@ public:
     return false;
   }
 
+  virtual void getADRReg(const MCInst &Inst, MCPhysReg &RegName) const {
+    llvm_unreachable("not implemented");
+  }
+
   virtual bool isMoveMem2Reg(const MCInst &Inst) const {
     llvm_unreachable("not implemented");
     return false;
@@ -564,6 +579,11 @@ public:
   }
 
   virtual bool isCleanRegXOR(const MCInst &Inst) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
+  virtual bool isPacked(const MCInst &Inst) const {
     llvm_unreachable("not implemented");
     return false;
   }
@@ -972,6 +992,20 @@ public:
     return false;
   }
 
+  // Replace Register in Inst with Imm. Returns true if successful
+  virtual bool replaceRegWithImm(MCInst &Inst, unsigned Register,
+                                 int64_t Imm) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
+  // Replace ToReplace in Inst with ReplaceWith. Returns true if successful
+  virtual bool replaceRegWithReg(MCInst &Inst, unsigned ToReplace,
+                                 unsigned ReplaceWith) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
   /// Add \p NewImm to the current immediate operand of \p Inst. If it is a
   /// memory accessing instruction, this immediate is the memory address
   /// displacement. Otherwise, the target operand is the first immediate
@@ -1071,6 +1105,21 @@ public:
     return &cast<const MCSymbolRefExpr>(Expr)->getSymbol();
   }
 
+  /// Return addend that represents an offset from MCSymbol target
+  /// of this instruction at a given operand number \p OpNum.
+  /// If there's no symbol associated with  the operand - return 0
+  virtual int64_t getTargetAddend(const MCInst &Inst,
+                                  unsigned OpNum = 0) const {
+    llvm_unreachable("not implemented");
+    return 0;
+  }
+
+  /// Return MCSymbol addend extracted from a target expression
+  virtual int64_t getTargetAddend(const MCExpr *Expr) const {
+    llvm_unreachable("not implemented");
+    return 0;
+  }
+
   /// Return MCSymbol/offset extracted from a target expression
   virtual std::pair<const MCSymbol *, uint64_t>
   getTargetSymbolInfo(const MCExpr *Expr) const {
@@ -1139,6 +1188,11 @@ public:
     llvm_unreachable("not implemented");
   }
 
+  /// Set of Registers used by the Rep instruction
+  virtual void getRepRegs(BitVector &Regs) const {
+    llvm_unreachable("not implemented");
+  }
+
   /// Return the register width in bytes (1, 2, 4 or 8)
   virtual uint8_t getRegSize(MCPhysReg Reg) const;
 
@@ -1181,6 +1235,10 @@ public:
   /// Set of all registers being read by this instruction -- includes aliases
   /// but only if they are strictly smaller than the actual reg
   virtual void getUsedRegs(const MCInst &Inst, BitVector &Regs) const;
+
+  /// Set of all src registers -- includes aliases but
+  /// only if they are strictly smaller than the actual reg
+  virtual void getSrcRegs(const MCInst &Inst, BitVector &Regs) const;
 
   /// Return true if this instruction defines the specified physical
   /// register either explicitly or implicitly.
@@ -1348,6 +1406,15 @@ public:
     return false;
   }
 
+  /// Store \p Target absolute adddress to \p RegName
+  virtual std::vector<MCInst> materializeAddress(const MCSymbol *Target,
+                                                 MCContext *Ctx,
+                                                 MCPhysReg RegName,
+                                                 int64_t Addend = 0) const {
+    llvm_unreachable("not implemented");
+    return {};
+  }
+
   /// Creates a new unconditional branch instruction in Inst and set its operand
   /// to TBB.
   ///
@@ -1506,6 +1573,27 @@ public:
   /// Returns true on success.
   virtual bool reverseBranchCondition(MCInst &Inst, const MCSymbol *TBB,
                                       MCContext *Ctx) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
+  virtual bool replaceBranchCondition(MCInst &Inst, const MCSymbol *TBB,
+                                      MCContext *Ctx, unsigned CC) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
+  virtual unsigned getInvertedCondCode(unsigned CC) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
+  virtual unsigned getCondCodesLogicalOr(unsigned CC1, unsigned CC2) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
+  virtual bool isValidCondCode(unsigned CC) const {
     llvm_unreachable("not implemented");
     return false;
   }

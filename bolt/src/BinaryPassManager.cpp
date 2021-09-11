@@ -9,6 +9,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "BinaryPassManager.h"
+#include "Passes/ADRRelaxationPass.h"
 #include "Passes/Aligner.h"
 #include "Passes/AllocCombiner.h"
 #include "Passes/FrameOptimizer.h"
@@ -28,6 +29,7 @@
 #include "Passes/SplitFunctions.h"
 #include "Passes/StokeInfo.h"
 #include "Passes/TailDuplication.h"
+#include "Passes/ThreeWayBranch.h"
 #include "Passes/ValidateInternalCalls.h"
 #include "Passes/VeneerElimination.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -81,6 +83,11 @@ static cl::opt<bool> TailDuplicationFlag(
     "tail-duplication",
     cl::desc("duplicate unconditional branches that cross a cache line"),
     cl::ZeroOrMore, cl::ReallyHidden, cl::cat(BoltOptCategory));
+
+static cl::opt<bool> ThreeWayBranchFlag("three-way-branch",
+                                        cl::desc("reorder three way branches"),
+                                        cl::ZeroOrMore, cl::ReallyHidden,
+                                        cl::cat(BoltOptCategory));
 
 static cl::opt<bool>
 PrintJTFootprintReduction("print-after-jt-footprint-reduction",
@@ -415,8 +422,8 @@ void BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
                        opts::ICF);
 
   if (BC.isAArch64())
-      Manager.registerPass(
-          std::make_unique<VeneerElimination>(PrintVeneerElimination));
+    Manager.registerPass(
+        std::make_unique<VeneerElimination>(PrintVeneerElimination));
 
   Manager.registerPass(
       std::make_unique<SpecializeMemcpy1>(NeverPrint, opts::SpecializeMemcpy1),
@@ -444,6 +451,9 @@ void BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
                        opts::ICF);
 
   Manager.registerPass(std::make_unique<PLTCall>(PrintPLT));
+
+  Manager.registerPass(std::make_unique<ThreeWayBranch>(),
+                       opts::ThreeWayBranchFlag);
 
   Manager.registerPass(std::make_unique<ReorderBasicBlocks>(PrintReordered));
 
@@ -521,11 +531,14 @@ void BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
   if (BC.HasRelocations)
     Manager.registerPass(std::make_unique<PatchEntries>());
 
-  // Tighten branches according to offset differences between branch and
-  // targets. No extra instructions after this pass, otherwise we may have
-  // relocations out of range and crash during linking.
-  if (BC.isAArch64())
+  if (BC.isAArch64()) {
+    Manager.registerPass(std::make_unique<ADRRelaxationPass>());
+
+    // Tighten branches according to offset differences between branch and
+    // targets. No extra instructions after this pass, otherwise we may have
+    // relocations out of range and crash during linking.
     Manager.registerPass(std::make_unique<LongJmpPass>(PrintLongJmp));
+  }
 
   // This pass turns tail calls into jumps which makes them invisible to
   // function reordering. It's unsafe to use any CFG or instruction analysis

@@ -1315,8 +1315,11 @@ public:
     case ELF::R_AARCH64_LDST8_ABS_LO12_NC:
     case ELF::R_AARCH64_LDST128_ABS_LO12_NC:
     case ELF::R_AARCH64_ADR_GOT_PAGE:
+    case ELF::R_AARCH64_TLSDESC_ADR_PREL21:
     case ELF::R_AARCH64_TLSDESC_ADR_PAGE21:
+    case ELF::R_AARCH64_ADR_PREL_LO21:
     case ELF::R_AARCH64_ADR_PREL_PG_HI21:
+    case ELF::R_AARCH64_ADR_PREL_PG_HI21_NC:
       Relocations[Offset] = Relocation{Offset, Symbol, RelType, Addend, Value};
       break;
     case ELF::R_X86_64_PC32:
@@ -1821,7 +1824,7 @@ public:
   }
 
   /// Retrieve the MCCFIInstruction object associated with a CFI pseudo.
-  MCCFIInstruction* getCFIFor(const MCInst &Instr) {
+  const MCCFIInstruction *getCFIFor(const MCInst &Instr) const {
     if (!BC.MIB->isCFI(Instr))
       return nullptr;
     uint32_t Offset = Instr.getOperand(0).getImm();
@@ -1829,13 +1832,18 @@ public:
     return &FrameInstructions[Offset];
   }
 
-  const MCCFIInstruction* getCFIFor(const MCInst &Instr) const {
-    if (!BC.MIB->isCFI(Instr))
-      return nullptr;
+  void setCFIFor(const MCInst &Instr, MCCFIInstruction &&CFIInst) {
+    assert(BC.MIB->isCFI(Instr) &&
+           "attempting to change CFI in a non-CFI inst");
     uint32_t Offset = Instr.getOperand(0).getImm();
     assert(Offset < FrameInstructions.size() && "Invalid CFI offset");
-    return &FrameInstructions[Offset];
+    FrameInstructions[Offset] = std::move(CFIInst);
   }
+
+  void mutateCFIRegisterFor(const MCInst &Instr, MCPhysReg NewReg);
+
+  const MCCFIInstruction *mutateCFIOffsetFor(const MCInst &Instr,
+                                             int64_t NewOffset);
 
   BinaryFunction &setFileOffset(uint64_t Offset) {
     FileOffset = Offset;
