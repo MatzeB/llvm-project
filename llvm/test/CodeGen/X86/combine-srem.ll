@@ -435,29 +435,59 @@ define <4 x i1> @boolvec_srem(<4 x i1> %x, <4 x i1> %y) {
 define i32 @combine_srem_two(i32 %x) {
 ; CHECK-LABEL: combine_srem_two:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    # kill: def $edi killed $edi def $rdi
 ; CHECK-NEXT:    movl %edi, %ecx
 ; CHECK-NEXT:    shrl $31, %ecx
-; CHECK-NEXT:    addl %edi, %ecx
-; CHECK-NEXT:    andl $-2, %ecx
+; CHECK-NEXT:    leal (%rdi,%rcx), %eax
+; CHECK-NEXT:    andl $1, %eax
 ; CHECK-NEXT:    subl %ecx, %eax
 ; CHECK-NEXT:    retq
   %1 = srem i32 %x, 2
   ret i32 %1
 }
 
+define void @combine_srem_two_no_constraint(i32 *%p, i32 %x) {
+; CHECK-LABEL: combine_srem_two_no_constraint:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    movl %esi, %eax
+; CHECK-NEXT:    shrl $31, %eax
+; CHECK-NEXT:    addl %esi, %eax
+; CHECK-NEXT:    andl $-2, %eax
+; CHECK-NEXT:    subl %eax, %esi
+; CHECK-NEXT:    movl %esi, (%rdi)
+; CHECK-NEXT:    retq
+  %1 = srem i32 %x, 2
+  store i32 %1, i32* %p
+  ret void
+}
+
 define i32 @combine_srem_negtwo(i32 %x) {
 ; CHECK-LABEL: combine_srem_negtwo:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    movl %edi, %eax
+; CHECK-NEXT:    # kill: def $edi killed $edi def $rdi
 ; CHECK-NEXT:    movl %edi, %ecx
 ; CHECK-NEXT:    shrl $31, %ecx
-; CHECK-NEXT:    addl %edi, %ecx
-; CHECK-NEXT:    andl $-2, %ecx
+; CHECK-NEXT:    leal (%rdi,%rcx), %eax
+; CHECK-NEXT:    andl $1, %eax
 ; CHECK-NEXT:    subl %ecx, %eax
 ; CHECK-NEXT:    retq
   %1 = srem i32 %x, -2
   ret i32 %1
+}
+
+define void @combine_srem_negtwo_no_constraint(i32 *%p, i32 %x) {
+; CHECK-LABEL: combine_srem_negtwo_no_constraint:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    movl %esi, %eax
+; CHECK-NEXT:    shrl $31, %eax
+; CHECK-NEXT:    addl %esi, %eax
+; CHECK-NEXT:    andl $-2, %eax
+; CHECK-NEXT:    subl %eax, %esi
+; CHECK-NEXT:    movl %esi, (%rdi)
+; CHECK-NEXT:    retq
+  %1 = srem i32 %x, -2
+  store i32 %1, i32* %p
+  ret void
 }
 
 define i8 @combine_i8_srem_negpow2(i8 %x) {

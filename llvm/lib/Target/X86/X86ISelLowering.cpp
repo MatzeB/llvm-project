@@ -50916,6 +50916,43 @@ static SDValue combineAdd(SDNode *N, SelectionDAG &DAG,
   return combineAddOrSubToADCOrSBB(N, DAG);
 }
 
+static SDValue commuteConstrainedSub(SDNode *Sub, SelectionDAG& DAG) {
+  SDValue SubLHS = Sub->getOperand(0);
+  if (SubLHS->getOpcode() != ISD::CopyFromReg)
+    return SDValue();
+  EVT VT = SubLHS.getValueType();
+  if (!VT.isScalarInteger())
+    return SDValue();
+  if (!Sub->hasOneUse() || Sub->use_begin()->getOpcode() != ISD::CopyToReg)
+    return SDValue();
+  SDValue And = Sub->getOperand(1);
+  if (And->getOpcode() != ISD::AND || !And->hasOneUse())
+    return SDValue();
+  SDValue AndRHS = And->getOperand(1);
+  ConstantSDNode *C = dyn_cast<ConstantSDNode>(AndRHS);
+  if (!C)
+    return SDValue();
+  SDValue Add = And->getOperand(0);
+  if (Add->getOpcode() != ISD::ADD)
+    return SDValue();
+  SDValue AddLHS = Add->getOperand(0);
+  SDValue AddRHS = Add->getOperand(1);
+  if (AddLHS == SubLHS) {
+    /* pattern matched. */
+  } else if (AddRHS == SubLHS) {
+    std::swap(AddLHS, AddRHS);
+  } else {
+    return SDValue();
+  }
+  if (AddRHS->getOpcode() == ISD::CopyFromReg)
+    return SDValue();
+
+  uint64_t CVal = C->getZExtValue();
+  SDValue ComplementC = DAG.getConstant(~CVal, SDLoc(), VT);
+  SDValue NewAnd = DAG.getNode(ISD::AND, SDLoc(), VT, Add, ComplementC);
+  return DAG.getNode(ISD::SUB, SDLoc(Sub), VT, NewAnd, AddRHS);
+}
+
 static SDValue combineSub(SDNode *N, SelectionDAG &DAG,
                           TargetLowering::DAGCombinerInfo &DCI,
                           const X86Subtarget &Subtarget) {
@@ -50949,6 +50986,9 @@ static SDValue combineSub(SDNode *N, SelectionDAG &DAG,
 
   // Try to synthesize horizontal subs from subs of shuffles.
   if (SDValue V = combineToHorizontalAddSub(N, DAG, Subtarget))
+    return V;
+
+  if (SDValue V = commuteConstrainedSub(N, DAG))
     return V;
 
   return combineAddOrSubToADCOrSBB(N, DAG);
