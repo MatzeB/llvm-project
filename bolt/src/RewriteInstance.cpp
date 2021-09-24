@@ -446,8 +446,8 @@ bool processAllFunctions() {
 
 constexpr const char *RewriteInstance::SectionsToOverwrite[];
 std::vector<std::string> RewriteInstance::DebugSectionsToOverwrite = {
-    ".debug_aranges", ".debug_line", ".debug_loc",
-    ".debug_ranges",  ".gdb_index",  ".debug_addr"};
+    ".debug_abbrev", ".debug_aranges", ".debug_line", ".debug_loc",
+    ".debug_ranges", ".gdb_index",     ".debug_addr"};
 
 const char RewriteInstance::TimerGroupName[] = "rewrite";
 const char RewriteInstance::TimerGroupDesc[] = "Rewrite passes";
@@ -1824,13 +1824,11 @@ int64_t getRelocationAddend(const ELFObjectFileBase *Obj,
 }
 } // anonymous namespace
 
-bool RewriteInstance::analyzeRelocation(const RelocationRef &Rel,
-                                        uint64_t RType,
-                                        std::string &SymbolName,
-                                        bool &IsSectionRelocation,
-                                        uint64_t &SymbolAddress,
-                                        int64_t &Addend,
-                                        uint64_t &ExtractedValue) const {
+bool RewriteInstance::analyzeRelocation(
+    const RelocationRef &Rel, uint64_t RType, std::string &SymbolName,
+    bool &IsSectionRelocation, uint64_t &SymbolAddress, int64_t &Addend,
+    uint64_t &ExtractedValue, bool &Skip) const {
+  Skip = false;
   if (!Relocation::isSupported(RType))
     return false;
 
@@ -1841,6 +1839,9 @@ bool RewriteInstance::analyzeRelocation(const RelocationRef &Rel,
   ErrorOr<uint64_t> Value =
       BC->getUnsignedValueAtAddress(Rel.getOffset(), RelSize);
   assert(Value && "failed to extract relocated value");
+  if ((Skip = Relocation::skipRelocationProcess(RType, *Value)))
+    return true;
+
   ExtractedValue = Relocation::extractValue(RType,
                                             *Value,
                                             Rel.getOffset());
@@ -1898,6 +1899,8 @@ bool RewriteInstance::analyzeRelocation(const RelocationRef &Rel,
   if (Relocation::isGOT(RType)) {
     Addend = 0;
     SymbolAddress = ExtractedValue + PCRelOffset;
+  } else if (Relocation::isTLS(RType)) {
+    SkipVerification = true;
   } else if (!SymbolAddress) {
     assert(!IsSectionRelocation);
     if (ExtractedValue || Addend == 0 || IsPCRelative) {
@@ -1924,9 +1927,6 @@ bool RewriteInstance::analyzeRelocation(const RelocationRef &Rel,
       return true;
 
     if (SymbolName == "__hot_start" || SymbolName == "__hot_end")
-      return true;
-
-    if (Relocation::isTLS(RType))
       return true;
 
     if (RType == ELF::R_X86_64_PLT32)
@@ -2316,9 +2316,15 @@ void RewriteInstance::readRelocations(const SectionRef &Section) {
       RType &= ~ELF::R_X86_64_converted_reloc_bit;
     }
 
-    // No special handling required for TLS relocations on X86.
-    if (Relocation::isTLS(RType) && BC->isX86())
-      continue;
+    if (Relocation::isTLS(RType)) {
+      // No special handling required for TLS relocations on X86.
+      if (BC->isX86())
+        continue;
+
+      // The non-got related TLS relocations on AArch64 also could be skipped.
+      if (!Relocation::isGOT(RType))
+        continue;
+    }
 
     if (BC->getDynamicRelocationAt(Rel.getOffset())) {
       LLVM_DEBUG(
@@ -2334,17 +2340,20 @@ void RewriteInstance::readRelocations(const SectionRef &Section) {
     int64_t Addend;
     uint64_t ExtractedValue;
     bool IsSectionRelocation;
-    if (!analyzeRelocation(Rel,
-                           RType,
-                           SymbolName,
-                           IsSectionRelocation,
-                           SymbolAddress,
-                           Addend,
-                           ExtractedValue)) {
+    bool Skip;
+    if (!analyzeRelocation(Rel, RType, SymbolName, IsSectionRelocation,
+                           SymbolAddress, Addend, ExtractedValue, Skip)) {
+      LLVM_DEBUG(dbgs() << "BOLT-WARNING: failed to analyze relocation @ "
+                        << "offset = 0x" << Twine::utohexstr(Rel.getOffset())
+                        << "; type name = " << TypeName << '\n');
+      ++NumFailedRelocations;
+      continue;
+    }
+
+    if (Skip) {
       LLVM_DEBUG(dbgs() << "BOLT-DEBUG: skipping relocation @ offset = 0x"
                         << Twine::utohexstr(Rel.getOffset())
                         << "; type name = " << TypeName << '\n');
-      ++NumFailedRelocations;
       continue;
     }
 
@@ -2397,16 +2406,17 @@ void RewriteInstance::readRelocations(const SectionRef &Section) {
     }
 
     bool ForceRelocation = BC->forceSymbolRelocations(SymbolName);
-
-    if (BC->isAArch64() && RType == ELF::R_AARCH64_ADR_GOT_PAGE)
-      ForceRelocation = true;
-
     ErrorOr<BinarySection &> RefSection =
-        BC->getSectionForAddress(SymbolAddress);
-    if (!RefSection && !ForceRelocation) {
-      LLVM_DEBUG(
-          dbgs() << "BOLT-DEBUG: cannot determine referenced section.\n");
-      continue;
+        std::make_error_code(std::errc::bad_address);
+    if (BC->isAArch64() && Relocation::isGOT(RType)) {
+      ForceRelocation = true;
+    } else {
+      RefSection = BC->getSectionForAddress(SymbolAddress);
+      if (!RefSection && !ForceRelocation) {
+        LLVM_DEBUG(
+            dbgs() << "BOLT-DEBUG: cannot determine referenced section.\n");
+        continue;
+      }
     }
 
     const bool IsToCode = RefSection && RefSection->isText();
@@ -3558,11 +3568,10 @@ RewriteInstance::getCodeSections() {
 }
 
 void RewriteInstance::mapCodeSections(RuntimeDyld &RTDyld) {
-  ErrorOr<BinarySection &> TextSection =
-      BC->getUniqueSectionByName(BC->getMainCodeSectionName());
-  assert(TextSection && ".text section not found in output");
-
   if (BC->HasRelocations) {
+    ErrorOr<BinarySection &> TextSection =
+        BC->getUniqueSectionByName(BC->getMainCodeSectionName());
+    assert(TextSection && ".text section not found in output");
     assert(TextSection->hasValidSectionID() && ".text section should be valid");
 
     // Map sections for functions with pre-assigned addresses.
@@ -3668,26 +3677,6 @@ void RewriteInstance::mapCodeSections(RuntimeDyld &RTDyld) {
   // Processing in non-relocation mode.
   uint64_t NewTextSectionStartAddress = NextAvailableAddress;
 
-  // Prepare .text section for injected functions
-  if (TextSection->hasValidSectionID()) {
-    uint64_t NewTextSectionOffset = 0;
-    uint64_t Padding = offsetToAlignment(NewTextSectionStartAddress,
-                                         llvm::Align(BC->PageAlign));
-    NextAvailableAddress += Padding;
-    NewTextSectionStartAddress = NextAvailableAddress;
-    NewTextSectionOffset = getFileOffsetForAddress(NextAvailableAddress);
-    NextAvailableAddress += Padding + TextSection->getOutputSize();
-    TextSection->setOutputAddress(NewTextSectionStartAddress);
-    TextSection->setOutputFileOffset(NewTextSectionOffset);
-
-    LLVM_DEBUG(dbgs() << "BOLT: mapping .text 0x"
-                      << Twine::utohexstr(TextSection->getAllocAddress())
-                      << " to 0x"
-                      << Twine::utohexstr(NewTextSectionStartAddress) << '\n');
-    RTDyld.reassignSectionAddress(TextSection->getSectionID(),
-                                  NewTextSectionStartAddress);
-  }
-
   for (auto &BFI : BC->getBinaryFunctions()) {
     BinaryFunction &Function = BFI.second;
     if (!Function.isEmitted())
@@ -3716,11 +3705,11 @@ void RewriteInstance::mapCodeSections(RuntimeDyld &RTDyld) {
         JumpTable *JT = JTI.second;
         BinarySection &Section = JT->getOutputSection();
         Section.setOutputAddress(JT->getAddress());
+        Section.setOutputFileOffset(getFileOffsetForAddress(JT->getAddress()));
         LLVM_DEBUG(dbgs() << "BOLT-DEBUG: mapping " << Section.getName()
                           << " to 0x" << Twine::utohexstr(JT->getAddress())
                           << '\n');
-        RTDyld.reassignSectionAddress(Section.getSectionID(),
-                                      JT->getAddress());
+        RTDyld.reassignSectionAddress(Section.getSectionID(), JT->getAddress());
       }
     }
 
@@ -5152,11 +5141,12 @@ void RewriteInstance::rewriteFile() {
   assert(Offset == getFileOffsetForAddress(NextAvailableAddress) &&
          "error resizing output file");
 
-  // Overwrite functions with fixed output address.
+  // Overwrite functions with fixed output address. This is mostly used by
+  // non-relocation mode, with one exception: injected functions are covered
+  // here in both modes.
   uint64_t CountOverwrittenFunctions = 0;
   uint64_t OverwrittenScore = 0;
   for (BinaryFunction *Function : BC->getAllBinaryFunctions()) {
-
     if (Function->getImageAddress() == 0 || Function->getImageSize() == 0)
       continue;
 
@@ -5169,6 +5159,15 @@ void RewriteInstance::rewriteFile() {
                << ") for function " << *Function << '\n';
       }
       FailedAddresses.emplace_back(Function->getAddress());
+      // Remove jump table sections that this function owns in non-reloc mode
+      // because we don't wnat to write them anymore
+      if (!BC->HasRelocations && opts::JumpTables == JTS_BASIC) {
+        for (auto &JTI : Function->JumpTables) {
+          JumpTable *JT = JTI.second;
+          BinarySection &Section = JT->getOutputSection();
+          BC->deregisterSection(Section);
+        }
+      }
       continue;
     }
 
@@ -5192,20 +5191,6 @@ void RewriteInstance::rewriteFile() {
       MAB->writeNopData(OS, Function->getMaxSize() - Function->getImageSize());
 
       OS.seek(Pos);
-    }
-
-    // Write jump tables if updating in-place.
-    if (opts::JumpTables == JTS_BASIC) {
-      for (auto &JTI : Function->JumpTables) {
-        JumpTable *JT = JTI.second;
-        BinarySection &Section = JT->getOutputSection();
-        Section.setOutputFileOffset(
-            getFileOffsetForAddress(JT->getAddress()));
-        assert(Section.getOutputFileOffset() && "no matching offset in file");
-        OS.pwrite(reinterpret_cast<const char*>(Section.getOutputData()),
-                  Section.getOutputSize(),
-                  Section.getOutputFileOffset());
-      }
     }
 
     if (!Function->isSplit()) {
@@ -5262,7 +5247,7 @@ void RewriteInstance::rewriteFile() {
     OS.seek(SavedPos);
   }
 
-  // Write all non-local sections, i.e. those not emitted with the function.
+  // Write all allocatable sections - reloc-mode text is written here as well
   for (BinarySection &Section : BC->allocatableSections()) {
     if (!Section.isFinalized() || !Section.getOutputData())
       continue;
