@@ -4224,6 +4224,27 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
     }
     llvm_unreachable("unknown builtin type");
 
+  // facebook begin T15268145
+  case Type::Record:
+    if (const auto recordType = cast<RecordType>(type.getTypePtr())) {
+      auto record = recordType->getDecl();
+      if (!record || !isa<ClassTemplateSpecializationDecl>(record)) {
+        return false;
+      }
+
+      if (auto specialization = cast<ClassTemplateSpecializationDecl>(record)) {
+        auto context = specialization->getDeclContext();
+        if (!context || !context->isStdNamespace()) {
+          return false;
+        }
+
+        return specialization->getName() == "unique_ptr" ||
+               specialization->getName() == "shared_ptr";
+      }
+    }
+    return false;
+  // facebook end T15268145
+
   // Non-pointer types.
   case Type::Complex:
   case Type::LValueReference:
@@ -4241,7 +4262,6 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
   case Type::DependentAddressSpace:
   case Type::FunctionProto:
   case Type::FunctionNoProto:
-  case Type::Record:
   case Type::DeducedTemplateSpecialization:
   case Type::Enum:
   case Type::InjectedClassName:

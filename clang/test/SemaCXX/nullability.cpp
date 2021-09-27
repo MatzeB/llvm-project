@@ -12,10 +12,26 @@ typedef decltype(nullptr) nullptr_t;
 class X {
 };
 
+// facebook begin T15268145
+template <typename T>
+class unique_ptr {};
+
+namespace std {
+template <typename T>
+class unique_ptr {};
+}
+// facebook end T15268145
+
 // Nullability applies to all pointer types.
 typedef int (X::* _Nonnull member_function_type_1)(int);
 typedef int X::* _Nonnull member_data_type_1;
 typedef nullptr_t _Nonnull nonnull_nullptr_t; // expected-error{{nullability specifier '_Nonnull' cannot be applied to non-pointer type 'nullptr_t' (aka 'std::nullptr_t')}}
+
+// facebook begin T15268145
+typedef std::unique_ptr<int> _Nullable nullable_std_unique_ptr;
+typedef X _Nullable nullable_X;                        // expected-error{{nullability specifier '_Nullable' cannot be applied to non-pointer type 'X'}}
+typedef unique_ptr<int> _Nullable nullable_unique_ptr; // expected-error{{nullability specifier '_Nullable' cannot be applied to non-pointer type 'unique_ptr<int>'}}
+// facebook end T15268145
 
 // Nullability can move into member pointers (this is suppressing a warning).
 typedef _Nonnull int (X::* member_function_type_2)(int);
