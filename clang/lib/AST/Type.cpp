@@ -4800,10 +4800,20 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
     const RecordDecl *RD = cast<RecordType>(type)->getDecl();
     // For template specializations, look only at primary template attributes.
     // This is a consistent regardless of whether the instantiation is known.
-    if (const auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(RD))
+    if (const auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(RD)) {
+      // facebook begin T15268145
+      const DeclContext *Ctx = CTSD->getDeclContext();
+      if (Ctx && Ctx->isStdNamespace()) {
+        if (CTSD->getName() == "unique_ptr" || CTSD->getName() == "shared_ptr") {
+          return true;
+        }
+      }
+      // facebook end T15268145
+
       return CTSD->getSpecializedTemplate()
           ->getTemplatedDecl()
           ->hasAttr<TypeNullableAttr>();
+    }
     return RD->hasAttr<TypeNullableAttr>();
   }
 

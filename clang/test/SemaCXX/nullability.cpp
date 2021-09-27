@@ -200,3 +200,14 @@ class a;
 template <typename b> using c = b _Nullable; // expected-error {{'_Nullable' cannot be applied to non-pointer type 'GH60344::a'}}
 c<a>;  // expected-note {{in instantiation of template type alias 'c' requested here}}
 }
+
+// facebook begin T15268145
+template <typename T>
+class unique_ptr {};
+
+typedef std::unique_ptr<int> _Nullable nullable_std_unique_ptr;
+typedef X _Nullable nullable_X;                        // expected-error{{nullability specifier '_Nullable' cannot be applied to non-pointer type 'X'}}
+typedef unique_ptr<int> _Nullable nullable_unique_ptr; // expected-error{{nullability specifier '_Nullable' cannot be applied to non-pointer type 'unique_ptr<int>'}}
+// facebook end T15268145
+
+
