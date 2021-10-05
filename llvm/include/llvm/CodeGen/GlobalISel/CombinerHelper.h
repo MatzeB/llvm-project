@@ -19,6 +19,7 @@
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/LowLevelType.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/Support/Alignment.h"
@@ -35,7 +36,10 @@ class GISelKnownBits;
 class MachineDominatorTree;
 class LegalizerInfo;
 struct LegalityQuery;
+class RegisterBank;
+class RegisterBankInfo;
 class TargetLowering;
+class TargetRegisterInfo;
 
 struct PreferredTuple {
   LLT Ty;                // The result type of the extend.
@@ -53,6 +57,7 @@ struct IndexedLoadStoreMatchInfo {
 struct PtrAddChain {
   int64_t Imm;
   Register Base;
+  const RegisterBank *Bank;
 };
 
 struct RegisterImmPair {
@@ -65,6 +70,16 @@ struct ShiftOfShiftedLogic {
   MachineInstr *Shift2;
   Register LogicNonShiftReg;
   uint64_t ValSum;
+};
+
+using BuildFnTy = std::function<void(MachineIRBuilder &)>;
+
+struct MergeTruncStoresInfo {
+  SmallVector<GStore *> FoundStores;
+  GStore *LowestIdxStore = nullptr;
+  Register WideSrcVal;
+  bool NeedBSwap = false;
+  bool NeedRotate = false;
 };
 
 using OperandBuildSteps =
@@ -94,6 +109,8 @@ protected:
   GISelKnownBits *KB;
   MachineDominatorTree *MDT;
   const LegalizerInfo *LI;
+  const RegisterBankInfo *RBI;
+  const TargetRegisterInfo *TRI;
 
 public:
   CombinerHelper(GISelChangeObserver &Observer, MachineIRBuilder &B,
@@ -119,6 +136,18 @@ public:
   void replaceRegOpWith(MachineRegisterInfo &MRI, MachineOperand &FromRegOp,
                         Register ToReg) const;
 
+  /// Get the register bank of \p Reg.
+  /// If Reg has not been assigned a register, a register class,
+  /// or a register bank, then this returns nullptr.
+  ///
+  /// \pre Reg.isValid()
+  const RegisterBank *getRegBank(Register Reg) const;
+
+  /// Set the register bank of \p Reg.
+  /// Does nothing if the RegBank is null.
+  /// This is the counterpart to getRegBank.
+  void setRegBank(Register Reg, const RegisterBank *RegBank);
+
   /// If \p MI is COPY, try to combine it.
   /// Returns true if MI changed.
   bool tryCombineCopy(MachineInstr &MI);
@@ -142,6 +171,9 @@ public:
   bool tryCombineExtendingLoads(MachineInstr &MI);
   bool matchCombineExtendingLoads(MachineInstr &MI, PreferredTuple &MatchInfo);
   void applyCombineExtendingLoads(MachineInstr &MI, PreferredTuple &MatchInfo);
+
+  /// Match (and (load x), mask) -> zextload x
+  bool matchCombineLoadWithAndMask(MachineInstr &MI, BuildFnTy &MatchInfo);
 
   /// Combine \p MI into a pre-indexed or post-indexed load/store operation if
   /// legal and the surrounding code makes it useful.
@@ -263,6 +295,9 @@ public:
   void applyCombineShlOfExtend(MachineInstr &MI,
                                const RegisterImmPair &MatchData);
 
+  /// Fold away a merge of an unmerge of the corresponding values.
+  bool matchCombineMergeUnmerge(MachineInstr &MI, Register &MatchInfo);
+
   /// Reduce a shift by a constant to an unmerge and a shift on a half sized
   /// type. This will not produce a shift smaller than \p TargetShiftSize.
   bool matchCombineShiftToUnmerge(MachineInstr &MI, unsigned TargetShiftSize,
@@ -380,6 +415,9 @@ public:
   /// Replace an instruction with a G_CONSTANT with value \p C.
   bool replaceInstWithConstant(MachineInstr &MI, int64_t C);
 
+  /// Replace an instruction with a G_CONSTANT with value \p C.
+  bool replaceInstWithConstant(MachineInstr &MI, APInt C);
+
   /// Replace an instruction with a G_IMPLICIT_DEF.
   bool replaceInstWithUndef(MachineInstr &MI);
 
@@ -438,7 +476,7 @@ public:
 
   /// Fold and(and(x, C1), C2) -> C1&C2 ? and(x, C1&C2) : 0
   bool matchOverlappingAnd(MachineInstr &MI,
-                           std::function<void(MachineIRBuilder &)> &MatchInfo);
+                           BuildFnTy &MatchInfo);
 
   /// \return true if \p MI is a G_AND instruction whose operands are x and y
   /// where x & y == x or x & y == y. (E.g., one of operands is all-ones value.)
@@ -494,8 +532,10 @@ public:
   ///
   /// And check if the tree can be replaced with a M-bit load + possibly a
   /// bswap.
-  bool matchLoadOrCombine(MachineInstr &MI,
-                          std::function<void(MachineIRBuilder &)> &MatchInfo);
+  bool matchLoadOrCombine(MachineInstr &MI, BuildFnTy &MatchInfo);
+
+  bool matchTruncStoreMerge(MachineInstr &MI, MergeTruncStoresInfo &MatchInfo);
+  void applyTruncStoreMerge(MachineInstr &MI, MergeTruncStoresInfo &MatchInfo);
 
   bool matchExtendThroughPhis(MachineInstr &MI, MachineInstr *&ExtMI);
   void applyExtendThroughPhis(MachineInstr &MI, MachineInstr *&ExtMI);
@@ -512,12 +552,10 @@ public:
 
   /// Use a function which takes in a MachineIRBuilder to perform a combine.
   /// By default, it erases the instruction \p MI from the function.
-  void applyBuildFn(MachineInstr &MI,
-                    std::function<void(MachineIRBuilder &)> &MatchInfo);
+  void applyBuildFn(MachineInstr &MI, BuildFnTy &MatchInfo);
   /// Use a function which takes in a MachineIRBuilder to perform a combine.
   /// This variant does not erase \p MI after calling the build function.
-  void applyBuildFnNoErase(MachineInstr &MI,
-                           std::function<void(MachineIRBuilder &)> &MatchInfo);
+  void applyBuildFnNoErase(MachineInstr &MI, BuildFnTy &MatchInfo);
 
   bool matchFunnelShiftToRotate(MachineInstr &MI);
   void applyFunnelShiftToRotate(MachineInstr &MI);
@@ -528,16 +566,38 @@ public:
   /// or false constant based off of KnownBits information.
   bool matchICmpToTrueFalseKnownBits(MachineInstr &MI, int64_t &MatchInfo);
 
-  bool matchBitfieldExtractFromSExtInReg(
-      MachineInstr &MI, std::function<void(MachineIRBuilder &)> &MatchInfo);
-  /// Match: and (lshr x, cst), mask -> ubfx x, cst, width
-  bool matchBitfieldExtractFromAnd(
-      MachineInstr &MI, std::function<void(MachineIRBuilder &)> &MatchInfo);
+  /// \returns true if a G_ICMP \p MI can be replaced with its LHS based off of
+  /// KnownBits information.
+  bool
+  matchICmpToLHSKnownBits(MachineInstr &MI,
+                          BuildFnTy &MatchInfo);
 
+  bool matchBitfieldExtractFromSExtInReg(MachineInstr &MI,
+                                         BuildFnTy &MatchInfo);
+  /// Match: and (lshr x, cst), mask -> ubfx x, cst, width
+  bool matchBitfieldExtractFromAnd(MachineInstr &MI, BuildFnTy &MatchInfo);
+
+  /// Match: shr (shl x, n), k -> sbfx/ubfx x, pos, width
+  bool matchBitfieldExtractFromShr(MachineInstr &MI, BuildFnTy &MatchInfo);
+
+  // Helpers for reassociation:
+  bool matchReassocConstantInnerRHS(GPtrAdd &MI, MachineInstr *RHS,
+                                    BuildFnTy &MatchInfo);
+  bool matchReassocFoldConstantsInSubTree(GPtrAdd &MI, MachineInstr *LHS,
+                                          MachineInstr *RHS,
+                                          BuildFnTy &MatchInfo);
+  bool matchReassocConstantInnerLHS(GPtrAdd &MI, MachineInstr *LHS,
+                                    MachineInstr *RHS, BuildFnTy &MatchInfo);
   /// Reassociate pointer calculations with G_ADD involved, to allow better
   /// addressing mode usage.
-  bool matchReassocPtrAdd(MachineInstr &MI,
-                          std::function<void(MachineIRBuilder &)> &MatchInfo);
+  bool matchReassocPtrAdd(MachineInstr &MI, BuildFnTy &MatchInfo);
+
+  /// Do constant folding when opportunities are exposed after MIR building.
+  bool matchConstantFold(MachineInstr &MI, APInt &MatchInfo);
+
+  /// \returns true if it is possible to narrow the width of a scalar binop
+  /// feeding a G_AND instruction \p MI.
+  bool matchNarrowBinopFeedingAnd(MachineInstr &MI, BuildFnTy &MatchInfo);
 
   /// Try to transform \p MI by using all of the above
   /// combine functions. Returns true if changed.
@@ -549,20 +609,12 @@ public:
   ///       and rename: s/bool tryEmit/void emit/
   bool tryEmitMemcpyInline(MachineInstr &MI);
 
-private:
-  // Memcpy family optimization helpers.
-  bool tryEmitMemcpyInline(MachineInstr &MI, Register Dst, Register Src,
-                           uint64_t KnownLen, Align DstAlign, Align SrcAlign,
-                           bool IsVolatile);
-  bool optimizeMemcpy(MachineInstr &MI, Register Dst, Register Src,
-                      uint64_t KnownLen, uint64_t Limit, Align DstAlign,
-                      Align SrcAlign, bool IsVolatile);
-  bool optimizeMemmove(MachineInstr &MI, Register Dst, Register Src,
-                       uint64_t KnownLen, Align DstAlign, Align SrcAlign,
-                       bool IsVolatile);
-  bool optimizeMemset(MachineInstr &MI, Register Dst, Register Val,
-                      uint64_t KnownLen, Align DstAlign, bool IsVolatile);
+  /// Match:
+  ///   (G_UMULO x, 2) -> (G_UADDO x, x)
+  ///   (G_SMULO x, 2) -> (G_SADDO x, x)
+  bool matchMulOBy2(MachineInstr &MI, BuildFnTy &MatchInfo);
 
+private:
   /// Given a non-indexed load or store instruction \p MI, find an offset that
   /// can be usefully and legally folded into it as a post-indexing operation.
   ///
@@ -595,8 +647,10 @@ private:
   /// at to the index of the load.
   /// \param [in] MemSizeInBits - The number of bits each load should produce.
   ///
-  /// \returns The lowest-index load found and the lowest index on success.
-  Optional<std::pair<MachineInstr *, int64_t>> findLoadOffsetsForLoadOrCombine(
+  /// \returns On success, a 3-tuple containing lowest-index load found, the
+  /// lowest index, and the last load in the sequence.
+  Optional<std::tuple<GZExtLoad *, int64_t, GZExtLoad *>>
+  findLoadOffsetsForLoadOrCombine(
       SmallDenseMap<int64_t, int64_t, 8> &MemOffset2Idx,
       const SmallVector<Register, 8> &RegsToVisit,
       const unsigned MemSizeInBits);

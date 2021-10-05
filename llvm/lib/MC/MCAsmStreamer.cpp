@@ -245,7 +245,7 @@ public:
                             unsigned ValueSize = 1,
                             unsigned MaxBytesToEmit = 0) override;
 
-  void emitCodeAlignment(unsigned ByteAlignment,
+  void emitCodeAlignment(unsigned ByteAlignment, const MCSubtargetInfo *STI,
                          unsigned MaxBytesToEmit = 0) override;
 
   void emitValueToOffset(const MCExpr *Offset,
@@ -253,6 +253,8 @@ public:
                          SMLoc Loc) override;
 
   void emitFileDirective(StringRef Filename) override;
+  void emitFileDirective(StringRef Filename, StringRef CompilerVerion,
+                         StringRef TimeStamp, StringRef Description) override;
   Expected<unsigned> tryEmitDwarfFileDirective(unsigned FileNo,
                                                StringRef Directory,
                                                StringRef Filename,
@@ -1427,6 +1429,7 @@ void MCAsmStreamer::emitValueToAlignment(unsigned ByteAlignment, int64_t Value,
 }
 
 void MCAsmStreamer::emitCodeAlignment(unsigned ByteAlignment,
+                                      const MCSubtargetInfo *STI,
                                       unsigned MaxBytesToEmit) {
   // Emit with a text fill value.
   emitValueToAlignment(ByteAlignment, MAI->getTextAlignFillValue(),
@@ -1447,6 +1450,28 @@ void MCAsmStreamer::emitFileDirective(StringRef Filename) {
   assert(MAI->hasSingleParameterDotFile());
   OS << "\t.file\t";
   PrintQuotedString(Filename, OS);
+  EmitEOL();
+}
+
+void MCAsmStreamer::emitFileDirective(StringRef Filename,
+                                      StringRef CompilerVerion,
+                                      StringRef TimeStamp,
+                                      StringRef Description) {
+  assert(MAI->hasFourStringsDotFile());
+  OS << "\t.file\t";
+  PrintQuotedString(Filename, OS);
+  OS << ",";
+  if (!CompilerVerion.empty()) {
+    PrintQuotedString(CompilerVerion, OS);
+  }
+  if (!TimeStamp.empty()) {
+    OS << ",";
+    PrintQuotedString(TimeStamp, OS);
+  }
+  if (!Description.empty()) {
+    OS << ",";
+    PrintQuotedString(Description, OS);
+  }
   EmitEOL();
 }
 

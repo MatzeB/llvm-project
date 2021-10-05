@@ -39,7 +39,11 @@
 #pragma push_macro("PTX70")
 #pragma push_macro("PTX71")
 #pragma push_macro("PTX72")
-#define PTX72 "ptx72"
+#pragma push_macro("PTX73")
+#pragma push_macro("PTX74")
+#define PTX74 "ptx74"
+#define PTX73 "ptx73|" PTX74
+#define PTX72 "ptx72|" PTX73
 #define PTX71 "ptx71|" PTX72
 #define PTX70 "ptx70|" PTX71
 #define PTX65 "ptx65|" PTX70
@@ -724,6 +728,7 @@ TARGET_BUILTIN(__hmma_m8n32k16_mma_f16f32, "vi*iC*iC*fC*IiIi", "", AND(SM_70,PTX
 TARGET_BUILTIN(__bmma_m8n8k128_ld_a_b1, "vi*iC*UiIi", "", AND(SM_75,PTX63))
 TARGET_BUILTIN(__bmma_m8n8k128_ld_b_b1, "vi*iC*UiIi", "", AND(SM_75,PTX63))
 TARGET_BUILTIN(__bmma_m8n8k128_ld_c, "vi*iC*UiIi", "", AND(SM_75,PTX63))
+TARGET_BUILTIN(__bmma_m8n8k128_mma_and_popc_b1, "vi*iC*iC*iC*Ii", "", AND(SM_75,PTX71))
 TARGET_BUILTIN(__bmma_m8n8k128_mma_xor_popc_b1, "vi*iC*iC*iC*Ii", "", AND(SM_75,PTX63))
 TARGET_BUILTIN(__bmma_m8n8k128_st_c_i32, "vi*iC*UiIi", "", AND(SM_75,PTX63))
 TARGET_BUILTIN(__imma_m16n16k16_ld_a_s8, "vi*iC*UiIi", "", AND(SM_72,PTX63))
@@ -814,3 +819,5 @@ TARGET_BUILTIN(__nvvm_cp_async_wait_all, "v", "", AND(SM_80,PTX70))
 #pragma pop_macro("PTX70")
 #pragma pop_macro("PTX71")
 #pragma pop_macro("PTX72")
+#pragma pop_macro("PTX73")
+#pragma pop_macro("PTX74")

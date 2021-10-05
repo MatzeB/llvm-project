@@ -189,7 +189,7 @@ private:
 } // anonymous namespace
 
 void BinaryEmitter::emitAll(StringRef OrgSecPrefix) {
-  Streamer.InitSections(false);
+  Streamer.initSections(false, *BC.STI);
 
   if (opts::UpdateDebugSections && BC.isELF()) {
     // Force the emission of debug line info into allocatable section to ensure
@@ -210,8 +210,10 @@ void BinaryEmitter::emitAll(StringRef OrgSecPrefix) {
 
   emitFunctions();
 
-  if (opts::UpdateDebugSections)
+  if (opts::UpdateDebugSections) {
     emitDebugLineInfoForOriginalFunctions();
+    DwarfLineTable::emit(BC, Streamer);
+  }
 
   emitDataSections(OrgSecPrefix);
 
@@ -287,14 +289,15 @@ bool BinaryEmitter::emitFunction(BinaryFunction &Function, bool EmitColdPart) {
   BC.Ctx->addGenDwarfSection(Section);
 
   if (BC.HasRelocations) {
-    Streamer.emitCodeAlignment(BinaryFunction::MinAlign);
+    Streamer.emitCodeAlignment(BinaryFunction::MinAlign, &*BC.STI);
     uint16_t MaxAlignBytes = EmitColdPart
       ? Function.getMaxColdAlignmentBytes()
       : Function.getMaxAlignmentBytes();
     if (MaxAlignBytes > 0)
-      Streamer.emitCodeAlignment(Function.getAlignment(), MaxAlignBytes);
+      Streamer.emitCodeAlignment(Function.getAlignment(), &*BC.STI,
+                                 MaxAlignBytes);
   } else {
-    Streamer.emitCodeAlignment(Function.getAlignment());
+    Streamer.emitCodeAlignment(Function.getAlignment(), &*BC.STI);
   }
 
   MCContext &Context = Streamer.getContext();
@@ -404,7 +407,7 @@ void BinaryEmitter::emitFunctionBody(BinaryFunction &BF, bool EmitColdPart,
 
     if ((opts::AlignBlocks || opts::PreserveBlocksAlignment)
         && BB->getAlignment() > 1) {
-      Streamer.emitCodeAlignment(BB->getAlignment(),
+      Streamer.emitCodeAlignment(BB->getAlignment(), &*BC.STI,
                                  BB->getAlignmentMaxBytes());
     }
     Streamer.emitLabel(BB->getLabel());
@@ -455,7 +458,7 @@ void BinaryEmitter::emitFunctionBody(BinaryFunction &BF, bool EmitColdPart,
         // This assumes the second instruction in the macro-op pair will get
         // assigned to its own MCRelaxableFragment. Since all JCC instructions
         // are relaxable, we should be safe.
-        Streamer.emitNeverAlignCodeAtEnd(/*Alignment to avoid=*/64);
+        Streamer.emitNeverAlignCodeAtEnd(/*Alignment to avoid=*/64, *BC.STI);
       }
 
       if (!EmitCodeOnly && opts::UpdateDebugSections && BF.getDWARFUnit()) {
@@ -654,7 +657,16 @@ SMLoc BinaryEmitter::emitLineInfo(const BinaryFunction &BF, SMLoc NewLoc,
     Flags,
     CurrentRow.Isa,
     CurrentRow.Discriminator);
-  BC.Ctx->setDwarfCompileUnitID(FunctionUnitIndex);
+  const MCDwarfLoc &DwarfLoc = BC.Ctx->getCurrentDwarfLoc();
+  BC.Ctx->clearDwarfLocSeen();
+
+  MCSymbol *LineSym = BC.Ctx->createTempSymbol();
+  Streamer.emitLabel(LineSym);
+
+  BC.getDwarfLineTable(FunctionUnitIndex)
+      .getMCLineSections()
+      .addLineEntry(MCDwarfLineEntry(LineSym, DwarfLoc),
+                    Streamer.getCurrentSectionOnly());
 
   return NewLoc;
 }
@@ -1010,34 +1022,30 @@ void BinaryEmitter::emitDebugLineInfoForOriginalFunctions() {
     uint64_t Address = It.first;
     if (LineTable->lookupAddressRange({Address, 0}, Function.getMaxSize(),
                                       Results)) {
-      MCLineSection &OutputLineTable =
-          BC.Ctx->getMCDwarfLineTable(Unit->getOffset()).getMCLineSections();
+      BinaryLineSection &OutputLineTable =
+          BC.getDwarfLineTable(Unit->getOffset()).getBinaryLineSections();
       for (uint32_t RowIndex : Results) {
         const DWARFDebugLine::Row &Row = LineTable->Rows[RowIndex];
         BC.Ctx->setCurrentDwarfLoc(
-            Row.File,
-            Row.Line,
-            Row.Column,
+            Row.File, Row.Line, Row.Column,
             (DWARF2_FLAG_IS_STMT * Row.IsStmt) |
-            (DWARF2_FLAG_BASIC_BLOCK * Row.BasicBlock) |
-            (DWARF2_FLAG_PROLOGUE_END * Row.PrologueEnd) |
-            (DWARF2_FLAG_EPILOGUE_BEGIN * Row.EpilogueBegin),
-            Row.Isa,
-            Row.Discriminator,
-            Row.Address.Address);
+                (DWARF2_FLAG_BASIC_BLOCK * Row.BasicBlock) |
+                (DWARF2_FLAG_PROLOGUE_END * Row.PrologueEnd) |
+                (DWARF2_FLAG_EPILOGUE_BEGIN * Row.EpilogueBegin),
+            Row.Isa, Row.Discriminator);
         MCDwarfLoc Loc = BC.Ctx->getCurrentDwarfLoc();
         BC.Ctx->clearDwarfLocSeen();
-        OutputLineTable.addLineEntry(MCDwarfLineEntry{nullptr, Loc},
-                                     FunctionSection);
+        OutputLineTable.addLineEntry(
+            BinaryDwarfLineEntry{Row.Address.Address, Loc}, FunctionSection);
       }
       // Add an empty entry past the end of the function
       // for end_sequence mark.
-      BC.Ctx->setCurrentDwarfLoc(0, 0, 0, 0, 0, 0,
-                                 Address + Function.getMaxSize());
+      BC.Ctx->setCurrentDwarfLoc(0, 0, 0, 0, 0, 0);
       MCDwarfLoc Loc = BC.Ctx->getCurrentDwarfLoc();
       BC.Ctx->clearDwarfLocSeen();
-      OutputLineTable.addLineEntry(MCDwarfLineEntry{nullptr, Loc},
-                                   FunctionSection);
+      OutputLineTable.addLineEntry(
+          BinaryDwarfLineEntry{Address + Function.getMaxSize(), Loc},
+          FunctionSection);
     } else {
       LLVM_DEBUG(dbgs() << "BOLT-DEBUG: function " << Function
                         << " has no associated line number information\n");

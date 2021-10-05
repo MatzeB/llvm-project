@@ -104,7 +104,13 @@ def V_CNDMASK_B64_PSEUDO : VOP3Common <(outs VReg_64:$vdst),
 // 64-bit vector move instruction. This is mainly used by the
 // SIFoldOperands pass to enable folding of inline immediates.
 def V_MOV_B64_PSEUDO : VPseudoInstSI <(outs VReg_64:$vdst),
-                                      (ins VSrc_b64:$src0)>;
+                                      (ins VSrc_b64:$src0)> {
+  let isReMaterializable = 1;
+  let isAsCheapAsAMove = 1;
+  let isMoveImm = 1;
+  let SchedRW = [Write64Bit];
+  let Size = 16; // Needs maximum 2 v_mov_b32 instructions 8 byte long each.
+}
 
 // 64-bit vector move with dpp. Expanded post-RA.
 def V_MOV_B64_DPP_PSEUDO : VOP_DPP_Pseudo <"v_mov_b64_dpp", VOP_I64_I64> {
@@ -310,6 +316,14 @@ def SI_ELSE : CFPseudoInstSI <
   (ins SReg_1:$src, brtarget:$target), [], 1, 1> {
   let Size = 12;
   let hasSideEffects = 1;
+}
+
+def SI_WATERFALL_LOOP : CFPseudoInstSI <
+  (outs),
+  (ins brtarget:$target), [], 1> {
+  let Size = 8;
+  let isBranch = 1;
+  let Defs = [];
 }
 
 def SI_LOOP : CFPseudoInstSI <
@@ -1003,21 +1017,32 @@ def : GCNPat <
 /********** Extraction, Insertion, Building and Casting  **********/
 /********** ============================================ **********/
 
-foreach Index = 0-2 in {
-  def Extract_Element_v2i32_#Index : Extract_Element <
-    i32, v2i32, Index, !cast<SubRegIndex>(sub#Index)
+// Special case for 2 element vectors. REQ_SEQUENCE produces better code
+// than an INSERT_SUBREG.
+multiclass Insert_Element_V2<RegisterClass RC, ValueType elem_type, ValueType vec_type> {
+  def : GCNPat <
+    (insertelt vec_type:$vec, elem_type:$elem, 0),
+    (REG_SEQUENCE RC, $elem, sub0, (elem_type (EXTRACT_SUBREG $vec, sub1)), sub1)
   >;
-  def Insert_Element_v2i32_#Index : Insert_Element <
+
+  def : GCNPat <
+    (insertelt vec_type:$vec, elem_type:$elem, 1),
+    (REG_SEQUENCE RC, (elem_type (EXTRACT_SUBREG $vec, sub0)), sub0, $elem, sub1)
+  >;
+}
+
+foreach Index = 0-1 in {
+  def Extract_Element_v2i32_#Index : Extract_Element <
     i32, v2i32, Index, !cast<SubRegIndex>(sub#Index)
   >;
 
   def Extract_Element_v2f32_#Index : Extract_Element <
     f32, v2f32, Index, !cast<SubRegIndex>(sub#Index)
   >;
-  def Insert_Element_v2f32_#Index : Insert_Element <
-    f32, v2f32, Index, !cast<SubRegIndex>(sub#Index)
-  >;
 }
+
+defm : Insert_Element_V2 <SReg_64, i32, v2i32>;
+defm : Insert_Element_V2 <SReg_64, f32, v2f32>;
 
 foreach Index = 0-2 in {
   def Extract_Element_v3i32_#Index : Extract_Element <
@@ -2083,6 +2108,22 @@ def : GCNPat <
 >;
 
 def : GCNPat <
+  (i1 (UniformUnaryFrag<trunc> i32:$a)),
+  (S_CMP_EQ_U32 (S_AND_B32 (i32 1), $a), (i32 1))
+>;
+
+def : GCNPat <
+  (i1 (UniformUnaryFrag<trunc> i16:$a)),
+  (S_CMP_EQ_U32 (S_AND_B32 (i32 1), $a), (i32 1))
+>;
+
+def : GCNPat <
+  (i1 (UniformUnaryFrag<trunc> i64:$a)),
+  (S_CMP_EQ_U32 (S_AND_B32 (i32 1),
+                    (i32 (EXTRACT_SUBREG $a, sub0))), (i32 1))
+>;
+
+def : GCNPat <
   (i1 (trunc i32:$a)),
   (V_CMP_EQ_U32_e64 (S_AND_B32 (i32 1), $a), (i32 1))
 >;
@@ -2264,31 +2305,37 @@ let SubtargetPredicate = NotHasMinMaxDenormModes in {
 
 
 let OtherPredicates = [HasDLInsts] in {
+// Don't allow source modifiers. If there are any source modifiers then it's
+// better to select fma instead of fmac.
 def : GCNPat <
-  (fma (f32 (VOP3Mods f32:$src0, i32:$src0_modifiers)),
-       (f32 (VOP3Mods f32:$src1, i32:$src1_modifiers)),
+  (fma (f32 (VOP3NoMods f32:$src0)),
+       (f32 (VOP3NoMods f32:$src1)),
        (f32 (VOP3NoMods f32:$src2))),
-  (V_FMAC_F32_e64 $src0_modifiers, $src0, $src1_modifiers, $src1,
+  (V_FMAC_F32_e64 SRCMODS.NONE, $src0, SRCMODS.NONE, $src1,
                   SRCMODS.NONE, $src2)
 >;
 } // End OtherPredicates = [HasDLInsts]
 
 let SubtargetPredicate = isGFX10Plus in
+// Don't allow source modifiers. If there are any source modifiers then it's
+// better to select fma instead of fmac.
 def : GCNPat <
-  (fma (f16 (VOP3Mods f32:$src0, i32:$src0_modifiers)),
-       (f16 (VOP3Mods f32:$src1, i32:$src1_modifiers)),
+  (fma (f16 (VOP3NoMods f32:$src0)),
+       (f16 (VOP3NoMods f32:$src1)),
        (f16 (VOP3NoMods f32:$src2))),
-  (V_FMAC_F16_e64 $src0_modifiers, $src0, $src1_modifiers, $src1,
+  (V_FMAC_F16_e64 SRCMODS.NONE, $src0, SRCMODS.NONE, $src1,
                   SRCMODS.NONE, $src2)
 >;
 
 let SubtargetPredicate = isGFX90APlus in
+// Don't allow source modifiers. If there are any source modifiers then it's
+// better to select fma instead of fmac.
 def : GCNPat <
-  (fma (f64 (VOP3Mods0 f64:$src0, i32:$src0_modifiers, i1:$clamp, i32:$omod)),
-       (f64 (VOP3Mods f64:$src1, i32:$src1_modifiers)),
+  (fma (f64 (VOP3NoMods f64:$src0)),
+       (f64 (VOP3NoMods f64:$src1)),
        (f64 (VOP3NoMods f64:$src2))),
-  (V_FMAC_F64_e64 $src0_modifiers, $src0, $src1_modifiers, $src1,
-                  SRCMODS.NONE, $src2, $clamp, $omod)
+  (V_FMAC_F64_e64 SRCMODS.NONE, $src0, SRCMODS.NONE, $src1,
+                  SRCMODS.NONE, $src2)
 >;
 
 // COPY is workaround tablegen bug from multiple outputs
@@ -2642,7 +2689,15 @@ class AMDGPUGenericInstruction : GenericInstruction {
   let Namespace = "AMDGPU";
 }
 
+// Returns -1 if the input is zero.
 def G_AMDGPU_FFBH_U32 : AMDGPUGenericInstruction {
+  let OutOperandList = (outs type0:$dst);
+  let InOperandList = (ins type1:$src);
+  let hasSideEffects = 0;
+}
+
+// Returns -1 if the input is zero.
+def G_AMDGPU_FFBL_B32 : AMDGPUGenericInstruction {
   let OutOperandList = (outs type0:$dst);
   let InOperandList = (ins type1:$src);
   let hasSideEffects = 0;

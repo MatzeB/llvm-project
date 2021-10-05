@@ -368,7 +368,7 @@ void MCObjectStreamer::emitInstruction(const MCInst &Inst,
                                                 "' cannot have instructions");
     return;
   }
-  getAssembler().getBackend().emitInstructionBegin(*this, Inst);
+  getAssembler().getBackend().emitInstructionBegin(*this, Inst, STI);
   emitInstructionImpl(Inst, STI);
   getAssembler().getBackend().emitInstructionEnd(*this, Inst);
 }
@@ -467,33 +467,6 @@ static const MCExpr *buildSymbolDiff(MCObjectStreamer &OS, const MCSymbol *A,
   const MCExpr *AddrDelta =
       MCBinaryExpr::create(MCBinaryExpr::Sub, ARef, BRef, Context);
   return AddrDelta;
-}
-
-static void emitDwarfSetLineAddrAbs(MCObjectStreamer &OS,
-                                    MCDwarfLineTableParams Params,
-                                    int64_t LineDelta, uint64_t Address,
-                                    int PointerSize) {
-  // emit the sequence to set the address
-  OS.emitIntValue(dwarf::DW_LNS_extended_op, 1);
-  OS.emitULEB128IntValue(PointerSize + 1);
-  OS.emitIntValue(dwarf::DW_LNE_set_address, 1);
-  OS.emitIntValue(Address, PointerSize);
-
-  // emit the sequence for the LineDelta (from 1) and a zero address delta.
-  MCDwarfLineAddr::Emit(&OS, Params, LineDelta, 0);
-}
-
-void MCObjectStreamer::emitDwarfAdvanceLineAddrAbs(int64_t LineDelta,
-                                                   uint64_t Address,
-                                                   uint64_t AddressDelta,
-                                                   unsigned PointerSize) {
-  if (Address != -1ULL) {
-    emitDwarfSetLineAddrAbs(*this, Assembler->getDWARFLinetableParams(),
-                            LineDelta, Address, PointerSize);
-    return;
-  }
-  MCDwarfLineAddr::Emit(this, Assembler->getDWARFLinetableParams(), LineDelta,
-                        AddressDelta);
 }
 
 static void emitDwarfSetLineAddr(MCObjectStreamer &OS,
@@ -636,13 +609,15 @@ void MCObjectStreamer::emitValueToAlignment(unsigned ByteAlignment,
 }
 
 void MCObjectStreamer::emitCodeAlignment(unsigned ByteAlignment,
+                                         const MCSubtargetInfo *STI,
                                          unsigned MaxBytesToEmit) {
   emitValueToAlignment(ByteAlignment, 0, 1, MaxBytesToEmit);
-  cast<MCAlignFragment>(getCurrentFragment())->setEmitNops(true);
+  cast<MCAlignFragment>(getCurrentFragment())->setEmitNops(true, STI);
 }
 
-void MCObjectStreamer::emitNeverAlignCodeAtEnd(unsigned ByteAlignment) {
-  insert(new MCNeverAlignFragment(ByteAlignment));
+void MCObjectStreamer::emitNeverAlignCodeAtEnd(unsigned ByteAlignment,
+                                               const MCSubtargetInfo &STI) {
+  insert(new MCNeverAlignFragment(ByteAlignment, STI));
 }
 
 void MCObjectStreamer::emitValueToOffset(const MCExpr *Offset,
@@ -866,17 +841,26 @@ void MCObjectStreamer::emitFill(const MCExpr &NumValues, int64_t Size,
 }
 
 void MCObjectStreamer::emitNops(int64_t NumBytes, int64_t ControlledNopLength,
-                                SMLoc Loc) {
+                                SMLoc Loc, const MCSubtargetInfo &STI) {
   // Emit an NOP fragment.
   MCDataFragment *DF = getOrCreateDataFragment();
   flushPendingLabels(DF, DF->getContents().size());
 
   assert(getCurrentSectionOnly() && "need a section");
-  insert(new MCNopsFragment(NumBytes, ControlledNopLength, Loc));
+
+  insert(new MCNopsFragment(NumBytes, ControlledNopLength, Loc, STI));
 }
 
 void MCObjectStreamer::emitFileDirective(StringRef Filename) {
   getAssembler().addFileName(Filename);
+}
+
+void MCObjectStreamer::emitFileDirective(StringRef Filename,
+                                         StringRef CompilerVerion,
+                                         StringRef TimeStamp,
+                                         StringRef Description) {
+  getAssembler().addFileName(Filename);
+  // TODO: add additional info to integrated assembler.
 }
 
 void MCObjectStreamer::emitAddrsig() {

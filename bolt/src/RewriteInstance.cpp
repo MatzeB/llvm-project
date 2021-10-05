@@ -494,9 +494,10 @@ RewriteInstance::RewriteInstance(ELFObjectFileBase *File, const int Argc,
 
   BC = BinaryContext::createBinaryContext(
       File, IsPIC,
-      DWARFContext::create(*File, nullptr, opts::DWPPathName,
-                           WithColor::defaultErrorHandler,
-                           WithColor::defaultWarningHandler));
+      DWARFContext::create(
+          *File, DWARFContext::ProcessDebugRelocations::Process, nullptr,
+          opts::DWPPathName, WithColor::defaultErrorHandler,
+          WithColor::defaultWarningHandler));
 
   BAT = std::make_unique<BoltAddressTranslation>(*BC);
 
@@ -5158,9 +5159,8 @@ void RewriteInstance::rewriteFile() {
                << Twine::utohexstr(Function->getMaxSize())
                << ") for function " << *Function << '\n';
       }
-      FailedAddresses.emplace_back(Function->getAddress());
       // Remove jump table sections that this function owns in non-reloc mode
-      // because we don't wnat to write them anymore
+      // because we don't want to write them anymore.
       if (!BC->HasRelocations && opts::JumpTables == JTS_BASIC) {
         for (auto &JTI : Function->JumpTables) {
           JumpTable *JT = JTI.second;
@@ -5188,7 +5188,8 @@ void RewriteInstance::rewriteFile() {
     if (Function->getMaxSize() != std::numeric_limits<uint64_t>::max()) {
       uint64_t Pos = OS.tell();
       OS.seek(Function->getFileOffset() + Function->getImageSize());
-      MAB->writeNopData(OS, Function->getMaxSize() - Function->getImageSize());
+      MAB->writeNopData(OS, Function->getMaxSize() - Function->getImageSize(),
+                        &*BC->STI);
 
       OS.seek(Pos);
     }

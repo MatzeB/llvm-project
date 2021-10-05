@@ -8,8 +8,8 @@
 
 #include "TestDialect.h"
 #include "TestTypes.h"
+#include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
-#include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVMPass.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Pass/Pass.h"
@@ -25,7 +25,7 @@ public:
       test::TestTypeProducerOp>::ConvertOpToLLVMPattern;
 
   LogicalResult
-  matchAndRewrite(test::TestTypeProducerOp op, ArrayRef<Value> operands,
+  matchAndRewrite(test::TestTypeProducerOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     rewriter.replaceOpWithNewOp<LLVM::NullOp>(op, getVoidPtrType());
     return success();

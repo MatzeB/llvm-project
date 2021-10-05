@@ -121,8 +121,6 @@ public:
     return AttributeSpecs[idx].getImplicitConstValue();
   }
 
-  const AttributeSpec *findAttribute(dwarf::Attribute Attr) const;
-
   /// Get the index of the specified attribute.
   ///
   /// Searches the this abbreviation declaration for the index of the specified

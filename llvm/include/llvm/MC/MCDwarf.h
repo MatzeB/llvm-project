@@ -20,6 +20,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCSection.h"
+#include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MD5.h"
 #include <cassert>
@@ -34,7 +35,6 @@ namespace llvm {
 template <typename T> class ArrayRef;
 class MCAsmBackend;
 class MCContext;
-class MCDwarfLineStr;
 class MCObjectStreamer;
 class MCStreamer;
 class MCSymbol;
@@ -46,6 +46,24 @@ namespace mcdwarf {
 // Emit the common part of the DWARF 5 range/locations list tables header.
 MCSymbol *emitListsTableHeaderStart(MCStreamer &S);
 } // namespace mcdwarf
+
+/// Manage the .debug_line_str section contents, if we use it.
+class MCDwarfLineStr {
+  MCSymbol *LineStrLabel = nullptr;
+  StringTableBuilder LineStrings{StringTableBuilder::DWARF};
+  bool UseRelocs = false;
+
+public:
+  /// Construct an instance that can emit .debug_line_str (for use in a normal
+  /// v5 line table).
+  explicit MCDwarfLineStr(MCContext &Ctx);
+
+  /// Emit a reference to the string.
+  void emitRef(MCStreamer *MCOS, StringRef Path);
+
+  /// Emit the .debug_line_str section if appropriate.
+  void emitSection(MCStreamer *MCOS);
+};
 
 /// Instances of this class represent the name of the dwarf .file directive and
 /// its associated dwarf file number in the MC file. MCDwarfFile's are created
@@ -81,7 +99,6 @@ class MCDwarfLoc {
   uint8_t Flags;
   uint8_t Isa;
   uint32_t Discriminator;
-  uint64_t AbsoluteAddr;
 
 // Flag that indicates the initial value of the is_stmt_start flag.
 #define DWARF2_LINE_DEFAULT_IS_STMT 1
@@ -96,17 +113,14 @@ private: // MCContext manages these
   friend class MCDwarfLineEntry;
 
   MCDwarfLoc(unsigned fileNum, unsigned line, unsigned column, unsigned flags,
-             unsigned isa, unsigned discriminator, uint64_t addr=-1ULL)
+             unsigned isa, unsigned discriminator)
       : FileNum(fileNum), Line(line), Column(column), Flags(flags), Isa(isa),
-        Discriminator(discriminator), AbsoluteAddr(addr) {}
+        Discriminator(discriminator) {}
 
   // Allow the default copy constructor and assignment operator to be used
   // for an MCDwarfLoc object.
 
 public:
-  /// \brief Get the AbsoluteAddr of this MCDwarfLoc.
-  uint64_t getAbsoluteAddr() const { return AbsoluteAddr; }
-
   /// Get the FileNum of this MCDwarfLoc.
   unsigned getFileNum() const { return FileNum; }
 
@@ -152,11 +166,6 @@ public:
   /// Set the Discriminator of this MCDwarfLoc.
   void setDiscriminator(unsigned discriminator) {
     Discriminator = discriminator;
-  }
-
-  /// \brief Set the AbsoluteAddr of this MCDwarfLoc.
-  void setAbsoluteAddr(uint64_t addr) {
-    AbsoluteAddr = addr;
   }
 };
 
@@ -325,6 +334,11 @@ public:
   // This emits the Dwarf file and the line tables for a given Compile Unit.
   void emitCU(MCStreamer *MCOS, MCDwarfLineTableParams Params,
               Optional<MCDwarfLineStr> &LineStr) const;
+
+  // This emits a single line table associated with a given Section.
+  static void
+  emitOne(MCStreamer *MCOS, MCSection *Section,
+          const MCLineSection::MCDwarfLineEntryCollection &LineEntries);
 
   Expected<unsigned> tryGetFile(StringRef &Directory, StringRef &FileName,
                                 Optional<MD5::MD5Result> Checksum,

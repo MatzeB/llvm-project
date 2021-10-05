@@ -234,7 +234,8 @@ public:
   bool RunScriptFormatKeyword(const char *impl_function, ValueObject *value,
                               std::string &output, Status &error) override;
 
-  bool LoadScriptingModule(const char *filename, bool init_session,
+  bool LoadScriptingModule(const char *filename,
+                           const LoadScriptOptions &options,
                            lldb_private::Status &error,
                            StructuredData::ObjectSP *module_sp = nullptr,
                            FileSpec extra_search_dir = {}) override;
@@ -292,8 +293,6 @@ public:
 
   // PluginInterface protocol
   lldb_private::ConstString GetPluginName() override;
-
-  uint32_t GetPluginVersion() override;
 
   class Locker : public ScriptInterpreterLocker {
   public:
@@ -431,11 +430,9 @@ public:
       int stdin_fd = GetInputFD();
       if (stdin_fd >= 0) {
         Terminal terminal(stdin_fd);
-        TerminalState terminal_state;
-        const bool is_a_tty = terminal.IsATerminal();
+        TerminalState terminal_state(terminal);
 
-        if (is_a_tty) {
-          terminal_state.Save(stdin_fd, false);
+        if (terminal.IsATerminal()) {
           terminal.SetCanonical(false);
           terminal.SetEcho(true);
         }
@@ -465,9 +462,6 @@ public:
         run_string.Printf("run_python_interpreter (%s)",
                           m_python->GetDictionaryName());
         PyRun_SimpleString(run_string.GetData());
-
-        if (is_a_tty)
-          terminal_state.Restore();
       }
     }
     SetIsDone(true);

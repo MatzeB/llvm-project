@@ -92,10 +92,10 @@ struct AsyncParallelForPass
   AsyncParallelForPass() = default;
 
   AsyncParallelForPass(bool asyncDispatch, int32_t numWorkerThreads,
-                       int32_t targetBlockSize) {
+                       int32_t minTaskSize) {
     this->asyncDispatch = asyncDispatch;
     this->numWorkerThreads = numWorkerThreads;
-    this->targetBlockSize = targetBlockSize;
+    this->minTaskSize = minTaskSize;
   }
 
   void runOnOperation() override;
@@ -104,9 +104,9 @@ struct AsyncParallelForPass
 struct AsyncParallelForRewrite : public OpRewritePattern<scf::ParallelOp> {
 public:
   AsyncParallelForRewrite(MLIRContext *ctx, bool asyncDispatch,
-                          int32_t numWorkerThreads, int32_t targetBlockSize)
+                          int32_t numWorkerThreads, int32_t minTaskSize)
       : OpRewritePattern(ctx), asyncDispatch(asyncDispatch),
-        numWorkerThreads(numWorkerThreads), targetBlockSize(targetBlockSize) {}
+        numWorkerThreads(numWorkerThreads), minTaskSize(minTaskSize) {}
 
   LogicalResult matchAndRewrite(scf::ParallelOp op,
                                 PatternRewriter &rewriter) const override;
@@ -114,7 +114,7 @@ public:
 private:
   bool asyncDispatch;
   int32_t numWorkerThreads;
-  int32_t targetBlockSize;
+  int32_t minTaskSize;
 };
 
 struct ParallelComputeFunctionType {
@@ -189,6 +189,10 @@ createParallelComputeFunction(scf::ParallelOp op, PatternRewriter &rewriter) {
   ImplicitLocOpBuilder b(op.getLoc(), rewriter);
 
   ModuleOp module = op->getParentOfType<ModuleOp>();
+
+  // Make sure that all constants will be inside the parallel operation body to
+  // reduce the number of parallel compute function arguments.
+  cloneConstantsIntoTheRegion(op.getLoopBody(), rewriter);
 
   ParallelComputeFunctionType computeFuncType =
       getParallelComputeFunctionType(op, rewriter);
@@ -504,12 +508,6 @@ static void doAsyncDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
   Value c0 = b.create<ConstantIndexOp>(0);
   Value c1 = b.create<ConstantIndexOp>(1);
 
-  // Create an async.group to wait on all async tokens from the concurrent
-  // execution of multiple parallel compute function. First block will be
-  // executed synchronously in the caller thread.
-  Value groupSize = b.create<SubIOp>(blockCount, c1);
-  Value group = b.create<CreateGroupOp>(GroupType::get(ctx), groupSize);
-
   // Appends operands shared by async dispatch and parallel compute functions to
   // the given operands vector.
   auto appendBlockComputeOperands = [&](SmallVector<Value> &operands) {
@@ -539,6 +537,12 @@ static void doAsyncDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
   };
 
   auto asyncDispatch = [&](OpBuilder &nestedBuilder, Location loc) {
+    // Create an async.group to wait on all async tokens from the concurrent
+    // execution of multiple parallel compute function. First block will be
+    // executed synchronously in the caller thread.
+    Value groupSize = b.create<SubIOp>(blockCount, c1);
+    Value group = b.create<CreateGroupOp>(GroupType::get(ctx), groupSize);
+
     ImplicitLocOpBuilder nb(loc, nestedBuilder);
 
     // Launch async dispatch function for [0, blockCount) range.
@@ -547,20 +551,21 @@ static void doAsyncDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
 
     nb.create<CallOp>(asyncDispatchFunction.sym_name(),
                       asyncDispatchFunction.getCallableResults(), operands);
+
+    // Wait for the completion of all parallel compute operations.
+    b.create<AwaitAllOp>(group);
+
     nb.create<scf::YieldOp>();
   };
 
   // Dispatch either single block compute function, or launch async dispatch.
   b.create<scf::IfOp>(TypeRange(), isSingleBlock, syncDispatch, asyncDispatch);
-
-  // Wait for the completion of all parallel compute operations.
-  b.create<AwaitAllOp>(group);
 }
 
 // Dispatch parallel compute functions by submitting all async compute tasks
 // from a simple for loop in the caller thread.
 static void
-doSequantialDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
+doSequentialDispatch(ImplicitLocOpBuilder &b, PatternRewriter &rewriter,
                      ParallelComputeFunction &parallelComputeFunction,
                      scf::ParallelOp op, Value blockSize, Value blockCount,
                      const SmallVector<Value> &tripCounts) {
@@ -650,52 +655,73 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
   for (size_t i = 1; i < tripCounts.size(); ++i)
     tripCount = b.create<MulIOp>(tripCount, tripCounts[i]);
 
-  // With large number of threads the value of creating many compute blocks
-  // is reduced because the problem typically becomes memory bound. For small
-  // number of threads it helps with stragglers.
-  float overshardingFactor = numWorkerThreads <= 4    ? 8.0
-                             : numWorkerThreads <= 8  ? 4.0
-                             : numWorkerThreads <= 16 ? 2.0
-                             : numWorkerThreads <= 32 ? 1.0
-                             : numWorkerThreads <= 64 ? 0.8
-                                                      : 0.6;
+  // Short circuit no-op parallel loops (zero iterations) that can arise from
+  // the memrefs with dynamic dimension(s) equal to zero.
+  Value c0 = b.create<ConstantIndexOp>(0);
+  Value isZeroIterations = b.create<CmpIOp>(CmpIPredicate::eq, tripCount, c0);
 
-  // Do not overload worker threads with too many compute blocks.
-  Value maxComputeBlocks = b.create<ConstantIndexOp>(
-      std::max(1, static_cast<int>(numWorkerThreads * overshardingFactor)));
+  // Do absolutely nothing if the trip count is zero.
+  auto noOp = [&](OpBuilder &nestedBuilder, Location loc) {
+    nestedBuilder.create<scf::YieldOp>(loc);
+  };
 
-  // Target block size from the pass parameters.
-  Value targetComputeBlockSize = b.create<ConstantIndexOp>(targetBlockSize);
+  // Compute the parallel block size and dispatch concurrent tasks computing
+  // results for each block.
+  auto dispatch = [&](OpBuilder &nestedBuilder, Location loc) {
+    ImplicitLocOpBuilder nb(loc, nestedBuilder);
 
-  // Compute parallel block size from the parallel problem size:
-  //   blockSize = min(tripCount,
-  //                   max(ceil_div(tripCount, maxComputeBlocks),
-  //                       targetComputeBlockSize))
-  Value bs0 = b.create<SignedCeilDivIOp>(tripCount, maxComputeBlocks);
-  Value bs1 = b.create<CmpIOp>(CmpIPredicate::sge, bs0, targetComputeBlockSize);
-  Value bs2 = b.create<SelectOp>(bs1, bs0, targetComputeBlockSize);
-  Value bs3 = b.create<CmpIOp>(CmpIPredicate::sle, tripCount, bs2);
-  Value blockSize0 = b.create<SelectOp>(bs3, tripCount, bs2);
-  Value blockCount0 = b.create<SignedCeilDivIOp>(tripCount, blockSize0);
+    // With large number of threads the value of creating many compute blocks
+    // is reduced because the problem typically becomes memory bound. For small
+    // number of threads it helps with stragglers.
+    float overshardingFactor = numWorkerThreads <= 4    ? 8.0
+                               : numWorkerThreads <= 8  ? 4.0
+                               : numWorkerThreads <= 16 ? 2.0
+                               : numWorkerThreads <= 32 ? 1.0
+                               : numWorkerThreads <= 64 ? 0.8
+                                                        : 0.6;
 
-  // Compute balanced block size for the estimated block count.
-  Value blockSize = b.create<SignedCeilDivIOp>(tripCount, blockCount0);
-  Value blockCount = b.create<SignedCeilDivIOp>(tripCount, blockSize);
+    // Do not overload worker threads with too many compute blocks.
+    Value maxComputeBlocks = b.create<ConstantIndexOp>(
+        std::max(1, static_cast<int>(numWorkerThreads * overshardingFactor)));
 
-  // Create a parallel compute function that takes a block id and computes the
-  // parallel operation body for a subset of iteration space.
-  ParallelComputeFunction parallelComputeFunction =
-      createParallelComputeFunction(op, rewriter);
+    // Target block size from the pass parameters.
+    Value minTaskSizeCst = b.create<ConstantIndexOp>(minTaskSize);
 
-  // Dispatch parallel compute function using async recursive work splitting, or
-  // by submitting compute task sequentially from a caller thread.
-  if (asyncDispatch) {
-    doAsyncDispatch(b, rewriter, parallelComputeFunction, op, blockSize,
-                    blockCount, tripCounts);
-  } else {
-    doSequantialDispatch(b, rewriter, parallelComputeFunction, op, blockSize,
-                         blockCount, tripCounts);
-  }
+    // Compute parallel block size from the parallel problem size:
+    //   blockSize = min(tripCount,
+    //                   max(ceil_div(tripCount, maxComputeBlocks),
+    //                       ceil_div(minTaskSize, bodySize)))
+    Value bs0 = b.create<SignedCeilDivIOp>(tripCount, maxComputeBlocks);
+    Value bs1 = b.create<CmpIOp>(CmpIPredicate::sge, bs0, minTaskSizeCst);
+    Value bs2 = b.create<SelectOp>(bs1, bs0, minTaskSizeCst);
+    Value bs3 = b.create<CmpIOp>(CmpIPredicate::sle, tripCount, bs2);
+    Value blockSize0 = b.create<SelectOp>(bs3, tripCount, bs2);
+    Value blockCount0 = b.create<SignedCeilDivIOp>(tripCount, blockSize0);
+
+    // Compute balanced block size for the estimated block count.
+    Value blockSize = b.create<SignedCeilDivIOp>(tripCount, blockCount0);
+    Value blockCount = b.create<SignedCeilDivIOp>(tripCount, blockSize);
+
+    // Create a parallel compute function that takes a block id and computes the
+    // parallel operation body for a subset of iteration space.
+    ParallelComputeFunction parallelComputeFunction =
+        createParallelComputeFunction(op, rewriter);
+
+    // Dispatch parallel compute function using async recursive work splitting,
+    // or by submitting compute task sequentially from a caller thread.
+    if (asyncDispatch) {
+      doAsyncDispatch(b, rewriter, parallelComputeFunction, op, blockSize,
+                      blockCount, tripCounts);
+    } else {
+      doSequentialDispatch(b, rewriter, parallelComputeFunction, op, blockSize,
+                           blockCount, tripCounts);
+    }
+
+    nb.create<scf::YieldOp>();
+  };
+
+  // Replace the `scf.parallel` operation with the parallel compute function.
+  b.create<scf::IfOp>(TypeRange(), isZeroIterations, noOp, dispatch);
 
   // Parallel operation was replaced with a block iteration loop.
   rewriter.eraseOp(op);
@@ -708,7 +734,7 @@ void AsyncParallelForPass::runOnOperation() {
 
   RewritePatternSet patterns(ctx);
   patterns.add<AsyncParallelForRewrite>(ctx, asyncDispatch, numWorkerThreads,
-                                        targetBlockSize);
+                                        minTaskSize);
 
   if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
     signalPassFailure();
@@ -718,9 +744,9 @@ std::unique_ptr<Pass> mlir::createAsyncParallelForPass() {
   return std::make_unique<AsyncParallelForPass>();
 }
 
-std::unique_ptr<Pass>
-mlir::createAsyncParallelForPass(bool asyncDispatch, int32_t numWorkerThreads,
-                                 int32_t targetBlockSize) {
+std::unique_ptr<Pass> mlir::createAsyncParallelForPass(bool asyncDispatch,
+                                                       int32_t numWorkerThreads,
+                                                       int32_t minTaskSize) {
   return std::make_unique<AsyncParallelForPass>(asyncDispatch, numWorkerThreads,
-                                                targetBlockSize);
+                                                minTaskSize);
 }

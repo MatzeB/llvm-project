@@ -105,28 +105,32 @@
 //  expected layouts after transformations. Combinations of memref.cast +
 //  canonicalization are responsible for clean ups.
 
+#include "mlir/Dialect/Linalg/Transforms/ComprehensiveBufferize.h"
+
 #include "PassDetail.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
 #include "mlir/Dialect/Linalg/Passes.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/Dialect/Vector/VectorOps.h"
+#include "mlir/IR/AsmState.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/BufferUtils.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/EquivalenceClasses.h"
 #include "llvm/ADT/ScopeExit.h"
-#include "llvm/ADT/SetOperations.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/FormatVariadic.h"
 
-#define DEBUG_TYPE "comprehensive-func-bufferize"
+#define DEBUG_TYPE "comprehensive-module-bufferize"
 
 using namespace mlir;
 using namespace linalg;
@@ -134,6 +138,13 @@ using namespace tensor;
 
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << X)
+
+// TODO: from some HW description.
+static constexpr int64_t kBufferAlignments = 128;
+
+// Forward declarations.
+static std::string printOperationInfo(Operation *, bool prefix = true);
+static std::string printValueInfo(Value, bool prefix = true);
 
 //===----------------------------------------------------------------------===//
 // Generic helpers.
@@ -164,6 +175,14 @@ static ReturnOp getAssumedUniqueReturnOp(FuncOp funcOp) {
   return returnOp;
 }
 
+/// Return true if `value` is the result of an InitTensorOp or a cast thereof.
+static bool isInitTensorOp(Value value) {
+  tensor::CastOp castOp;
+  while ((castOp = value.getDefiningOp<tensor::CastOp>()))
+    value = castOp.source();
+  return value.getDefiningOp<InitTensorOp>();
+}
+
 //===----------------------------------------------------------------------===//
 // Bufferization-specific BlockAndValueMapping support with debugging.
 //===----------------------------------------------------------------------===//
@@ -171,13 +190,15 @@ static ReturnOp getAssumedUniqueReturnOp(FuncOp funcOp) {
 /// Wrapper for better debugging.
 static void map(BlockAndValueMapping &bvm, ValueRange keys, ValueRange values) {
   assert(!keys.empty() && "Unexpected empty keys");
-  LDBG("Map: " << keys.front() << " to " << values.front() << '\n');
+  LDBG("\n\tMap: " << printValueInfo(keys.front())
+                   << "\n\tto: " << printValueInfo(values.front()) << '\n');
   return bvm.map(keys, values);
 }
 
 /// Wrapper for better debugging.
 static void map(BlockAndValueMapping &bvm, Value key, Value value) {
-  LDBG("Map: " << key << " to " << value << '\n');
+  LDBG("\n\tMap: " << printValueInfo(key) << "\n\tto: " << printValueInfo(value)
+                   << '\n');
   return bvm.map(key, value);
 }
 
@@ -198,7 +219,7 @@ static Value lookup(const BlockAndValueMapping &bvm, Value key) {
   } else {
     parentOp = key.getDefiningOp()->getParentOfType<FuncOp>();
   }
-  LDBG("In func:\n" << *parentOp << "NO VALUE FOR KEY: " << key << '\n');
+  LDBG("In func:\n" << *parentOp << "\nNO VALUE FOR KEY: " << key << '\n');
   (void)parentOp;
   return Value();
 }
@@ -258,8 +279,9 @@ static void setInPlaceOpResult(OpResult opResult,
                  llvm::to_vector<4>(attr.getAsValueRange<StringAttr>()))
            : SmallVector<StringRef>(op->getNumResults(),
                                     stringify(InPlaceSpec::None));
-  LDBG("->set inPlace=" << stringify(inPlace) << ": " << *op
-                        << " @idx=" << opResult.getResultNumber() << '\n');
+  LDBG("->set inPlace=" << stringify(inPlace) << " <- #"
+                        << opResult.getResultNumber() << ": "
+                        << printOperationInfo(op) << "\n");
   inPlaceVector[opResult.getResultNumber()] = stringify(inPlace);
   op->setAttr(kInPlaceResultsAttrName,
               OpBuilder(op).getStrArrayAttr(inPlaceVector));
@@ -322,8 +344,10 @@ setInPlaceFuncArgument(BlockArgument bbArg,
 
 /// Remove the attribute that triggers inplace bufferization on a FuncOp
 /// argument `bbArg`.
-static void removeInPlaceFuncArgument(BlockArgument bbArg) {
+static void removeBufferizationFuncArguments(BlockArgument bbArg) {
   auto funcOp = cast<FuncOp>(bbArg.getOwner()->getParentOp());
+  funcOp.removeArgAttr(bbArg.getArgNumber(),
+                       LinalgDialect::kBufferLayoutAttrName);
   funcOp.removeArgAttr(bbArg.getArgNumber(),
                        LinalgDialect::kInplaceableAttrName);
 }
@@ -332,6 +356,58 @@ LLVM_ATTRIBUTE_UNUSED static InPlaceSpec getInPlace(Value v) {
   if (auto bbArg = v.dyn_cast<BlockArgument>())
     return getInPlace(bbArg);
   return getInPlace(v.cast<OpResult>());
+}
+
+//===----------------------------------------------------------------------===//
+// Printing helpers.
+//===----------------------------------------------------------------------===//
+
+/// Helper method printing the bufferization information of a buffer / tensor.
+static void printTensorOrBufferInfo(std::string prefix, Value value,
+                                    AsmState &state, llvm::raw_ostream &os) {
+  if (!value.getType().isa<ShapedType>())
+    return;
+  os << prefix;
+  value.printAsOperand(os, state);
+  os << " : " << value.getType();
+  if (getInPlace(value) == InPlaceSpec::None)
+    return;
+  os << " [InPlace=" << stringify(getInPlace(value)) << "]";
+}
+
+/// Print the operation name and bufferization information.
+static std::string printOperationInfo(Operation *op, bool prefix) {
+  std::string result;
+  llvm::raw_string_ostream os(result);
+  AsmState state(op->getParentOfType<mlir::FuncOp>());
+  StringRef tab = prefix ? "\n[" DEBUG_TYPE "]\t" : "";
+  os << tab << op->getName();
+  SmallVector<Value> shapedOperands;
+  for (OpOperand &opOperand : op->getOpOperands()) {
+    std::string prefix =
+        llvm::formatv("{0}  -> #{1} ", tab, opOperand.getOperandNumber());
+    printTensorOrBufferInfo(prefix, opOperand.get(), state, os);
+  }
+  for (OpResult opResult : op->getOpResults()) {
+    std::string prefix =
+        llvm::formatv("{0}  <- #{1} ", tab, opResult.getResultNumber());
+    printTensorOrBufferInfo(prefix, opResult, state, os);
+  }
+  return result;
+}
+
+/// Print the bufferization information for the defining op or block argument.
+static std::string printValueInfo(Value value, bool prefix) {
+  auto *op = value.getDefiningOp();
+  if (op)
+    return printOperationInfo(op, prefix);
+  // Print the block argument bufferization information.
+  std::string result;
+  llvm::raw_string_ostream os(result);
+  AsmState state(value.getParentRegion()->getParentOfType<mlir::FuncOp>());
+  os << value;
+  printTensorOrBufferInfo("\n\t - ", value, state, os);
+  return result;
 }
 
 //===----------------------------------------------------------------------===//
@@ -360,6 +436,7 @@ static bool hasKnownBufferizationAliasingBehavior(Operation *op) {
       isa<CallOpInterface,
           tensor::CastOp,
           ConstantOp,
+          tensor::DimOp,
           ExtractSliceOp,
           scf::ForOp,
           InsertSliceOp,
@@ -487,6 +564,7 @@ static Optional<OpOperand *> getAliasingOpOperand(OpResult result) {
       .Case([&](scf::ForOp op) {
         return &op.getIterOpOperands()[result.getResultNumber()];
       })
+      .Case([&](InitTensorOp op) { return nullptr; })
       .Case([&](InsertSliceOp op) { return &op->getOpOperand(1); })
       .Case([&](LinalgOp op) {
         return op.getOutputTensorOperands()[result.getResultNumber()];
@@ -515,8 +593,10 @@ static Optional<OpResult> getAliasingOpResult(OpOperand &opOperand) {
     return None;
   return TypeSwitch<Operation *, OpResult>(opOperand.getOwner())
       // These terminators legitimately have no result.
-      .Case<ReturnOp, linalg::YieldOp, scf::YieldOp>(
+      .Case<ReturnOp, linalg::InitTensorOp, linalg::YieldOp, scf::YieldOp>(
           [&](auto op) { return OpResult(); })
+      // DimOp has no tensor result.
+      .Case<tensor::DimOp>([&](auto op) { return None; })
       // ConstantOp is never inplaceable.
       .Case([&](ConstantOp op) { return op->getResult(0); })
       // ExtractSliceOp is different: its result is not inplaceable on op.source
@@ -542,12 +622,21 @@ static bool bufferizesToMemoryRead(OpOperand &opOperand) {
     return false;
   // scf::ForOp alone doesn't bufferize to a memory read, one of the uses of its
   // matching bbArg may.
-  if (isa<scf::ForOp>(opOperand.getOwner()))
+  if (auto forOp = dyn_cast<scf::ForOp>(opOperand.getOwner())) {
+    for (OpOperand &use :
+         forOp.getRegionIterArgForOpOperand(opOperand).getUses())
+      if (bufferizesToMemoryRead(use))
+        return true;
     return false;
+  }
   // TiledLoop alone doesn't bufferize to a memory read, one of the uses of its
   // matching bbArg may.
-  if (isa<TiledLoopOp>(opOperand.getOwner()))
+  if (auto tiledLoopOp = dyn_cast<TiledLoopOp>(opOperand.getOwner())) {
+    for (OpOperand &use : tiledLoopOp.getTiedBlockArgument(opOperand).getUses())
+      if (bufferizesToMemoryRead(use))
+        return true;
     return false;
+  }
   // CallOpInterface alone doesn't bufferize to a memory read, one of the uses
   // of the matching bbArg may. It is the responsibility of the caller to
   // inspect bbArgs. In the absence of a BufferizationAliasInfo, we need to be
@@ -601,187 +690,6 @@ bufferizesToMemoryWrite(OpOperand &opOperand,
 // Bufferization-specific alias analysis.
 //===----------------------------------------------------------------------===//
 
-namespace {
-
-/// The BufferizationAliasInfo class maintains a list of buffer aliases and
-/// equivalence classes to support bufferization.
-/// ExtractSliceOps have special behavior, they act as a level of indirection
-/// for bufferization. They don't create reads or writes themselves and analysis
-/// needs to look through their uses.
-/// ExtractSliceOp + InsertSliceOp have special joint behavior: they may
-/// bufferize to the same buffer (i.e. subview), which is what introduces the
-/// need for bufferization classes.
-/// Some of these functionalities could be refactored in a Bufferizer class that
-/// uses BufferizationAliasInfo.
-class BufferizationAliasInfo {
-public:
-  /// Specify fine-grain relationship between buffers to enable more analysis.
-  enum class BufferRelation {
-    None,
-    // TODO: ResultContainsOperand,
-    // TODO: OperandContainsResult,
-    Equivalent
-  };
-
-  explicit BufferizationAliasInfo(Operation *rootOp);
-
-  /// Add a new entry for `v` in the `aliasInfo` and `equivalentInfo`. In the
-  /// beginning the alias and equivalence sets only contain `v` itself.
-  void createAliasInfoEntry(Value v);
-
-  /// Insert an info entry for `newValue` and merge its alias set with that of
-  /// `alias`.
-  void insertNewBufferAlias(Value newValue, Value alias);
-
-  /// Insert an info entry for `newValue` and merge its alias set with that of
-  /// `alias`. Additionally, merge their equivalence classes.
-  void insertNewBufferEquivalence(Value newValue, Value alias);
-
-  /// Return true if the buffer to which `operand` would bufferize aliases a
-  /// buffer that is known to not be writeable. This implies that the matching
-  /// OpResult cannot be bufferized inplace.
-  bool aliasesNonWriteableBuffer(OpOperand &operand) const;
-
-  /// Return true if the buffer to which `operand` would bufferize is equivalent
-  /// to some buffer write.
-  bool aliasesInPlaceWrite(Value v) const;
-
-  /// Set the inPlace bufferization spec to true.
-  /// Merge result's and operand's aliasing sets and iterate to a fixed point.
-  void bufferizeInPlace(OpResult result, OpOperand &operand,
-                        BufferRelation bufferRelation = BufferRelation::None);
-
-  /// Set the inPlace bufferization spec to false.
-  void bufferizeOutOfPlace(OpResult result);
-
-  /// Return true if it is possible to find an inplace write W among the uses of
-  /// aliasInfo[result], and a read R among the uses of aliasInfo[result],
-  /// such that W and R interfere.
-  /// Such a (W, R) pair is an interference to the inplace bufferization of
-  /// rootWrite when:
-  ///   1. R is not known properly dominate W (i.e. the effects of the write may
-  ///      be visible from R).
-  ///   2. one cannot find an intermediate clobbering write `C` to W, such that
-  ///      C interleaved between W and R (i.e. W -> C -> R where -> denotes
-  ///      dominance).
-  bool
-  wouldCreateReadAfterWriteInterference(OpResult result,
-                                        const DominanceInfo &domInfo) const;
-
-  /// Return true if `v1` and `v2` bufferize to equivalent buffers.
-  bool areEquivalentBufferizedValues(Value v1, Value v2) const {
-    return equivalentInfo.getLeaderValue(v1) ==
-           equivalentInfo.getLeaderValue(v2);
-  }
-
-  /// Return true if the source of an `insertSliceOp` bufferizes to an
-  /// equivalent ExtractSliceOp.
-  bool isSourceEquivalentToAMatchingExtractSliceOp(
-      InsertSliceOp insertSliceOp) const;
-
-  /// Apply `fun` to all the members of the equivalence class of `v`.
-  void applyOnEquivalenceClass(Value v, function_ref<void(Value)> fun) const;
-
-  /// Print to `os`.
-  void print(raw_ostream &os) const;
-
-  /// Print to `errs()`.
-  void dump() const { print(llvm::errs()); }
-
-private:
-  /// Check that aliasInfo for `v` exists and return a reference to it.
-  DenseSet<Value> &getAliasInfoRef(Value v);
-
-  const DenseSet<Value> &getAliasInfoRef(Value v) const {
-    return const_cast<BufferizationAliasInfo *>(this)->getAliasInfoRef(v);
-  }
-
-  /// Union all the aliasing sets of all aliases of v1 and v2.
-  bool mergeAliases(Value v1, Value v2);
-
-  /// Iteratively merge alias sets until a fixed-point.
-  void mergeAliasesToFixedPoint();
-
-  /// Return true if the (ExtractSliceOp, InsertSliceOp) pair match (i.e.
-  /// equivalent operand / result and same offset/sizes/strides specification).
-  ///
-  /// This is one particular type of relationship between ops on tensors that
-  /// reduce to an equivalence on buffers. This should be generalized and
-  /// exposed as interfaces on the proper types.
-  bool areEquivalentExtractSliceOps(ExtractSliceOp st, InsertSliceOp sti) const;
-
-  /// Return true if there is a `candidateOp` that would write to memory after
-  /// bufferization and such that:
-  ///   1. The written buffer is equivalent to either `aliasingRead` or
-  ///      `aliasingWrite` under the inPlace bufferization decisions taken
-  ///      so far.
-  ///   2. `aliasingWrite` properly dominates `candidateOp`.
-  ///   3. `candidateOp` properly dominates `aliasingReadOp`.
-  // TODO: richer clobbering analysis with container-containee relationship
-  // instead of equivalence.
-  bool existsInterleavedValueClobber(OpOperand &aliasingRead,
-                                     OpOperand &aliasingWrite,
-                                     const DominanceInfo &domInfo) const;
-
-  /// Return true if there is a write that:
-  ///   1. Properly dominates aliasingReadOp.
-  ///   2. Is properly dominated by aliasingWriteOp.
-  ///   3. Clobbers the write that would be interfering with the read.
-  ///
-  /// Case discussion:
-  /// ================
-  /// Case 1: rootRead is produced by opToBufferize,
-  /// Case 2: rootWrite is produced by opToBufferize,
-  /// Common case:
-  ///   - aliasingReadOp is a read to an alias of rootRead.
-  ///   - aliasingWriteOp is an inplace write to an alias of rootWrite.
-  ///   - aliasingWriteOp dominates aliasingReadOp.
-  ///
-  /// ```
-  ///    // Either case 1:
-  ///    %rootRead = opToBufferize(%rootWrite)
-  ///    aliasingWriteOp(%aliasingWrite = alias(%rootWrite)) // inplace
-  ///     aliasingReadOp( %aliasingRead = alias(%rootRead))
-  /// ```
-  ///
-  /// ```
-  ///    // Or case 2:
-  ///    %rootWrite = opToBufferize(%rootRead)
-  ///    aliasingWriteOp(%aliasingWrite = alias(%rootWrite)) // inplace
-  ///     aliasingReadOp( %aliasingRead = alias(%rootRead))
-  /// ```
-  ///
-  /// Capture possible cases where `aliasingWriteOp(alias(%rootWrite))` has no
-  /// visible effect on `aliasingReadOp(alias(%rootRead))`.
-  bool isClobberedWriteBeforeRead(Operation *opToBufferize,
-                                  OpOperand &aliasingRead,
-                                  OpOperand &aliasingWrite,
-                                  const DominanceInfo &domInfo) const;
-
-  /// EquivalenceClasses wants comparable elements because it uses std::set.
-  /// ValueWrapper wraps Value and uses pointer comparison on the defining op.
-  /// This is a poor man's comparison but it's not like UnionFind needs ordering
-  /// anyway ..
-  struct ValueWrapper {
-    ValueWrapper(Value val) : v(val) {}
-    operator Value() const { return v; }
-    bool operator<(const ValueWrapper &wrap) const {
-      return v.getImpl() < wrap.v.getImpl();
-    }
-    bool operator==(const ValueWrapper &wrap) const { return v == wrap.v; }
-    Value v;
-  };
-
-  /// Auxiliary structure to store all the values a given value aliases with.
-  /// These are the conservative cases that can further decompose into
-  /// "equivalent" buffer relationships.
-  DenseMap<Value, DenseSet<Value>> aliasInfo;
-
-  /// Auxiliary structure to store all the equivalent buffer classes.
-  llvm::EquivalenceClasses<ValueWrapper> equivalentInfo;
-};
-} // namespace
-
 BufferizationAliasInfo::BufferizationAliasInfo(Operation *rootOp) {
   rootOp->walk([&](Operation *op) {
     for (Value v : op->getResults())
@@ -798,19 +706,15 @@ BufferizationAliasInfo::BufferizationAliasInfo(Operation *rootOp) {
 /// Add a new entry for `v` in the `aliasInfo` and `equivalentInfo`. In the
 /// beginning the alias and equivalence sets only contain `v` itself.
 void BufferizationAliasInfo::createAliasInfoEntry(Value v) {
-  DenseSet<Value> selfSet;
-  selfSet.insert(v);
-  aliasInfo.try_emplace(v, selfSet);
+  aliasInfo.insert(v);
   equivalentInfo.insert(v);
 }
 
 /// Insert an info entry for `newValue` and merge its alias set with that of
 /// `alias`.
 void BufferizationAliasInfo::insertNewBufferAlias(Value newValue, Value alias) {
-  assert(aliasInfo.find(alias) != aliasInfo.end() && "Missing alias entry");
   createAliasInfoEntry(newValue);
-  mergeAliases(newValue, alias);
-  mergeAliasesToFixedPoint();
+  aliasInfo.unionSets(newValue, alias);
 }
 
 /// Insert an info entry for `newValue` and merge its alias set with that of
@@ -827,13 +731,14 @@ void BufferizationAliasInfo::insertNewBufferEquivalence(Value newValue,
 bool BufferizationAliasInfo::aliasesNonWriteableBuffer(
     OpOperand &operand) const {
   LDBG("----Start aliasesNonWriteableBuffer\n");
-  LDBG("-------for operand #" << operand.getOperandNumber() << ": "
-                              << *(operand.getOwner()) << '\n');
-  for (Value v : getAliasInfoRef(operand.get())) {
-    LDBG("-----------examine: " << v << '\n');
+  LDBG("-------for -> #" << operand.getOperandNumber() << ": "
+                         << printOperationInfo(operand.getOwner()) << '\n');
+  for (Value v : getAliases(operand.get())) {
+    LDBG("-----------examine: " << printValueInfo(v) << '\n');
     if (auto bbArg = v.dyn_cast<BlockArgument>()) {
       if (getInPlace(bbArg) == InPlaceSpec::True) {
-        LDBG("-----------bbArg is writeable -> skip: " << bbArg << '\n');
+        LDBG("-----------bbArg is writeable -> skip: " << printValueInfo(bbArg)
+                                                       << '\n');
         continue;
       }
       LDBG("-----------notWriteable\n");
@@ -855,12 +760,12 @@ bool BufferizationAliasInfo::aliasesNonWriteableBuffer(
 /// to some buffer write.
 bool BufferizationAliasInfo::aliasesInPlaceWrite(Value value) const {
   LDBG("----Start aliasesInPlaceWrite\n");
-  LDBG("-------for : " << value << '\n');
-  for (Value v : getAliasInfoRef(value)) {
+  LDBG("-------for : " << printValueInfo(value) << '\n');
+  for (Value v : getAliases(value)) {
     for (auto &use : v.getUses()) {
       if (bufferizesToMemoryWrite(use, InPlaceSpec::True)) {
         LDBG("-----------wants to bufferize to inPlace write: "
-             << *use.getOwner() << '\n');
+             << printOperationInfo(use.getOwner()) << '\n');
         return true;
       }
     }
@@ -870,17 +775,17 @@ bool BufferizationAliasInfo::aliasesInPlaceWrite(Value value) const {
 }
 
 /// Set the inPlace bufferization spec to true.
-/// Merge result's and operand's aliasing sets and iterates to a fixed point.
 void BufferizationAliasInfo::bufferizeInPlace(OpResult result,
                                               OpOperand &operand,
                                               BufferRelation bufferRelation) {
   setInPlaceOpResult(result, InPlaceSpec::True);
-  if (mergeAliases(result, operand.get()))
-    mergeAliasesToFixedPoint();
+  aliasInfo.unionSets(result, operand.get());
+  // Dump the updated alias analysis.
+  LLVM_DEBUG(dumpAliases());
   if (bufferRelation == BufferRelation::Equivalent)
     equivalentInfo.unionSets(result, operand.get());
-  // Dump the updated analysis.
-  LLVM_DEBUG(dump());
+  // Dump the updated equivalence analysis.
+  LLVM_DEBUG(dumpEquivalences());
 }
 
 /// Set the inPlace bufferization spec to false.
@@ -888,74 +793,27 @@ void BufferizationAliasInfo::bufferizeOutOfPlace(OpResult result) {
   setInPlaceOpResult(result, InPlaceSpec::False);
 }
 
-/// Return true if it is possible to find an inplace write W among the uses of
-/// aliasInfo[result], and a read R among the uses of aliasInfo[result],
-/// such that W and R interfere.
-/// Such a (W, R) pair is an interference to the inplace bufferization of
-/// rootWrite when:
-///   1. R is not known properly dominate W (i.e. the effects of the write may
-///      be visible from R).
-///   2. one cannot find an intermediate clobbering write `C` to W, such that
-///      C interleaved between W and R (i.e. W -> C -> R where -> denotes
-///      dominance).
+/// Return true if it is possible to find an inplace write W among `usesWrite`
+/// and a read R among `usesRead`, such that W and R interfere.
 bool BufferizationAliasInfo::wouldCreateReadAfterWriteInterference(
-    OpResult result, const DominanceInfo &domInfo) const {
-  Optional<OpOperand *> maybeAliasingOperand = getAliasingOpOperand(result);
-  if (!maybeAliasingOperand)
-    return false;
-
-  Operation *opToBufferize = result.getDefiningOp();
-  Value root = (*maybeAliasingOperand)->get();
-  LDBG("----Start wouldCreateReadAfterWriteInterference\n");
-  LDBG("--------rootValue: " << root << "\n");
-
-  // Collect:
-  //   1. all the inplace write uses of some alias of `root`.
-  //   2. all the write uses that belong to `opToBufferize`.
-  // opToBufferize is not yet inplace, we want to determine if it can be inplace
-  // so we also consider all its write uses, not just the inplace ones.
-  DenseSet<OpOperand *> usesWrite;
-  for (Value vWrite : getAliasInfoRef(root)) {
-    for (auto &uWrite : vWrite.getUses()) {
-      if (!bufferizesToMemoryWrite(uWrite))
-        continue;
-      if (uWrite.getOwner() == opToBufferize ||
-          bufferizesToMemoryWrite(uWrite, InPlaceSpec::True))
-        usesWrite.insert(&uWrite);
-    }
-  }
-  for (Value vWrite : getAliasInfoRef(result))
-    for (auto &uWrite : vWrite.getUses())
-      if (bufferizesToMemoryWrite(uWrite, InPlaceSpec::True))
-        usesWrite.insert(&uWrite);
-
-  // Collect all the reads of some alias of `root`.
-  // opToBufferize is not yet inplace, we want to determine if it can be inplace
-  // so we also consider all read uses of its result.
-  DenseSet<OpOperand *> usesRead;
-  auto &aliasListRead = getAliasInfoRef(root);
-  for (Value vRead : aliasListRead)
-    for (auto &uRead : vRead.getUses())
-      if (bufferizesToMemoryRead(uRead))
-        usesRead.insert(&uRead);
-  for (Value vRead : getAliasInfoRef(result))
-    for (auto &uRead : vRead.getUses())
-      if (bufferizesToMemoryRead(uRead))
-        usesRead.insert(&uRead);
-
+    Operation *opToBufferize, DenseSet<OpOperand *> &usesRead,
+    DenseSet<OpOperand *> &usesWrite, const DominanceInfo &domInfo) const {
   for (OpOperand *uRead : usesRead) {
     Operation *aliasingReadOp = uRead->getOwner();
-    LDBG("----++++aliasRead  #" << uRead->getOperandNumber()
-                                << " in: " << *aliasingReadOp << '\n');
+    LDBG("----++++aliasRead -> #"
+         << uRead->getOperandNumber()
+         << " in: " << printOperationInfo(aliasingReadOp) << '\n');
     for (OpOperand *uWrite : usesWrite) {
+      // The same operand may both read and write.
       // Don't consider self-use of the same operand for interference.
       // Multiple different uses within the same op is fair game though.
       if (uWrite == uRead)
         continue;
 
       Operation *aliasingWriteOp = uWrite->getOwner();
-      LDBG("----    aliasWrite #" << uWrite->getOperandNumber()
-                                  << " in: " << *aliasingWriteOp << '\n');
+      LDBG("----    aliasWrite -> #"
+           << uWrite->getOperandNumber()
+           << " in: " << printOperationInfo(aliasingWriteOp) << '\n');
       // If the candidate write is the one that produces the read value (in the
       // SSA def-use sense), this is not considered an interference.
       if (getInplaceableOpResult(*uWrite) == uRead->get())
@@ -966,17 +824,20 @@ bool BufferizationAliasInfo::wouldCreateReadAfterWriteInterference(
         continue;
       // At this point, aliasingWriteOp properly dominates aliasingReadOp or
       // there is no clear dominance and we need to be conservative.
-      LDBG("---->found RaW interference\n");
-      LDBG("     Interfering  read (op #" << uRead->getOperandNumber()
-                                          << "): " << *aliasingReadOp << '\n');
-      LDBG("     Interfering write (op #" << uWrite->getOperandNumber()
-                                          << "): " << *aliasingWriteOp << '\n');
+      LDBG("---->found RaW interference between:\n");
+      LDBG("       OpToBufferize -> " << printOperationInfo(opToBufferize)
+                                      << '\n');
+      LDBG("       Interfering write -> #"
+           << uWrite->getOperandNumber() << ":"
+           << printOperationInfo(aliasingWriteOp) << '\n');
+      LDBG("       Target read -> #" << uRead->getOperandNumber() << ":"
+                                     << printOperationInfo(aliasingReadOp)
+                                     << '\n');
       LDBG("---->opportunity to clobber RaW interference\n");
       if (isClobberedWriteBeforeRead(opToBufferize, *uRead, *uWrite, domInfo)) {
         LDBG("---->clobbered! -> skip\n");
         continue;
       }
-
       LDBG("---->not clobbered -> found an interference\n");
       return true;
     }
@@ -985,18 +846,130 @@ bool BufferizationAliasInfo::wouldCreateReadAfterWriteInterference(
   return false;
 }
 
+/// Return true if it is possible to find an inplace write W among the uses of
+/// aliasInfo[result], and a read R among the uses of aliasInfo[result],
+/// such that W and R interfere.
+/// Such a (W, R) pair is an interference to the inplace bufferization of
+/// opResult when:
+///   1. R is not known to properly dominate W (i.e. the effects of the write
+///      may be visible from R).
+///   2. one cannot find an intermediate clobbering write `C` to W, such that
+///      C interleaved between W and R (i.e. W -> C -> R where -> denotes
+///      dominance).
+bool BufferizationAliasInfo::wouldCreateReadAfterWriteInterference(
+    OpResult result, const DominanceInfo &domInfo) const {
+  Optional<OpOperand *> maybeAliasingOperand = getAliasingOpOperand(result);
+  if (!maybeAliasingOperand)
+    return false;
+
+  Operation *opToBufferize = result.getDefiningOp();
+  Value opResult = result;
+  Value opOperand = (*maybeAliasingOperand)->get();
+
+  LDBG("----Start wouldCreateReadAfterWriteInterference\n");
+  LDBG("--------consider all aliases to root read: "
+       << printValueInfo(opOperand) << "\n");
+  LDBG("--------consider all aliases to root write: "
+       << printValueInfo(opResult) << "\n");
+
+  /// Helper function to iterate on aliases of `root` and capture the reads.
+  auto getAliasingReads = [&](DenseSet<OpOperand *> &res, Value root) {
+    for (Value alias : getAliases(root)) {
+      for (auto &use : alias.getUses()) {
+        // Read to a value that aliases root.
+        if (bufferizesToMemoryRead(use)) {
+          LDBG("------------bufferizesToMemoryRead: "
+               << use.getOwner()->getName().getStringRef() << "\n");
+          res.insert(&use);
+        }
+      }
+    }
+  };
+
+  /// Helper function to iterate on aliases of `root` and capture the writes.
+  auto getAliasingInplaceWrites = [&](DenseSet<OpOperand *> &res, Value root) {
+    for (Value alias : getAliases(root)) {
+      for (auto &use : alias.getUses()) {
+        // Inplace write to a value that aliases root.
+        if (bufferizesToMemoryWrite(use, InPlaceSpec::True)) {
+          LDBG("------------bufferizesToMemoryWrite: "
+               << use.getOwner()->getName().getStringRef() << "\n");
+          res.insert(&use);
+        }
+      }
+    }
+  };
+
+  // Check if we can find any interference between reads to aliases[`opOperand`]
+  // and writes to aliases[`opResult`]. This handles the case:
+  //
+  // ```
+  //  %0 = op_to_bufferize_maybe_inplace(%1)
+  //  %2 = some_alias(%0)
+  //  inplace_write(%2)
+  //  %3 = some_alias(%1)
+  //  read(%3)
+  // ```
+  DenseSet<OpOperand *> usesRead, usesWrite;
+  LDBG("--------\n");
+  LDBG("--------Test reads(opOperand) vs writes(opResult)\n");
+  getAliasingReads(usesRead, opOperand);
+  getAliasingInplaceWrites(usesWrite, opResult);
+  // Additionally, `result` is not yet bufferized and we need to check for
+  // interferences as if it were bufferized inplace: add `maybeAliasingOperand`
+  // if it is a write. This handles the case:
+  //
+  // ```
+  //  %0 = op_to_bufferize_maybe_inplace(%1)
+  //  %2 = some_alias(%1)
+  //  read(%2)
+  // ```
+  if (bufferizesToMemoryWrite(**maybeAliasingOperand))
+    usesWrite.insert(*maybeAliasingOperand);
+  if (wouldCreateReadAfterWriteInterference(opToBufferize, usesRead, usesWrite,
+                                            domInfo))
+    return true;
+
+  // Check if we can find any interference between writes to
+  // aliases[`opOperand`] and reads to aliases[`opResult`]. This handles the
+  // case:
+  //
+  // ```
+  //  %0 = op_to_bufferize_maybe_inplace(%1)
+  //  %2 = some_alias(%1)
+  //  inplace_write(%2)
+  //  %3 = some_alias(%0)
+  //  read(%3)
+  // ```
+  LDBG("--------\n");
+  LDBG("--------Test reads(opResult) vs writes(opOperand)\n");
+  usesRead.clear();
+  usesWrite.clear();
+  getAliasingReads(usesRead, opResult);
+  getAliasingInplaceWrites(usesWrite, opOperand);
+  return wouldCreateReadAfterWriteInterference(opToBufferize, usesRead,
+                                               usesWrite, domInfo);
+}
+
 /// Return true if the source of a `insertSliceOp` bufferizes to an
-/// equivalent ExtractSliceOp.
-bool BufferizationAliasInfo::isSourceEquivalentToAMatchingExtractSliceOp(
+/// equivalent ExtractSliceOp that bufferizes inplace.
+bool BufferizationAliasInfo::isSourceEquivalentToAMatchingInplaceExtractSliceOp(
     InsertSliceOp insertSliceOp) const {
+  LDBG("isSourceEquivalentToAMatchingInplaceExtractSliceOp: " << *insertSliceOp
+                                                              << '\n');
   auto leaderIt = equivalentInfo.findLeader(insertSliceOp.source());
   for (auto mit = leaderIt, meit = equivalentInfo.member_end(); mit != meit;
        ++mit) {
-    if (areEquivalentExtractSliceOps(
-            dyn_cast_or_null<ExtractSliceOp>(mit->v.getDefiningOp()),
-            insertSliceOp))
+    auto extractSliceOp =
+        dyn_cast_or_null<ExtractSliceOp>(mit->v.getDefiningOp());
+    if (extractSliceOp &&
+        areEquivalentExtractSliceOps(extractSliceOp, insertSliceOp) &&
+        getInPlace(extractSliceOp.result()) == InPlaceSpec::True) {
+      LDBG("\tfound: " << *mit->v.getDefiningOp() << '\n');
       return true;
+    }
   }
+  LDBG("\tnot equivalent\n");
   return false;
 }
 
@@ -1010,64 +983,60 @@ void BufferizationAliasInfo::applyOnEquivalenceClass(
   }
 }
 
-void BufferizationAliasInfo::print(raw_ostream &os) const {
-  os << "\n/========================== AliasInfo "
-        "==========================\n";
-  for (auto it : aliasInfo) {
-    os << "|\n| -- source: " << it.getFirst() << '\n';
-    for (auto v : it.getSecond())
-      os << "| ---- target: " << v << '\n';
+void BufferizationAliasInfo::printAliases(raw_ostream &os) const {
+  os << "\n/===================== AliasInfo =====================\n";
+  for (auto it = aliasInfo.begin(), eit = aliasInfo.end(); it != eit; ++it) {
+    if (!it->isLeader())
+      continue;
+    Value leader = it->getData();
+    os << "|\n| -- leader: " << printValueInfo(leader, /*prefix=*/false)
+       << '\n';
+    for (auto mit = aliasInfo.member_begin(it), meit = aliasInfo.member_end();
+         mit != meit; ++mit) {
+      Value v = static_cast<Value>(*mit);
+      os << "| ---- aliasing member: " << printValueInfo(v, /*prefix=*/false)
+         << '\n';
+    }
   }
-  os << "|\n\\====================== End AliasInfo "
-        "======================\n\n";
+  os << "\n/===================== End AliasInfo =====================\n\n";
+}
+
+void BufferizationAliasInfo::printEquivalences(raw_ostream &os) const {
   os << "\n/********************* Equivalent Buffers *********************\n";
   for (auto it = equivalentInfo.begin(), eit = equivalentInfo.end(); it != eit;
        ++it) {
     if (!it->isLeader())
       continue;
     Value leader = it->getData();
-    os << "|\n| -- leader: " << leader << '\n';
+    os << "|\n| -- leader: " << printValueInfo(leader, /*prefix=*/false)
+       << '\n';
     for (auto mit = equivalentInfo.member_begin(it),
               meit = equivalentInfo.member_end();
          mit != meit; ++mit) {
       Value v = static_cast<Value>(*mit);
-      os << "| ---- equivalent member: " << v << '\n';
+      os << "| ---- equivalent member: " << printValueInfo(v, /*prefix=*/false)
+         << '\n';
     }
   }
   os << "|\n\\***************** End Equivalent Buffers *****************\n\n";
 }
 
-DenseSet<Value> &BufferizationAliasInfo::getAliasInfoRef(Value v) {
-  auto it = aliasInfo.find(v);
-  if (it == aliasInfo.end())
-    llvm_unreachable("Missing alias");
-  return it->getSecond();
-}
-
-/// Union all the aliasing sets of all aliases of v1 and v2.
-bool BufferizationAliasInfo::mergeAliases(Value v1, Value v2) {
-  // Avoid invalidation of iterators by pre unioning the aliases for v1 and v2.
-  bool changed = set_union(getAliasInfoRef(v1), getAliasInfoRef(v2)) ||
-                 set_union(getAliasInfoRef(v2), getAliasInfoRef(v1));
-  for (auto v : getAliasInfoRef(v1))
-    if (v != v1)
-      changed |= set_union(getAliasInfoRef(v), getAliasInfoRef(v2));
-  for (auto v : getAliasInfoRef(v2))
-    if (v != v2)
-      changed |= set_union(getAliasInfoRef(v), getAliasInfoRef(v1));
-  return changed;
-}
-
-/// Iteratively merge alias sets until a fixed-point.
-void BufferizationAliasInfo::mergeAliasesToFixedPoint() {
-  while (true) {
-    bool changed = false;
-    for (auto it : aliasInfo)
-      for (auto v : it.getSecond())
-        changed |= mergeAliases(it.getFirst(), v);
-    if (!changed)
-      break;
+BufferizationAliasInfo::EquivalenceClassRangeType
+BufferizationAliasInfo::getAliases(Value v) const {
+  DenseSet<Value> res;
+  auto it = aliasInfo.findValue(aliasInfo.getLeaderValue(v));
+  for (auto mit = aliasInfo.member_begin(it), meit = aliasInfo.member_end();
+       mit != meit; ++mit) {
+    res.insert(static_cast<Value>(*mit));
   }
+  return BufferizationAliasInfo::EquivalenceClassRangeType(
+      aliasInfo.member_begin(it), aliasInfo.member_end());
+}
+
+void BufferizationAliasInfo::dumpAliases() const { printAliases(llvm::errs()); }
+
+void BufferizationAliasInfo::dumpEquivalences() const {
+  printEquivalences(llvm::errs());
 }
 
 /// This is one particular type of relationship between ops on tensors that
@@ -1107,13 +1076,15 @@ bool BufferizationAliasInfo::existsInterleavedValueClobber(
     auto leaderIt = equivalentInfo.findLeader(valueToClobber);
     for (auto mit = leaderIt, meit = equivalentInfo.member_end(); mit != meit;
          ++mit) {
-      /// Note: the "would write to memory after bufferization" condition is
-      /// verified by `candidateOp` since it would produce a value that
-      /// bufferizes to an equivalent buffer.
       Operation *candidateOp = mit->v.getDefiningOp();
       if (!candidateOp)
         continue;
-      LDBG("---->clobbering candidate: " << *candidateOp << '\n');
+      auto maybeAliasingOperand = getAliasingOpOperand(mit->v.cast<OpResult>());
+      if (!maybeAliasingOperand || !*maybeAliasingOperand ||
+          !bufferizesToMemoryWrite(**maybeAliasingOperand))
+        continue;
+      LDBG("---->clobbering candidate: " << printOperationInfo(candidateOp)
+                                         << '\n');
       if (domInfo.properlyDominates(aliasingWriteOp, candidateOp) &&
           domInfo.properlyDominates(candidateOp, aliasingReadOp))
         return true;
@@ -1302,6 +1273,21 @@ static FunctionType getOrCreateBufferizedFunctionType(
 // Bufferization-specific scoped alloc/dealloc insertion support.
 //===----------------------------------------------------------------------===//
 
+template <typename... Args>
+Operation *getFirstParentOfType(Value v) {
+  Operation *parent;
+  if (auto bbArg = v.dyn_cast<BlockArgument>())
+    parent = bbArg.getOwner()->getParentOp();
+  else
+    parent = v.getDefiningOp()->getParentOp();
+  while (parent) {
+    if (isa<Args...>(parent))
+      return parent;
+    parent = parent->getParentOp();
+  }
+  return nullptr;
+}
+
 /// Create an Allocop/DeAllocOp pair, where the AllocOp is after
 /// `shapedValue.getDefiningOp` (or at the top of the block in case of a
 /// bbArg) and the DeallocOp is at the end of the block.
@@ -1336,8 +1322,27 @@ createNewAllocDeallocPairForShapedValue(OpBuilder &b, Location loc,
     if (dim.value() == ShapedType::kDynamicSize)
       dynShape.push_back(createOrFoldDimOp(b, loc, shapedValue, dim.index()));
 
-  Value allocated = b.create<memref::AllocOp>(loc, allocMemRefType, dynShape);
-  aliasInfo.createAliasInfoEntry(allocated);
+  // If the buffer is statically shaped, try to hoist it to the first enclosing
+  // parallel region.
+  // TODO: this concept of parallel region and threadlocal needs interfaces.
+  // TODO: also hoist in the dynamic case. For now this relies on subsequent
+  // calls to LICM and buffer hoisting which will most likely not succeed.
+  // TODO: when packing, allocate a static bounding box which will enable more
+  // hoisting.
+  Value allocated;
+  { // Guarded insertion point to potentially hoist the AllocOp.
+    OpBuilder::InsertionGuard g(b);
+    if (dynShape.empty()) {
+      Operation *parent =
+          getFirstParentOfType<FuncOp, TiledLoopOp, scf::ParallelOp,
+                               AffineParallelOp>(shapedValue);
+      if (parent)
+        b.setInsertionPointToStart(&(parent->getRegion(0).front()));
+    }
+    allocated = b.create<memref::AllocOp>(
+        loc, allocMemRefType, dynShape, b.getI64IntegerAttr(kBufferAlignments));
+    aliasInfo.createAliasInfoEntry(allocated);
+  }
   Value casted = allocated;
   if (memRefType != allocMemRefType) {
     casted = b.create<memref::CastOp>(loc, memRefType, allocated);
@@ -1345,6 +1350,7 @@ createNewAllocDeallocPairForShapedValue(OpBuilder &b, Location loc,
   }
   b.setInsertionPoint(allocated.getParentBlock()->getTerminator());
   b.create<memref::DeallocOp>(loc, allocated);
+
   return casted;
 }
 
@@ -1366,6 +1372,7 @@ static void allocateBuffersForResults(OpBuilder &b, Location loc, LinalgOp op,
                                       BufferizationAliasInfo &aliasInfo) {
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(b);
+  b.setInsertionPoint(op);
 
   // TODO: provide the proper interface to iterate on OpResults and get the
   // matching OpOperands.
@@ -1388,7 +1395,6 @@ static void allocateBuffersForResults(OpBuilder &b, Location loc, LinalgOp op,
     Value dimTensor = bvm.lookupOrDefault(output);
     Value alloc =
         createNewAllocDeallocPairForShapedValue(b, loc, dimTensor, aliasInfo);
-    b.setInsertionPointAfter(alloc.getDefiningOp());
     resultBuffers.push_back(alloc);
 
     // Additionally, if the output buffer is used, clone its value for now.
@@ -1414,7 +1420,6 @@ static LogicalResult bufferize(OpBuilder &b, LinalgOp op,
   if (!op.hasTensorSemantics())
     return op->emitError() << "op does not have tensor semantics";
 
-  b.setInsertionPoint(op);
   Location loc = op.getLoc();
   SmallVector<Value> newInputBuffers;
   newInputBuffers.reserve(op.getNumInputs());
@@ -1433,6 +1438,9 @@ static LogicalResult bufferize(OpBuilder &b, LinalgOp op,
   // Clone the newly bufferized op.
   SmallVector<Value> newOperands = newInputBuffers;
   newOperands.append(newOutputBuffers.begin(), newOutputBuffers.end());
+
+  // Set insertion point now that potential alloc/dealloc are introduced.
+  b.setInsertionPoint(op);
   op.clone(b, loc, /*resultTypes=*/TypeRange{}, newOperands);
 
   // Replace the results of the old op with the new output buffers.
@@ -1482,9 +1490,7 @@ bufferize(OpBuilder &b, CallOpInterface callOp, BlockAndValueMapping &bvm,
              << "cannot bufferize bodiless function that returns a tensor";
   } else {
     ReturnOp returnOp = getAssumedUniqueReturnOp(funcOp);
-    if (!returnOp)
-      return funcOp->emitError() << "cannot bufferize a FuncOp with tensors "
-                                    "and without a unique ReturnOp";
+    assert(returnOp && "expected func with single return op");
 
     // For each FuncOp result, keep track of which inplace argument it reuses.
     for (OpOperand &returnOperand : returnOp->getOpOperands()) {
@@ -1658,11 +1664,10 @@ static LogicalResult bufferize(OpBuilder &b, scf::ForOp forOp,
                                BufferizationAliasInfo &aliasInfo) {
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(b);
-  Location loc = forOp.getLoc();
 
   // If inPlace, just forward the buffer.
   // Otherwise alloc and copy.
-  b.setInsertionPoint(forOp);
+  Location loc = forOp.getLoc();
   for (OpResult opResult : forOp->getResults()) {
     if (!opResult.getType().isa<TensorType>())
       continue;
@@ -1677,14 +1682,25 @@ static LogicalResult bufferize(OpBuilder &b, scf::ForOp forOp,
     if (getInPlace(opResult) != InPlaceSpec::True) {
       resultBuffer =
           createNewAllocDeallocPairForShapedValue(b, loc, operand, aliasInfo);
-      // If the tensor comes from `linalg::InitTensorOp`, the value is
-      // unitialized and we do not need to copy.
+      // If the tensor comes from either:
+      //   - linalg.init_tensor
+      //   - tensor.cast(linalg.init_tensor())
+      // Then the value is unitialized and we do not need to copy. This is a
+      // pragmatic simplification of "matching bbArg does not bufferize to a
+      // read".
       // TODO: "matching bbArg does not bufferize to a read" is a more general
       // check.
-      if (!operand.getDefiningOp<linalg::InitTensorOp>())
+      if (!isInitTensorOp(operand)) {
+        OpBuilder::InsertionGuard g(b);
+        // Set insertion point now that potential alloc/dealloc are introduced.
+        // Copy is inserted just before the forOp.
+        b.setInsertionPoint(forOp);
         b.create<linalg::CopyOp>(forOp.getLoc(), operandBuffer, resultBuffer);
+      }
     }
     BlockArgument bbArg = forOp.getRegionIterArgForOpOperand(opOperand);
+    aliasInfo.createAliasInfoEntry(resultBuffer);
+    aliasInfo.insertNewBufferEquivalence(bbArg, resultBuffer);
     map(bvm, bbArg, resultBuffer);
     map(bvm, opResult, resultBuffer);
   }
@@ -1738,6 +1754,7 @@ static LogicalResult bufferize(OpBuilder &b, ReturnOp returnOp,
                                BufferizationAliasInfo &aliasInfo) {
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(b);
+  // Cannot insert after returnOp.
   b.setInsertionPoint(returnOp);
 
   assert(isa<FuncOp>(returnOp->getParentOp()) &&
@@ -1760,6 +1777,9 @@ static LogicalResult bufferize(OpBuilder &b, ReturnOp returnOp,
 static LogicalResult bufferize(OpBuilder &b, TiledLoopOp tiledLoopOp,
                                BlockAndValueMapping &bvm,
                                BufferizationAliasInfo &aliasInfo) {
+  // Take a guard before anything else.
+  OpBuilder::InsertionGuard g(b);
+
   // Allocate output buffers if needed, forward output tensor args to the
   // terminator.
   Operation *yieldOp = tiledLoopOp.getBody()->getTerminator();
@@ -1802,12 +1822,19 @@ static LogicalResult bufferize(OpBuilder &b, TiledLoopOp tiledLoopOp,
       auto loc = tiledLoopOp.getLoc();
       Value alloc = createNewAllocDeallocPairForShapedValue(
           b, loc, oldOutputTensor, aliasInfo);
-      // If the tensor comes from `linalg::InitTensorOp`, the value is
-      // unitialized and we do not need to copy.
+      // If the tensor comes from either:
+      //   - linalg.init_tensor
+      //   - tensor.cast(linalg.init_tensor())
+      // Then the value is unitialized and we do not need to copy. This is a
+      // pragmatic simplification of "matching bbArg does not bufferize to a
+      // read".
       // TODO: "matching bbArg does not bufferize to a read" is a more general
       // check.
-      if (!oldOutputTensor.getDefiningOp<linalg::InitTensorOp>()) {
-        b.setInsertionPointAfter(alloc.getDefiningOp());
+      if (!isInitTensorOp(oldOutputTensor)) {
+        OpBuilder::InsertionGuard g(b);
+        // Set insertion point now that potential alloc/dealloc are introduced.
+        // Copy is inserted just before the tiledLoopOp.
+        b.setInsertionPoint(tiledLoopOp);
         b.create<linalg::CopyOp>(loc, outputBuffer, alloc);
       }
       outputBuffer = alloc;
@@ -1893,11 +1920,10 @@ static LogicalResult bufferize(OpBuilder &b, TiledLoopOp tiledLoopOp,
 static LogicalResult bufferize(OpBuilder &b, ExtractSliceOp extractSliceOp,
                                BlockAndValueMapping &bvm,
                                BufferizationAliasInfo &aliasInfo) {
-  LDBG("bufferize: " << *extractSliceOp << '\n');
-
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(b);
-  b.setInsertionPoint(extractSliceOp);
+
+  LDBG("bufferize: " << *extractSliceOp << '\n');
 
   Location loc = extractSliceOp.getLoc();
   // Bail if source was not bufferized.
@@ -1911,11 +1937,12 @@ static LogicalResult bufferize(OpBuilder &b, ExtractSliceOp extractSliceOp,
   // If not inplaceable, alloc.
   Value alloc;
   auto inPlace = getInPlace(extractSliceOp->getResult(0));
-  if (inPlace != InPlaceSpec::True) {
+  if (inPlace != InPlaceSpec::True)
     alloc = createNewAllocDeallocPairForShapedValue(
         b, loc, extractSliceOp.result(), aliasInfo);
-    b.setInsertionPointAfter(alloc.getDefiningOp());
-  }
+
+  // Set insertion point now that potential alloc/dealloc are introduced.
+  b.setInsertionPoint(extractSliceOp);
 
   // Bufferize to subview.
   auto subviewMemRefType =
@@ -1943,13 +1970,13 @@ static LogicalResult bufferize(OpBuilder &b, ExtractSliceOp extractSliceOp,
 static LogicalResult bufferize(OpBuilder &b, InsertSliceOp insertSliceOp,
                                BlockAndValueMapping &bvm,
                                BufferizationAliasInfo &aliasInfo) {
-  LDBG("bufferize: " << *insertSliceOp << '\n');
-
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(b);
   b.setInsertionPoint(insertSliceOp);
-  Location loc = insertSliceOp.getLoc();
 
+  LDBG("bufferize: " << *insertSliceOp << '\n');
+
+  Location loc = insertSliceOp.getLoc();
   Value dstMemref = lookup(bvm, insertSliceOp.dest());
   if (!dstMemref)
     return failure();
@@ -1960,9 +1987,12 @@ static LogicalResult bufferize(OpBuilder &b, InsertSliceOp insertSliceOp,
     // cloning the whole tensor on every single iteration and is a symptom
     // of a catastrophically bad scheduling decision.
     // TODO: be very loud about it or even consider failing the pass.
+    // Alloc a copy for `insertSliceOp.dest()`, it will become the result
+    // buffer.
     Value newDstMemref = createNewAllocDeallocPairForShapedValue(
-        b, loc, insertSliceOp.result(), aliasInfo);
-    b.setInsertionPointAfter(newDstMemref.getDefiningOp());
+        b, loc, insertSliceOp.dest(), aliasInfo);
+    // Set insertion point now that potential alloc/dealloc are introduced.
+    b.setInsertionPoint(insertSliceOp);
     b.create<CopyOp>(insertSliceOp.getLoc(), dstMemref, newDstMemref);
     dstMemref = newDstMemref;
   }
@@ -1983,7 +2013,8 @@ static LogicalResult bufferize(OpBuilder &b, InsertSliceOp insertSliceOp,
   //     slice is computed out of place into the inplace full tensor.
   //   - The result is not inplace. This is the case where the whole tensor is
   //     cloned and the clone needs to be updated.
-  if (!aliasInfo.isSourceEquivalentToAMatchingExtractSliceOp(insertSliceOp) ||
+  if (!aliasInfo.isSourceEquivalentToAMatchingInplaceExtractSliceOp(
+          insertSliceOp) ||
       inPlace != InPlaceSpec::True) {
     LDBG("insert_slice needs extra source copy: " << insertSliceOp.source()
                                                   << " -> copy\n");
@@ -2007,7 +2038,6 @@ static LogicalResult bufferize(OpBuilder &b, VectorTransferOpInterface op,
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(b);
   b.setInsertionPoint(op);
-  Location loc = op.getLoc();
 
   if (op.getShapedType().isa<MemRefType>())
     return failure();
@@ -2026,11 +2056,17 @@ static LogicalResult bufferize(OpBuilder &b, VectorTransferOpInterface op,
 
   // If transfer_write is not inPlace, allocate a new buffer.
   Value newInputBuffer;
+  Location loc = op.getLoc();
   if (inPlace != InPlaceSpec::True) {
+    // Alloc a copy for `writeOp.source()`, it will become the result buffer.
     newInputBuffer = createNewAllocDeallocPairForShapedValue(
-        b, loc, writeOp.result(), aliasInfo);
-    b.setInsertionPointAfter(newInputBuffer.getDefiningOp());
-    map(bvm, writeOp.result(), newInputBuffer);
+        b, loc, writeOp.source(), aliasInfo);
+    Value v = lookup(bvm, writeOp.source());
+    if (!isInitTensorOp(writeOp.source())) {
+      // Set insertion point now that potential alloc/dealloc are introduced.
+      b.setInsertionPoint(op);
+      b.create<CopyOp>(loc, v, newInputBuffer);
+    }
   } else {
     // InPlace write will result in memref.tensor_load(x) which must
     // canonicalize away with one of it uses.
@@ -2056,6 +2092,7 @@ static LogicalResult bufferize(OpBuilder &b, scf::YieldOp yieldOp,
                                BufferizationAliasInfo &aliasInfo) {
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(b);
+  // Cannot create IR past a yieldOp.
   b.setInsertionPoint(yieldOp);
 
   scf::ForOp forOp = dyn_cast<scf::ForOp>(yieldOp->getParentOp());
@@ -2064,14 +2101,24 @@ static LogicalResult bufferize(OpBuilder &b, scf::YieldOp yieldOp,
     auto tensorType = operand.get().getType().dyn_cast<TensorType>();
     if (!tensorType)
       continue;
+
     OpOperand &forOperand = forOp.getOpOperandForResult(
         forOp->getResult(operand.getOperandNumber()));
     auto bbArg = forOp.getRegionIterArgForOpOperand(forOperand);
-    if (getInPlace(bbArg) == InPlaceSpec::True)
-      operand.set(bbArg);
-    else
-      operand.set(
-          b.create<memref::TensorLoadOp>(yieldOp.getLoc(), lookup(bvm, bbArg)));
+    Value yieldedBuffer = lookup(bvm, operand.get());
+    Value bbArgBuffer = lookup(bvm, bbArg);
+    if (!aliasInfo.areEquivalentBufferizedValues(yieldedBuffer, bbArgBuffer)) {
+      // TODO: this could get resolved with copies but it can also turn into
+      // swaps so we need to be careful about order of copies.
+      return yieldOp->emitError()
+             << "Yield operand #" << operand.getOperandNumber()
+             << " does not bufferize to an equivalent buffer to the matching"
+             << " enclosing scf::for operand";
+    }
+
+    // Buffers are equivalent so the work is already done and we just yield the
+    // bbArg so that it later canonicalizes away.
+    operand.set(bbArg);
   }
   return success();
 }
@@ -2083,7 +2130,9 @@ static LogicalResult bufferize(OpBuilder &b, linalg::YieldOp yieldOp,
                                BufferizationAliasInfo &aliasInfo) {
   // Take a guard before anything else.
   OpBuilder::InsertionGuard g(b);
+  // Cannot create IR past a yieldOp.
   b.setInsertionPoint(yieldOp);
+
   // No tensors -> success.
   if (!llvm::any_of(yieldOp.getOperandTypes(), isaTensor))
     return success();
@@ -2091,6 +2140,22 @@ static LogicalResult bufferize(OpBuilder &b, linalg::YieldOp yieldOp,
   if (yieldOp->getParentOfType<TiledLoopOp>())
     return success();
   llvm_unreachable("unexpected yieldOp");
+}
+
+/// Bufferization for tensor::ExtractOp just translate to memref.load, it only
+/// reads the tensor.
+static LogicalResult bufferize(OpBuilder &b, tensor::ExtractOp extractOp,
+                               BlockAndValueMapping &bvm,
+                               BufferizationAliasInfo &aliasInfo) {
+  // Take a guard before anything else.
+  OpBuilder::InsertionGuard g(b);
+  b.setInsertionPoint(extractOp);
+
+  Location loc = extractOp.getLoc();
+  Value srcMemref = lookup(bvm, extractOp.tensor());
+  Value l = b.create<memref::LoadOp>(loc, srcMemref, extractOp.indices());
+  extractOp.replaceAllUsesWith(l);
+  return success();
 }
 //===----------------------------------------------------------------------===//
 // Bufferization analyses.
@@ -2115,7 +2180,8 @@ bufferizableInPlaceAnalysis(ExtractSliceOp extractSliceOp,
                             BufferizationAliasInfo &aliasInfo,
                             const DominanceInfo &domInfo) {
   LDBG('\n');
-  LDBG("Inplace analysis for extract_slice: " << *extractSliceOp << '\n');
+  LDBG("Inplace analysis for extract_slice: "
+       << printOperationInfo(extractSliceOp) << '\n');
 
   // If `extractSliceOp` were to be bufferized inplace, it cannot end up
   // aliasing a write into a non-writeable buffer.
@@ -2160,9 +2226,9 @@ bufferizableInPlaceAnalysis(OpOperand &operand, OpResult result,
   int64_t resultNumber = result.getResultNumber();
   (void)resultNumber;
   LDBG('\n');
-  LDBG("Inplace analysis for result #" << resultNumber << " (operand #"
-                                       << operand.getOperandNumber() << ") in "
-                                       << result << '\n');
+  LDBG("Inplace analysis for <- #" << resultNumber << " -> #"
+                                   << operand.getOperandNumber() << " in "
+                                   << printValueInfo(result) << '\n');
 
   // `result` must bufferize to a writeable buffer to be a candidate.
   // This means the operand  must not alias either:
@@ -2194,35 +2260,36 @@ bufferizableInPlaceAnalysis(OpOperand &operand, OpResult result,
   return success();
 }
 
-/// Return `failure()` if either
-/// scf::YieldOp are not explicitly bufferized and we need to perform a separate
-/// sanity check for now.
-static LogicalResult
-bufferizationSanityCheck(scf::YieldOp yieldOp,
-                         const BufferizationAliasInfo &aliasInfo) {
-  auto parentForOp = yieldOp->getParentOfType<scf::ForOp>();
-  if (!parentForOp)
-    return yieldOp->emitError() << "not nested under ForOp";
-
-  for (OpOperand &operand : yieldOp->getOpOperands()) {
-    OpResult matchingForOpResult =
-        parentForOp->getResult(operand.getOperandNumber());
-    // Nothing to do if operand bufferizes out of place.
-    if (getInPlace(matchingForOpResult) != InPlaceSpec::True)
+/// Analyze the `ops` to determine which OpResults are inplaceable:
+///   1. First, analyze InsertSliceOp greedily: we almost never want to
+///      bufferize the tensor "inserted into" to become out-of-place.
+///   2. Walk the other ops in reverse. This is a good starter heuristic.
+///      ExtractSliceOps are interleaved with other ops in traversal order.
+///
+LogicalResult mlir::linalg::inPlaceAnalysis(SmallVector<Operation *> &ops,
+                                            BufferizationAliasInfo &aliasInfo,
+                                            const DominanceInfo &domInfo) {
+  // Walk ops in reverse for better interference analysis.
+  for (Operation *op : reverse(ops)) {
+    for (OpOperand &opOperand : op->getOpOperands()) {
+      if (OpResult result = getInplaceableOpResult(opOperand))
+        if (result.getType().isa<TensorType>() &&
+            failed(bufferizableInPlaceAnalysis(opOperand, result, aliasInfo,
+                                               domInfo)))
+          return failure();
+    }
+    // Special logic to analyze ExtractSliceOp.
+    // Note that ExtractSliceOp analysis needs to be interleaved with other ops
+    // to properly capture aliases.
+    // Walk ExtractSliceOps in reverse for better clobbering analysis behavior:
+    // it is easier to detect clobbers of smaller slices before larger ones.
+    if (auto extractSliceOp = dyn_cast<ExtractSliceOp>(op)) {
+      if (failed(
+              bufferizableInPlaceAnalysis(extractSliceOp, aliasInfo, domInfo)))
+        return failure();
       continue;
-    OpOperand &machingForOpOperand =
-        parentForOp.getOpOperandForResult(matchingForOpResult);
-    BlockArgument matchingForOpIterArg =
-        parentForOp.getRegionIterArgForOpOperand(machingForOpOperand);
-    if (!aliasInfo.areEquivalentBufferizedValues(matchingForOpIterArg,
-                                                 operand.get())) {
-      return yieldOp->emitError()
-             << "Yield operand #" << operand.getOperandNumber()
-             << " does not bufferize to an equivalent buffer to the matching"
-             << " enclosing scf::for operand -> Fail the pass\n";
     }
   }
-
   return success();
 }
 
@@ -2235,112 +2302,56 @@ inPlaceAnalysisFuncOpBody(FuncOp funcOp, BufferizationAliasInfo &aliasInfo,
   assert(funcOp && funcOp->getNumRegions() > 0 && !funcOp.body().empty() &&
          "expected a funcOp definition with a body");
 
-  // Collect ops so we can build our own traversal.
-  SmallVector<ExtractSliceOp> extractSliceOps;
-  SmallVector<InsertSliceOp> insertSliceOps;
-  SmallVector<Operation *> nonSliceOps;
+  // Collect ops so we can build our own reverse traversal.
+  SmallVector<Operation *> ops;
   funcOp.walk([&](Operation *op) {
-    if (auto extractSliceOp = dyn_cast<ExtractSliceOp>(op))
-      return extractSliceOps.push_back(extractSliceOp);
-    if (auto insertSliceOp = dyn_cast<InsertSliceOp>(op))
-      return insertSliceOps.push_back(insertSliceOp);
     // No tensors => no buffers.
     if (none_of(op->getOperandTypes(), isaTensor) &&
         none_of(op->getResultTypes(), isaTensor))
       return;
-    nonSliceOps.push_back(op);
+    ops.push_back(op);
   });
 
-  // Bufferize InsertSliceOp greedily: we almost never want to bufferize
-  // the tensor "inserted into" to become out-of-place. This implementation
-  // does not distinguish between different InsertSliceOp. If we want
-  // finer-grained behavior, we could order the InsertSliceOp with some metric.
-  // Walk InsertSliceOp in reverse for better interference behavior.
-  for (InsertSliceOp insertSliceOp : reverse(insertSliceOps)) {
-    OpOperand &destOpOperand = insertSliceOp->getOpOperand(1);
-    if (failed(bufferizableInPlaceAnalysis(
-            destOpOperand, getInplaceableOpResult(destOpOperand), aliasInfo,
-            domInfo)))
-      return failure();
-  }
-
-  // Bufferize all ops except ExtractSliceOp and InsertSliceOp which are handled
-  // separately.
-  // Walk other ops in reverse for better interference behavior.
-  for (Operation *op : reverse(nonSliceOps))
-    for (OpOperand &opOperand : op->getOpOperands())
-      if (OpResult result = getInplaceableOpResult(opOperand))
-        if (failed(bufferizableInPlaceAnalysis(opOperand, result, aliasInfo,
-                                               domInfo)))
-          return failure();
-
-  // Finally, bufferize ExtractSliceOp.
-  // Walk ExtractSliceOps in reverse for better clobbering behavior: it is
-  // easier to detect clobbers of smaller slices before larger ones.
-  for (ExtractSliceOp extractSliceOp : reverse(extractSliceOps))
-    if (failed(bufferizableInPlaceAnalysis(extractSliceOp, aliasInfo, domInfo)))
-      return failure();
-
-  // Sanity checks.
-  auto walkResult = funcOp.walk([&](scf::YieldOp yieldOp) -> WalkResult {
-    return bufferizationSanityCheck(yieldOp, aliasInfo);
-  });
-
+  LogicalResult res = inPlaceAnalysis(ops, aliasInfo, domInfo);
   LDBG("End InPlaceAnalysisFuncOpInternals:\n" << funcOp << '\n');
 
-  return success(!walkResult.wasInterrupted());
+  return res;
 }
 
 //===----------------------------------------------------------------------===//
 // Bufferization entry-point for functions.
 //===----------------------------------------------------------------------===//
 
-static LogicalResult bufferizeFuncOpInternals(
-    FuncOp funcOp, BlockAndValueMapping &bvm, BufferizationAliasInfo &aliasInfo,
-    DenseMap<FuncOp, FunctionType> &bufferizedFunctionTypes,
-    GlobalCreator &globalCreator) {
-  LLVM_DEBUG(llvm::dbgs() << "\n\n");
-  LDBG("Begin BufferizeFuncOpInternals:\n" << funcOp << '\n');
-  OpBuilder b(funcOp->getContext());
-  /// Start by bufferizing `funcOp` arguments.
-  if (failed(bufferize(b, funcOp, bvm, aliasInfo)))
-    return failure();
-  // Walk in PreOrder to ensure ops with regions are handled before their body.
-  // Since walk has to be PreOrder, we need to erase ops that require it
-  // separately: this is the case for CallOp
-  // clang-format off
-  SmallVector<Operation *> toErase;
-  WalkResult result = funcOp.walk<WalkOrder::PreOrder>([&](Operation *op)
-                                                          -> WalkResult {
-    WalkResult result =
-      TypeSwitch<Operation *, LogicalResult>(op)
+LogicalResult mlir::linalg::bufferizeOp(
+    Operation *op, BlockAndValueMapping &bvm, BufferizationAliasInfo &aliasInfo,
+    DenseMap<FuncOp, FunctionType> *bufferizedFunctionTypes,
+    GlobalCreator *globalCreator) {
+  OpBuilder b(op->getContext());
+  return TypeSwitch<Operation *, LogicalResult>(op)
       // Skip BufferCast and TensorLoad ops.
-      .Case<memref::BufferCastOp,
-            memref::TensorLoadOp>([&](auto) { return success(); })
-      .Case<tensor::CastOp,
-            tensor::DimOp,
-            ExtractSliceOp,
-            scf::ForOp,
-            InitTensorOp,
-            InsertSliceOp,
-            LinalgOp,
-            ReturnOp,
-            TiledLoopOp,
-            VectorTransferOpInterface,
-            linalg::YieldOp,
+      .Case<memref::BufferCastOp, memref::TensorLoadOp>(
+          [&](auto) { return success(); })
+      .Case<tensor::CastOp, tensor::DimOp, ExtractSliceOp, scf::ForOp,
+            InitTensorOp, InsertSliceOp, tensor::ExtractOp, LinalgOp, ReturnOp,
+            TiledLoopOp, VectorTransferOpInterface, linalg::YieldOp,
             scf::YieldOp>([&](auto op) {
         LDBG("Begin bufferize:\n" << op << '\n');
         return bufferize(b, op, bvm, aliasInfo);
       })
       .Case([&](CallOpInterface op) {
         LDBG("Begin bufferize:\n" << op << '\n');
-        return bufferize(b, op, bvm, aliasInfo, bufferizedFunctionTypes);
+        if (!bufferizedFunctionTypes)
+          llvm_unreachable(
+              "null bufferizedFunctionTypes when bufferizing CallOpInterface");
+        return bufferize(b, op, bvm, aliasInfo, *bufferizedFunctionTypes);
       })
       .Case([&](ConstantOp op) {
         if (!isaTensor(op.getResult().getType()))
           return success();
         LDBG("Begin bufferize:\n" << op << '\n');
-        return bufferize(b, op, bvm, aliasInfo, globalCreator);
+        if (!globalCreator)
+          llvm_unreachable("null globalCreator when bufferizing ConstantOp");
+        return bufferize(b, op, bvm, aliasInfo, *globalCreator);
       })
       .Default([&](Operation *op) -> LogicalResult {
         auto isaTensor = [](Type t) { return t.isa<TensorType>(); };
@@ -2349,22 +2360,45 @@ static LogicalResult bufferizeFuncOpInternals(
           return op->emitError() << "unsupported op with tensors";
         return success();
       });
+}
 
-    // Register post-walk erasure, if necessary.
-    if (isa<CallOpInterface>(op))
-      if (llvm::any_of(op->getOperandTypes(), isaTensor) ||
-          llvm::any_of(op->getResultTypes(), isaTensor))
-        toErase.push_back(op);
+static LogicalResult bufferizeFuncOpInternals(
+    FuncOp funcOp, BlockAndValueMapping &bvm, BufferizationAliasInfo &aliasInfo,
+    DenseMap<FuncOp, FunctionType> &bufferizedFunctionTypes,
+    GlobalCreator &globalCreator) {
 
-    return result;
-  });
-  // clang-format on
+  LLVM_DEBUG(llvm::dbgs() << "\n\n");
+  LDBG("Begin BufferizeFuncOpInternals:\n" << funcOp << '\n');
+  OpBuilder b(funcOp->getContext());
+  /// Start by bufferizing `funcOp` arguments.
+  if (failed(bufferize(b, funcOp, bvm, aliasInfo)))
+    return failure();
+
+  // Walk in PreOrder to ensure ops with regions are handled before their body.
+  // Since walk has to be PreOrder, we need to erase ops that require it
+  // separately: this is the case for CallOp
+  SmallVector<Operation *> toErase;
+  if (funcOp
+          .walk<WalkOrder::PreOrder>([&](Operation *op) -> WalkResult {
+            if (failed(bufferizeOp(op, bvm, aliasInfo, &bufferizedFunctionTypes,
+                                   &globalCreator)))
+              return failure();
+            // Register post-walk erasure, if necessary.
+            if (isa<CallOpInterface>(op))
+              if (llvm::any_of(op->getOperandTypes(), isaTensor) ||
+                  llvm::any_of(op->getResultTypes(), isaTensor))
+                toErase.push_back(op);
+            return success();
+          })
+          .wasInterrupted())
+    return failure();
+
   LDBG("End BufferizeFuncOpInternals:\n" << funcOp << '\n');
 
   for (Operation *op : toErase)
     op->erase();
 
-  return failure(result.wasInterrupted());
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -2392,6 +2426,8 @@ static Operation *getEquivalentAlloc(Value value,
 static BlockArgument
 getEquivalentEnclosingFuncBBArg(Value v,
                                 const BufferizationAliasInfo &aliasInfo) {
+  if (!v.getType().isa<RankedTensorType>())
+    return nullptr;
   Operation *op = v.getParentBlock()->getParentOp();
   FuncOp funcOp = dyn_cast<FuncOp>(op);
   if (!funcOp)
@@ -2463,13 +2499,17 @@ static LogicalResult bufferizeFuncOpBoundary(
 
   // Support only single return-terminated block in the function.
   ReturnOp returnOp = getAssumedUniqueReturnOp(funcOp);
-  if (!returnOp)
-    return funcOp->emitError() << "cannot bufferize a FuncOp with tensors and "
-                                  "without a unique ReturnOp";
+  assert(returnOp && "expected func with single return op");
 
   // 1. For each FuncOp result, keep track of which inplace argument it reuses.
   SmallVector<Value> returnValues;
   for (OpOperand &returnOperand : returnOp->getOpOperands()) {
+    // If not a renturn tensor type just forward it.
+    if (!returnOperand.get().getType().isa<RankedTensorType>()) {
+      returnValues.push_back(returnOperand.get());
+      continue;
+    }
+
     // If return operand is equivalent to some bbArg, no need to return it.
     Value returnVal = returnOperand.get();
     if (getEquivalentEnclosingFuncBBArg(returnVal, aliasInfo))
@@ -2563,7 +2603,15 @@ getFuncOpsOrderedByCalls(ModuleOp moduleOp,
   DenseMap<FuncOp, DenseSet<FuncOp>> calledBy;
   // For each FuncOp, the number of CallOpInterface it contains.
   DenseMap<FuncOp, unsigned> numberCallOpsContainedInFuncOp;
-  WalkResult res = moduleOp.walk([&](FuncOp funcOp) {
+  WalkResult res = moduleOp.walk([&](FuncOp funcOp) -> WalkResult {
+    if (!funcOp.body().empty()) {
+      ReturnOp returnOp = getAssumedUniqueReturnOp(funcOp);
+      if (!returnOp)
+        return funcOp->emitError()
+               << "cannot bufferize a FuncOp with tensors and "
+                  "without a unique ReturnOp";
+    }
+
     numberCallOpsContainedInFuncOp[funcOp] = 0;
     return funcOp.walk([&](CallOpInterface callOp) -> WalkResult {
       // Only support CallOp for now.
@@ -2611,8 +2659,106 @@ struct LinalgComprehensiveModuleBufferize
 };
 } // end namespace
 
+static void applyEnablingTransformations(ModuleOp moduleOp) {
+  RewritePatternSet patterns(moduleOp.getContext());
+  patterns.add<GeneralizePadTensorOpPattern>(moduleOp.getContext());
+  (void)applyPatternsAndFoldGreedily(moduleOp, std::move(patterns));
+}
+
+static void
+foreachCaller(const DenseMap<FuncOp, DenseSet<Operation *>> &callerMap,
+              FuncOp callee, llvm::function_ref<void(Operation *)> doit) {
+  auto itCallers = callerMap.find(callee);
+  if (itCallers == callerMap.end())
+    return;
+  for (Operation *caller : itCallers->second)
+    doit(caller);
+}
+
+/// Postprocess the linalg.buffer_layout annotation across function boundaries.
+/// This is a purely mechanical process that may later become part of a
+/// separate pass with its own layout assignment heuristic.
+static void layoutPostProcessing(ModuleOp moduleOp) {
+  SmallVector<FuncOp> orderedFuncOps;
+  DenseMap<FuncOp, DenseSet<Operation *>> callerMap;
+  auto res = getFuncOpsOrderedByCalls(moduleOp, orderedFuncOps, callerMap);
+  (void)res;
+  assert(succeeded(res) && "unexpected getFuncOpsOrderedByCalls failure");
+
+  for (FuncOp funcOp : orderedFuncOps) {
+    DenseMap<Operation *, SmallVector<Value>> operandsPerCaller;
+    foreachCaller(callerMap, funcOp, [&](Operation *caller) {
+      operandsPerCaller.try_emplace(caller, SmallVector<Value>());
+    });
+
+    SmallVector<Type> argumentTypes;
+    // Iterate on each function argument and check it it was marked with a
+    // desired layout.
+    for (auto it : llvm::enumerate(funcOp.getType().getInputs())) {
+      int argNumber = it.index();
+      Type inputType = it.value();
+      auto memrefType = inputType.dyn_cast<MemRefType>();
+      auto layoutAttr = funcOp.getArgAttrOfType<AffineMapAttr>(
+          argNumber, LinalgDialect::kBufferLayoutAttrName);
+      AffineMap desiredLayoutMap =
+          layoutAttr ? layoutAttr.getValue() : AffineMap();
+      AffineMap currentLayoutMap =
+          memrefType ? getStridedLinearLayoutMap(memrefType) : AffineMap();
+      if (!memrefType || !layoutAttr || desiredLayoutMap == currentLayoutMap) {
+        argumentTypes.push_back(inputType);
+        foreachCaller(callerMap, funcOp, [&](Operation *caller) {
+          operandsPerCaller.find(caller)->getSecond().push_back(
+              caller->getOperand(argNumber));
+        });
+        continue;
+      }
+
+      // Compute the buffer type with desired layout and add to input argument
+      // types.
+      MemRefType desiredMemrefType = MemRefType::get(
+          memrefType.getShape(), memrefType.getElementType(), desiredLayoutMap);
+      argumentTypes.push_back(desiredMemrefType);
+
+      // If funcOp's body is not empty, change the bbArg type and propagate.
+      if (!funcOp.body().empty()) {
+        BlockArgument bbArg = funcOp.getArgument(argNumber);
+        bbArg.setType(desiredMemrefType);
+        OpBuilder b(bbArg.getContext());
+        b.setInsertionPointToStart(bbArg.getOwner());
+        // Cast back to the original memrefType and let it canonicalize.
+        Value cast =
+            b.create<memref::CastOp>(funcOp.getLoc(), memrefType, bbArg);
+        bbArg.replaceAllUsesExcept(cast, cast.getDefiningOp());
+      }
+
+      // Cast to desired buffer type on all callers to `funcOp`.
+      // TODO: on the callee side, this may even have to trigger a copy to
+      // change the layout. For now let the memref::CastOp fail to verify in
+      // such cases.
+      auto castArg = [&](Operation *caller) {
+        OpBuilder b(caller);
+        Value newOperand = b.create<memref::CastOp>(
+            funcOp.getLoc(), desiredMemrefType, caller->getOperand(argNumber));
+        operandsPerCaller.find(caller)->getSecond().push_back(newOperand);
+      };
+      foreachCaller(callerMap, funcOp, castArg);
+    }
+
+    // Set operands with cast buffer on all callers to `funcOp`.
+    foreachCaller(callerMap, funcOp, [&](Operation *caller) {
+      caller->setOperands(operandsPerCaller.lookup(caller));
+    });
+
+    // Finally set the funcOp type to update the arguments.
+    auto newFuncType = FunctionType::get(moduleOp.getContext(), argumentTypes,
+                                         funcOp.getType().getResults());
+    funcOp.setType(newFuncType);
+  }
+}
+
 void LinalgComprehensiveModuleBufferize::runOnOperation() {
   ModuleOp moduleOp = getOperation();
+  applyEnablingTransformations(moduleOp);
 
   SmallVector<FuncOp> orderedFuncOps;
   DenseMap<FuncOp, DenseSet<Operation *>> callerMap;
@@ -2672,17 +2818,29 @@ void LinalgComprehensiveModuleBufferize::runOnOperation() {
       signalPassFailure();
       return;
     }
+    if (!allowReturnMemref &&
+        llvm::any_of(funcOp.getType().getResults(), [](Type t) {
+          return t.isa<MemRefType, UnrankedMemRefType>();
+        })) {
+      funcOp->emitError("memref return type is unsupported");
+      signalPassFailure();
+      return;
+    }
   }
 
-  // Post-pass cleanup of inplaceable attributes.
+  // Perform a post-processing pass of layout modification at function boundary
+  // according to the kBufferLayoutAttrName.
+  layoutPostProcessing(moduleOp);
+
+  // Post-pass cleanup of inplaceable and buffer_layout attributes.
   moduleOp.walk(
       [&](Operation *op) { op->removeAttr(kInPlaceResultsAttrName); });
   moduleOp.walk([&](FuncOp op) {
     for (BlockArgument bbArg : op.getArguments())
-      removeInPlaceFuncArgument(bbArg);
+      removeBufferizationFuncArguments(bbArg);
   });
 
-  OpPassManager cleanupPipeline(OpPassManager("module"));
+  OpPassManager cleanupPipeline("builtin.module");
   cleanupPipeline.addPass(createCanonicalizerPass());
   cleanupPipeline.addPass(createCSEPass());
   cleanupPipeline.addPass(createLoopInvariantCodeMotionPass());

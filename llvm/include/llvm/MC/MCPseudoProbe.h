@@ -54,9 +54,9 @@
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/IPO/SampleProfileProbe.h"
 #include <algorithm>
 #include <functional>
+#include <list>
 #include <map>
 #include <set>
 #include <sstream>
@@ -112,20 +112,16 @@ protected:
   uint64_t Index;
   uint8_t Attributes;
   uint8_t Type;
-  const static uint32_t PseudoProbeFirstId =
-      static_cast<uint32_t>(PseudoProbeReservedId::Last) + 1;
+  // The value should be equal to PseudoProbeReservedId::Last + 1 which is
+  // defined in SampleProfileProbe.h. The header file is not included here to
+  // reduce the dependency from MC to IPO.
+  const static uint32_t PseudoProbeFirstId = 1;
 
 public:
   MCPseudoProbeBase(uint64_t G, uint64_t I, uint64_t At, uint8_t T)
       : Guid(G), Index(I), Attributes(At), Type(T) {}
 
   bool isEntry() const { return Index == PseudoProbeFirstId; }
-
-  bool isTailCall() const {
-    // Reserved of bolt is equivalent to PseudoProbeAttributes::TailCall
-    // defined in server-llvm (t/s/m)
-    return Attributes & static_cast<uint8_t>(PseudoProbeAttributes::Reserved);
-  }
 
   uint64_t getGuid() const { return Guid; }
 
@@ -172,6 +168,9 @@ public:
   void emit(MCObjectStreamer *MCOS, const MCPseudoProbe *LastProbe) const;
 };
 
+// Represents a callsite with caller function name and probe id
+using MCPseduoProbeFrameLocation = std::pair<StringRef, uint32_t>;
+
 class MCDecodedPseudoProbe : public MCPseudoProbeBase {
   uint64_t Address;
   MCDecodedPseudoProbeInlineTree *InlineTree;
@@ -193,13 +192,13 @@ public:
   // Get the inlined context by traversing current inline tree backwards,
   // each tree node has its InlineSite which is taken as the context.
   // \p ContextStack is populated in root to leaf order
-  void getInlineContext(SmallVectorImpl<std::string> &ContextStack,
-                        const GUIDProbeFunctionMap &GUID2FuncMAP,
-                        bool ShowName) const;
+  void
+  getInlineContext(SmallVectorImpl<MCPseduoProbeFrameLocation> &ContextStack,
+                   const GUIDProbeFunctionMap &GUID2FuncMAP) const;
 
   // Helper function to get the string from context stack
-  std::string getInlineContextStr(const GUIDProbeFunctionMap &GUID2FuncMAP,
-                                  bool ShowName) const;
+  std::string
+  getInlineContextStr(const GUIDProbeFunctionMap &GUID2FuncMAP) const;
 
   // Print pseudo probe while disassembling
   void print(raw_ostream &OS, const GUIDProbeFunctionMap &GUID2FuncMAP,
@@ -250,9 +249,8 @@ public:
 // A Tri-tree based data structure to group probes by inline stack.
 // A tree is allocated for a standalone .text section. A fake
 // instance is created as the root of a tree.
-// A real instance of this class is created for each function, either an
-// unlined function that has code in .text section or an inlined function.
-
+// A real instance of this class is created for each function, either a
+// not inlined function that has code in .text section or an inlined function.
 class MCPseudoProbeInlineTree
     : public MCPseudoProbeInlineTreeBase<MCPseudoProbe,
                                          MCPseudoProbeInlineTree> {
@@ -352,9 +350,6 @@ class MCPseudoProbeDecoder {
   /// Points to the end of the buffer.
   const uint8_t *End = nullptr;
 
-  /// SectionName used for debug
-  std::string SectionName;
-
   // Decoding helper function
   template <typename T> ErrorOr<T> readUnencodedNumber();
   template <typename T> ErrorOr<T> readUnsignedNumber();
@@ -389,10 +384,10 @@ public:
   //  Current probe(bar:3) inlined at foo:2 then inlined at main:1
   //  IncludeLeaf = true,  Output: [main:1, foo:2, bar:3]
   //  IncludeLeaf = false, Output: [main:1, foo:2]
-  void
-  getInlineContextForProbe(const MCDecodedPseudoProbe *Probe,
-                           SmallVectorImpl<std::string> &InlineContextStack,
-                           bool IncludeLeaf) const;
+  void getInlineContextForProbe(
+      const MCDecodedPseudoProbe *Probe,
+      SmallVectorImpl<MCPseduoProbeFrameLocation> &InlineContextStack,
+      bool IncludeLeaf) const;
 
   const AddressProbesMap &getAddress2ProbesMap() const {
     return Address2ProbesMap;
@@ -407,12 +402,11 @@ public:
   const MCPseudoProbeFuncDesc *
   getInlinerDescForProbe(const MCDecodedPseudoProbe *Probe) const;
 
-  std::string getSectionName() const { return SectionName; };
-
   const MCDecodedPseudoProbeInlineTree &getDummyInlineRoot() const {
     return DummyInlineRoot;
   }
 };
+
 } // end namespace llvm
 
 #endif // LLVM_MC_MCPSEUDOPROBE_H

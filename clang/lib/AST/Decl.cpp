@@ -102,7 +102,7 @@ bool Decl::isOutOfLine() const {
 
 TranslationUnitDecl::TranslationUnitDecl(ASTContext &ctx)
     : Decl(TranslationUnit, nullptr, SourceLocation()),
-      DeclContext(TranslationUnit), Ctx(ctx) {}
+      DeclContext(TranslationUnit), redeclarable_base(ctx), Ctx(ctx) {}
 
 //===----------------------------------------------------------------------===//
 // NamedDecl Implementation
@@ -2216,14 +2216,18 @@ VarDecl *VarDecl::getActingDefinition() {
     return nullptr;
 
   VarDecl *LastTentative = nullptr;
-  VarDecl *First = getFirstDecl();
-  for (auto I : First->redecls()) {
-    Kind = I->isThisDeclarationADefinition();
+
+  // Loop through the declaration chain, starting with the most recent.
+  for (VarDecl *Decl = getMostRecentDecl(); Decl;
+       Decl = Decl->getPreviousDecl()) {
+    Kind = Decl->isThisDeclarationADefinition();
     if (Kind == Definition)
       return nullptr;
-    if (Kind == TentativeDefinition)
-      LastTentative = I;
+    // Record the first (most recent) TentativeDefinition that is encountered.
+    if (Kind == TentativeDefinition && !LastTentative)
+      LastTentative = Decl;
   }
+
   return LastTentative;
 }
 
@@ -2532,6 +2536,14 @@ bool VarDecl::isEscapingByref() const {
 
 bool VarDecl::isNonEscapingByref() const {
   return hasAttr<BlocksAttr>() && !NonParmVarDeclBits.EscapingByref;
+}
+
+bool VarDecl::hasDependentAlignment() const {
+  QualType T = getType();
+  return T->isDependentType() || T->isUndeducedAutoType() ||
+         llvm::any_of(specific_attrs<AlignedAttr>(), [](const AlignedAttr *AA) {
+           return AA->isAlignmentDependent();
+         });
 }
 
 VarDecl *VarDecl::getTemplateInstantiationPattern() const {
@@ -2844,7 +2856,7 @@ FunctionDecl::FunctionDecl(Kind DK, ASTContext &C, DeclContext *DC,
                            SourceLocation StartLoc,
                            const DeclarationNameInfo &NameInfo, QualType T,
                            TypeSourceInfo *TInfo, StorageClass S,
-                           bool isInlineSpecified,
+                           bool UsesFPIntrin, bool isInlineSpecified,
                            ConstexprSpecKind ConstexprKind,
                            Expr *TrailingRequiresClause)
     : DeclaratorDecl(DK, DC, NameInfo.getLoc(), NameInfo.getName(), T, TInfo,
@@ -2870,7 +2882,7 @@ FunctionDecl::FunctionDecl(Kind DK, ASTContext &C, DeclContext *DC,
   FunctionDeclBits.ConstexprKind = static_cast<uint64_t>(ConstexprKind);
   FunctionDeclBits.InstantiationIsPending = false;
   FunctionDeclBits.UsesSEHTry = false;
-  FunctionDeclBits.UsesFPIntrin = false;
+  FunctionDeclBits.UsesFPIntrin = UsesFPIntrin;
   FunctionDeclBits.HasSkippedBody = false;
   FunctionDeclBits.WillHaveBody = false;
   FunctionDeclBits.IsMultiVersion = false;
@@ -3164,7 +3176,8 @@ bool FunctionDecl::isInlineBuiltinDeclaration() const {
     return false;
 
   const FunctionDecl *Definition;
-  return hasBody(Definition) && Definition->isInlineSpecified();
+  return hasBody(Definition) && Definition->isInlineSpecified() &&
+         Definition->hasAttr<AlwaysInlineAttr>();
 }
 
 bool FunctionDecl::isDestroyingOperatorDelete() const {
@@ -4849,18 +4862,16 @@ ImplicitParamDecl *ImplicitParamDecl::CreateDeserialized(ASTContext &C,
   return new (C, ID) ImplicitParamDecl(C, QualType(), ImplicitParamKind::Other);
 }
 
-FunctionDecl *FunctionDecl::Create(ASTContext &C, DeclContext *DC,
-                                   SourceLocation StartLoc,
-                                   const DeclarationNameInfo &NameInfo,
-                                   QualType T, TypeSourceInfo *TInfo,
-                                   StorageClass SC, bool isInlineSpecified,
-                                   bool hasWrittenPrototype,
-                                   ConstexprSpecKind ConstexprKind,
-                                   Expr *TrailingRequiresClause) {
-  FunctionDecl *New =
-      new (C, DC) FunctionDecl(Function, C, DC, StartLoc, NameInfo, T, TInfo,
-                               SC, isInlineSpecified, ConstexprKind,
-                               TrailingRequiresClause);
+FunctionDecl *
+FunctionDecl::Create(ASTContext &C, DeclContext *DC, SourceLocation StartLoc,
+                     const DeclarationNameInfo &NameInfo, QualType T,
+                     TypeSourceInfo *TInfo, StorageClass SC, bool UsesFPIntrin,
+                     bool isInlineSpecified, bool hasWrittenPrototype,
+                     ConstexprSpecKind ConstexprKind,
+                     Expr *TrailingRequiresClause) {
+  FunctionDecl *New = new (C, DC) FunctionDecl(
+      Function, C, DC, StartLoc, NameInfo, T, TInfo, SC, UsesFPIntrin,
+      isInlineSpecified, ConstexprKind, TrailingRequiresClause);
   New->setHasWrittenPrototype(hasWrittenPrototype);
   return New;
 }
@@ -4868,7 +4879,7 @@ FunctionDecl *FunctionDecl::Create(ASTContext &C, DeclContext *DC,
 FunctionDecl *FunctionDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
   return new (C, ID) FunctionDecl(
       Function, C, nullptr, SourceLocation(), DeclarationNameInfo(), QualType(),
-      nullptr, SC_None, false, ConstexprSpecKind::Unspecified, nullptr);
+      nullptr, SC_None, false, false, ConstexprSpecKind::Unspecified, nullptr);
 }
 
 BlockDecl *BlockDecl::Create(ASTContext &C, DeclContext *DC, SourceLocation L) {

@@ -76,6 +76,8 @@ protected:
 
   size_t GetFPRSize() override { return sizeof(m_fpr); }
 
+  lldb::addr_t FixWatchpointHitAddress(lldb::addr_t hit_addr) override;
+
 private:
   bool m_gpr_is_valid;
   bool m_fpu_is_valid;
@@ -137,7 +139,7 @@ private:
 
   void *GetMTEControl() { return &m_mte_ctrl_reg; }
 
-  void *GetSVEBuffer();
+  void *GetSVEBuffer() { return m_sve_ptrace_payload.data(); };
 
   size_t GetSVEHeaderSize() { return sizeof(m_sve_header); }
 

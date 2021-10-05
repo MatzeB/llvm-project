@@ -137,9 +137,10 @@ public:
   void emitValueToAlignment(unsigned ByteAlignment, int64_t Value = 0,
                             unsigned ValueSize = 1,
                             unsigned MaxBytesToEmit = 0) override;
-  void emitCodeAlignment(unsigned ByteAlignment,
+  void emitCodeAlignment(unsigned ByteAlignment, const MCSubtargetInfo *STI,
                          unsigned MaxBytesToEmit = 0) override;
-  void emitNeverAlignCodeAtEnd(unsigned ByteAlignment) override;
+  void emitNeverAlignCodeAtEnd(unsigned ByteAlignment,
+                               const MCSubtargetInfo &STI) override;
   void emitValueToOffset(const MCExpr *Offset, unsigned char Value,
                          SMLoc Loc) override;
   void emitDwarfLocDirective(unsigned FileNo, unsigned Line, unsigned Column,
@@ -150,9 +151,6 @@ public:
                                 const MCSymbol *Label,
                                 unsigned PointerSize) override;
   void emitDwarfLineEndEntry(MCSection *Section, MCSymbol *LastLabel) override;
-  void emitDwarfAdvanceLineAddrAbs(int64_t LineDelta, uint64_t Address,
-                                   uint64_t AddressDelta,
-                                   unsigned PointerSize) override;
   void emitDwarfAdvanceFrameAddr(const MCSymbol *LastLabel,
                                  const MCSymbol *Label);
   void emitCVLocDirective(unsigned FunctionId, unsigned FileNo, unsigned Line,
@@ -185,9 +183,11 @@ public:
                 SMLoc Loc = SMLoc()) override;
   void emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
                 SMLoc Loc = SMLoc()) override;
-  void emitNops(int64_t NumBytes, int64_t ControlledNopLength,
-                SMLoc Loc) override;
+  void emitNops(int64_t NumBytes, int64_t ControlledNopLength, SMLoc Loc,
+                const MCSubtargetInfo &STI) override;
   void emitFileDirective(StringRef Filename) override;
+  void emitFileDirective(StringRef Filename, StringRef CompilerVerion,
+                         StringRef TimeStamp, StringRef Description) override;
 
   void emitAddrsig() override;
   void emitAddrsigSym(const MCSymbol *Sym) override;

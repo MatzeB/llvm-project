@@ -61,7 +61,9 @@ add_mlir_library(MLIRTestDialect
   MLIRDLTI
   MLIRIR
   MLIRInferTypeOpInterface
+  MLIRLinalg
   MLIRLinalgTransforms
+  MLIRLLVMIR
   MLIRPass
   MLIRReduce
   MLIRStandard

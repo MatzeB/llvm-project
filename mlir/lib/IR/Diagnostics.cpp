@@ -131,6 +131,14 @@ Diagnostic &Diagnostic::operator<<(Operation &val) {
   return *this << os.str();
 }
 
+/// Stream in a Value.
+Diagnostic &Diagnostic::operator<<(Value val) {
+  std::string str;
+  llvm::raw_string_ostream os(str);
+  val.print(os);
+  return *this << os.str();
+}
+
 /// Outputs this diagnostic to a stream.
 void Diagnostic::print(raw_ostream &os) const {
   for (auto &arg : getArguments())
@@ -466,7 +474,7 @@ void SourceMgrDiagnosticHandler::emitDiagnostic(Diagnostic &diag) {
   SmallVector<std::pair<Location, StringRef>> locationStack;
   auto addLocToStack = [&](Location loc, StringRef locContext) {
     if (Optional<Location> showableLoc = findLocToShow(loc))
-      locationStack.emplace_back(loc, locContext);
+      locationStack.emplace_back(*showableLoc, locContext);
   };
 
   // Add locations to display for this diagnostic.

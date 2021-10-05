@@ -50,6 +50,11 @@ bool hwasan_init_is_running;
 
 int hwasan_report_count = 0;
 
+uptr kLowShadowStart;
+uptr kLowShadowEnd;
+uptr kHighShadowStart;
+uptr kHighShadowEnd;
+
 void Flags::SetDefaults() {
 #define HWASAN_FLAG(Type, Name, DefaultValue, Description) Name = DefaultValue;
 #include "hwasan_flags.inc"
@@ -136,7 +141,7 @@ static void CheckUnwind() {
 static void HwasanFormatMemoryUsage(InternalScopedString &s) {
   HwasanThreadList &thread_list = hwasanThreadList();
   auto thread_stats = thread_list.GetThreadStats();
-  auto *sds = StackDepotGetStats();
+  auto sds = StackDepotGetStats();
   AllocatorStatCounters asc;
   GetAllocatorStats(asc);
   s.append(
@@ -146,7 +151,7 @@ static void HwasanFormatMemoryUsage(InternalScopedString &s) {
       internal_getpid(), GetRSS(), thread_stats.n_live_threads,
       thread_stats.total_stack_size,
       thread_stats.n_live_threads * thread_list.MemoryUsedPerThread(),
-      sds->allocated, sds->n_uniq_ids, asc[AllocatorStatMapped]);
+      sds.allocated, sds.n_uniq_ids, asc[AllocatorStatMapped]);
 }
 
 #if SANITIZER_ANDROID
@@ -275,7 +280,7 @@ static void InitLoadedGlobals() {
 static void InitInstrumentation() {
   if (hwasan_instrumentation_inited) return;
 
-  InitPrctl();
+  InitializeOsSupport();
 
   if (!InitShadow()) {
     Printf("FATAL: HWAddressSanitizer cannot mmap the shadow memory.\n");
@@ -314,7 +319,7 @@ void __hwasan_init_static() {
     InitializeSingleGlobal(global);
 }
 
-void __hwasan_init() {
+__attribute__((constructor(0))) void __hwasan_init() {
   CHECK(!hwasan_init_is_running);
   if (hwasan_inited) return;
   hwasan_init_is_running = 1;
@@ -355,6 +360,7 @@ void __hwasan_init() {
   HwasanTSDThreadInit();
 
   HwasanAllocatorInit();
+  HwasanInstallAtForkHandler();
 
 #if HWASAN_CONTAINS_UBSAN
   __ubsan::InitAsPlugin();
@@ -574,4 +580,12 @@ void __sanitizer_print_stack_trace() {
   GET_FATAL_STACK_TRACE_PC_BP(StackTrace::GetCurrentPc(), GET_CURRENT_FRAME());
   stack.Print();
 }
+
+// Entry point for interoperability between __hwasan_tag_mismatch (ASM) and the
+// rest of the mismatch handling code (C++).
+void __hwasan_tag_mismatch4(uptr addr, uptr access_info, uptr *registers_frame,
+                            size_t outsize) {
+  __hwasan::HwasanTagMismatch(addr, access_info, registers_frame, outsize);
+}
+
 } // extern "C"

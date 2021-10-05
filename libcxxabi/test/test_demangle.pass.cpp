@@ -9,6 +9,11 @@
 // The demangler does not pass all these tests with the system dylibs on macOS.
 // XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
 
+// https://llvm.org/PR51407 was not fixed in some previously-released
+// demanglers, which causes them to run into the infinite loop.
+// UNSUPPORTED: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
+// UNSUPPORTED: use_system_cxx_lib && target={{.+}}-apple-macosx11.0
+
 #include "support/timer.h"
 #include <cassert>
 #include <cstdio>
@@ -23428,6 +23433,8 @@ const char* cases[][2] =
     {"_ZN4llvm7APFloatC2Ef", "llvm::APFloat::APFloat(float)"},
     {"_ZN4llvm7APFloatC1Ed", "llvm::APFloat::APFloat(double)"},
     {"_ZN4llvm7APFloatC2Ed", "llvm::APFloat::APFloat(double)"},
+    {"_ZN4llvm7APFloatC1EDF16_", "llvm::APFloat::APFloat(_Float16)"},
+    {"_ZN4llvm7APFloatC2EDF16_", "llvm::APFloat::APFloat(_Float16)"},
     {"_ZNK4llvm7APFloat8toStringERNS_15SmallVectorImplIcEEjj", "llvm::APFloat::toString(llvm::SmallVectorImpl<char>&, unsigned int, unsigned int) const"},
     {"_ZNK4llvm5APIntngEv", "llvm::APInt::operator-() const"},
     {"_ZN4llvm5APIntlSEj", "llvm::APInt::operator<<=(unsigned int)"},
@@ -29564,6 +29571,7 @@ const char* cases[][2] =
     {"_Z2f3IJEEvDpPKT_", "void f3<>()"},
     {"_Z2f3IJiEEvDpPKT_", "void f3<int>(int const*)"},
     {"_Z2f3IJifEEvDpPKT_", "void f3<int, float>(int const*, float const*)"},
+    {"_Z10float16addDF16_DF16_", "float16add(_Float16, _Float16)"},
     {"_Z2f4IJifdEE5tupleIJDpT_EEv", "tuple<int, float, double> f4<int, float, double>()"},
     {"_Z2f5IiJifdEE8identityIFT_DpT0_EEv", "identity<int (int, float, double)> f5<int, int, float, double>()"},
     {"_Z2f6IJLi1ELi2ELi3EEE9int_tupleIJXspT_EEEv", "int_tuple<1, 2, 3> f6<1, 2, 3>()"},
@@ -29844,6 +29852,9 @@ const char* cases[][2] =
 
     {"_ZN3xxx3yyyIvNS_1AILm0EEEZNS_2bb2cc2ddILNS_1eE1EEEvRKNS_1fERKNS_1g1hINS_1iEEERKNS_1jEfRKNS_1kEiPhEUlvE_JEEEvT1_DpT2_", "void xxx::yyy<void, xxx::A<0ul>, void xxx::bb::cc::dd<(xxx::e)1>(xxx::f const&, xxx::g::h<xxx::i> const&, xxx::j const&, float, xxx::k const&, int, unsigned char*)::'lambda'()>(void xxx::bb::cc::dd<(xxx::e)1>(xxx::f const&, xxx::g::h<xxx::i> const&, xxx::j const&, float, xxx::k const&, int, unsigned char*)::'lambda'())"},
 
+    // This should be invalid, but it is currently not recognized as such
+    // See https://llvm.org/PR51407
+    {"_Zcv1BIRT_EIS1_E", "operator B<><>"},
 };
 
 const unsigned N = sizeof(cases) / sizeof(cases[0]);

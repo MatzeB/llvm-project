@@ -5,7 +5,9 @@
 // RUN:               -convert-linalg-to-loops                                 \
 // RUN:               -convert-scf-to-std                                      \
 // RUN:               -convert-linalg-to-llvm                                  \
+// RUN:               -convert-memref-to-llvm                                  \
 // RUN:               -convert-std-to-llvm                                     \
+// RUN:               -reconcile-unrealized-casts                              \
 // RUN: | mlir-cpu-runner                                                      \
 // RUN:     -e main -entry-point-result=void -O0                               \
 // RUN:     -shared-libs=%linalg_test_lib_dir/libmlir_c_runner_utils%shlibext  \

@@ -27,7 +27,6 @@
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/EndianStream.h"
@@ -66,29 +65,6 @@ MCSymbol *mcdwarf::emitListsTableHeaderStart(MCStreamer &S) {
   return End;
 }
 
-/// Manage the .debug_line_str section contents, if we use it.
-class llvm::MCDwarfLineStr {
-  MCSymbol *LineStrLabel = nullptr;
-  StringTableBuilder LineStrings{StringTableBuilder::DWARF};
-  bool UseRelocs = false;
-
-public:
-  /// Construct an instance that can emit .debug_line_str (for use in a normal
-  /// v5 line table).
-  explicit MCDwarfLineStr(MCContext &Ctx) {
-    UseRelocs = Ctx.getAsmInfo()->doesDwarfUseRelocationsAcrossSections();
-    if (UseRelocs)
-      LineStrLabel =
-          Ctx.getObjectFileInfo()->getDwarfLineStrSection()->getBeginSymbol();
-  }
-
-  /// Emit a reference to the string.
-  void emitRef(MCStreamer *MCOS, StringRef Path);
-
-  /// Emit the .debug_line_str section if appropriate.
-  void emitSection(MCStreamer *MCOS);
-};
-
 static inline uint64_t ScaleAddrDelta(MCContext &Context, uint64_t AddrDelta) {
   unsigned MinInsnLength = Context.getAsmInfo()->getMinInstAlignment();
   if (MinInsnLength == 1)
@@ -98,6 +74,13 @@ static inline uint64_t ScaleAddrDelta(MCContext &Context, uint64_t AddrDelta) {
     ;
   }
   return AddrDelta / MinInsnLength;
+}
+
+MCDwarfLineStr::MCDwarfLineStr(MCContext &Ctx) {
+  UseRelocs = Ctx.getAsmInfo()->doesDwarfUseRelocationsAcrossSections();
+  if (UseRelocs)
+    LineStrLabel =
+        Ctx.getObjectFileInfo()->getDwarfLineStrSection()->getBeginSymbol();
 }
 
 //
@@ -162,7 +145,7 @@ makeStartPlusIntExpr(MCContext &Ctx, const MCSymbol &Start, int IntVal) {
 // This emits the Dwarf line table for the specified section from the entries
 // in the LineSection.
 //
-static inline void emitDwarfLineTable(
+void MCDwarfLineTable::emitOne(
     MCStreamer *MCOS, MCSection *Section,
     const MCLineSection::MCDwarfLineEntryCollection &LineEntries) {
   unsigned FileNum = 1;
@@ -171,26 +154,11 @@ static inline void emitDwarfLineTable(
   unsigned Flags = DWARF2_LINE_DEFAULT_IS_STMT ? DWARF2_FLAG_IS_STMT : 0;
   unsigned Isa = 0;
   unsigned Discriminator = 0;
-  uint64_t LastAddress = -1ULL;
   MCSymbol *LastLabel = nullptr;
-  const MCAsmInfo *AsmInfo = MCOS->getContext().getAsmInfo();
 
   // Loop through each MCDwarfLineEntry and encode the dwarf line number table.
-  for (auto it = LineEntries.begin(),
-            ie = LineEntries.end();
-       it != ie; ++it) {
-    const MCDwarfLineEntry &LineEntry = *it;
+  for (const MCDwarfLineEntry &LineEntry : LineEntries) {
     int64_t LineDelta = static_cast<int64_t>(LineEntry.getLine()) - LastLine;
-
-    const uint64_t Address = LineEntry.getAbsoluteAddr();
-    if (Address != -1ULL && std::next(it) == ie) {
-      // If emitting absolute addresses, the last entry only carries address
-      // info for the DW_LNE_end_sequence. This entry compensates for the lack
-      // of the section context used to emit the end of section label.
-      MCOS->emitDwarfAdvanceLineAddrAbs(INT64_MAX, -1ULL, Address - LastAddress,
-                                        AsmInfo->getCodePointerSize());
-      return;
-    }
 
     if (FileNum != LineEntry.getFileNum()) {
       FileNum = LineEntry.getFileNum();
@@ -227,34 +195,18 @@ static inline void emitDwarfLineTable(
     if (LineEntry.getFlags() & DWARF2_FLAG_EPILOGUE_BEGIN)
       MCOS->emitInt8(dwarf::DW_LNS_set_epilogue_begin);
 
-    if (Address == -1ULL) {
-      assert(LastAddress == -1ULL &&
-             "Absolute addresses can only be added at the end of the table.");
+    MCSymbol *Label = LineEntry.getLabel();
 
-      MCSymbol *Label = LineEntry.getLabel();
-
-      // At this point we want to emit/create the sequence to encode the delta
-      // in line numbers and the increment of the address from the previous
-      // Label and the current Label.
-      MCOS->emitDwarfAdvanceLineAddr(LineDelta, LastLabel, Label,
-                                     AsmInfo->getCodePointerSize());
-      LastLabel = Label;
-      LastAddress = -1ULL;
-    } else {
-      if (LastAddress == -1ULL) {
-        MCOS->emitDwarfAdvanceLineAddrAbs(LineDelta, Address, 0,
-                                          AsmInfo->getCodePointerSize());
-      } else {
-        MCOS->emitDwarfAdvanceLineAddrAbs(LineDelta, -1ULL,
-                                          Address - LastAddress,
-                                          AsmInfo->getCodePointerSize());
-      }
-      LastAddress = Address;
-      LastLabel = nullptr;
-    }
+    // At this point we want to emit/create the sequence to encode the delta in
+    // line numbers and the increment of the address from the previous Label
+    // and the current Label.
+    const MCAsmInfo *asmInfo = MCOS->getContext().getAsmInfo();
+    MCOS->emitDwarfAdvanceLineAddr(LineDelta, LastLabel, Label,
+                                   asmInfo->getCodePointerSize());
 
     Discriminator = 0;
     LastLine = LineEntry.getLine();
+    LastLabel = Label;
   }
 
   // Generate DWARF line end entry.
@@ -553,7 +505,7 @@ void MCDwarfLineTable::emitCU(MCStreamer *MCOS, MCDwarfLineTableParams Params,
 
   // Put out the line tables.
   for (const auto &LineSec : MCLineSections.getMCLineEntries())
-    emitDwarfLineTable(MCOS, LineSec.first, LineSec.second);
+    emitOne(MCOS, LineSec.first, LineSec.second);
 
   // This is the end of the section, so set the value of the symbol at the end
   // of this section (that was used in a previous expression).

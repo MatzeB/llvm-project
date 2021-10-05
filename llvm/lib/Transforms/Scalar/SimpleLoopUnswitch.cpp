@@ -420,7 +420,7 @@ static Loop *getTopMostExitingLoop(BasicBlock *ExitBB, LoopInfo &LI) {
 /// hoists the branch above that split. Preserves loop simplified form
 /// (splitting the exit block as necessary). It simplifies the branch within
 /// the loop to an unconditional branch but doesn't remove it entirely. Further
-/// cleanup can be done with some simplify-cfg like pass.
+/// cleanup can be done with some simplifycfg like pass.
 ///
 /// If `SE` is not null, it will be updated based on the potential loop SCEVs
 /// invalidated by this.
@@ -648,7 +648,7 @@ static bool unswitchTrivialBranch(Loop &L, BranchInst &BI, DominatorTree &DT,
 /// considered for unswitching so this is a stable transform and the same
 /// switch will not be revisited. If after unswitching there is only a single
 /// in-loop successor, the switch is further simplified to an unconditional
-/// branch. Still more cleanup can be done with some simplify-cfg like pass.
+/// branch. Still more cleanup can be done with some simplifycfg like pass.
 ///
 /// If `SE` is not null, it will be updated based on the potential loop SCEVs
 /// invalidated by this.
@@ -983,7 +983,7 @@ static bool unswitchAllTrivialConditions(Loop &L, DominatorTree &DT,
     if (auto *SI = dyn_cast<SwitchInst>(CurrentTerm)) {
       // Don't bother trying to unswitch past a switch with a constant
       // condition. This should be removed prior to running this pass by
-      // simplify-cfg.
+      // simplifycfg.
       if (isa<Constant>(SI->getCondition()))
         return Changed;
 
@@ -1012,7 +1012,7 @@ static bool unswitchAllTrivialConditions(Loop &L, DominatorTree &DT,
       return Changed;
 
     // Don't bother trying to unswitch past an unconditional branch or a branch
-    // with a constant value. These should be removed by simplify-cfg prior to
+    // with a constant value. These should be removed by simplifycfg prior to
     // running this pass.
     if (!BI->isConditional() || isa<Constant>(BI->getCondition()))
       return Changed;
@@ -1587,10 +1587,12 @@ deleteDeadClonedBlocks(Loop &L, ArrayRef<BasicBlock *> ExitBlocks,
     BB->eraseFromParent();
 }
 
-static void deleteDeadBlocksFromLoop(Loop &L,
-                                     SmallVectorImpl<BasicBlock *> &ExitBlocks,
-                                     DominatorTree &DT, LoopInfo &LI,
-                                     MemorySSAUpdater *MSSAU) {
+static void
+deleteDeadBlocksFromLoop(Loop &L,
+                         SmallVectorImpl<BasicBlock *> &ExitBlocks,
+                         DominatorTree &DT, LoopInfo &LI,
+                         MemorySSAUpdater *MSSAU,
+                         function_ref<void(Loop &, StringRef)> DestroyLoopCB) {
   // Find all the dead blocks tied to this loop, and remove them from their
   // successors.
   SmallSetVector<BasicBlock *, 8> DeadBlockSet;
@@ -1640,6 +1642,7 @@ static void deleteDeadBlocksFromLoop(Loop &L,
                         }) &&
            "If the child loop header is dead all blocks in the child loop must "
            "be dead as well!");
+    DestroyLoopCB(*ChildL, ChildL->getName());
     LI.destroy(ChildL);
     return true;
   });
@@ -1980,6 +1983,8 @@ static bool rebuildLoopAfterUnswitch(Loop &L, ArrayRef<BasicBlock *> ExitBlocks,
       ParentL->removeChildLoop(llvm::find(*ParentL, &L));
     else
       LI.removeLoop(llvm::find(LI, &L));
+    // markLoopAsDeleted for L should be triggered by the caller (it is typically
+    // done by using the UnswitchCB callback).
     LI.destroy(&L);
     return false;
   }
@@ -2019,7 +2024,8 @@ static void unswitchNontrivialInvariants(
     SmallVectorImpl<BasicBlock *> &ExitBlocks, IVConditionInfo &PartialIVInfo,
     DominatorTree &DT, LoopInfo &LI, AssumptionCache &AC,
     function_ref<void(bool, bool, ArrayRef<Loop *>)> UnswitchCB,
-    ScalarEvolution *SE, MemorySSAUpdater *MSSAU) {
+    ScalarEvolution *SE, MemorySSAUpdater *MSSAU,
+    function_ref<void(Loop &, StringRef)> DestroyLoopCB) {
   auto *ParentBB = TI.getParent();
   BranchInst *BI = dyn_cast<BranchInst>(&TI);
   SwitchInst *SI = BI ? nullptr : cast<SwitchInst>(&TI);
@@ -2319,7 +2325,7 @@ static void unswitchNontrivialInvariants(
   // Now that our cloned loops have been built, we can update the original loop.
   // First we delete the dead blocks from it and then we rebuild the loop
   // structure taking these deletions into account.
-  deleteDeadBlocksFromLoop(L, ExitBlocks, DT, LI, MSSAU);
+  deleteDeadBlocksFromLoop(L, ExitBlocks, DT, LI, MSSAU, DestroyLoopCB);
 
   if (MSSAU && VerifyMemorySSA)
     MSSAU->getMemorySSA()->verifyMemorySSA();
@@ -2364,7 +2370,9 @@ static void unswitchNontrivialInvariants(
     ConstantInt *ContinueReplacement =
         Direction ? ConstantInt::getFalse(BI->getContext())
                   : ConstantInt::getTrue(BI->getContext());
-    for (Value *Invariant : Invariants)
+    for (Value *Invariant : Invariants) {
+      assert(!isa<Constant>(Invariant) &&
+             "Should not be replacing constant values!");
       // Use make_early_inc_range here as set invalidates the iterator.
       for (Use &U : llvm::make_early_inc_range(Invariant->uses())) {
         Instruction *UserI = dyn_cast<Instruction>(U.getUser());
@@ -2379,6 +2387,7 @@ static void unswitchNontrivialInvariants(
                  DT.dominates(ClonedPH, UserI->getParent()))
           U.set(UnswitchedReplacement);
       }
+    }
   }
 
   // We can change which blocks are exit blocks of all the cloned sibling
@@ -2670,7 +2679,8 @@ static bool unswitchBestCondition(
     Loop &L, DominatorTree &DT, LoopInfo &LI, AssumptionCache &AC,
     AAResults &AA, TargetTransformInfo &TTI,
     function_ref<void(bool, bool, ArrayRef<Loop *>)> UnswitchCB,
-    ScalarEvolution *SE, MemorySSAUpdater *MSSAU) {
+    ScalarEvolution *SE, MemorySSAUpdater *MSSAU,
+    function_ref<void(Loop &, StringRef)> DestroyLoopCB) {
   // Collect all invariant conditions within this loop (as opposed to an inner
   // loop which would be handled when visiting that inner loop).
   SmallVector<std::pair<Instruction *, TinyPtrVector<Value *>>, 4>
@@ -2719,6 +2729,9 @@ static bool unswitchBestCondition(
     while (match(Cond, m_Select(m_Value(CondNext), m_One(), m_Zero())))
       Cond = CondNext;
     BI->setCondition(Cond);
+
+    if (isa<Constant>(Cond))
+      continue;
 
     if (L.isLoopInvariant(BI->getCondition())) {
       UnswitchCandidates.push_back({BI, {BI->getCondition()}});
@@ -2775,14 +2788,15 @@ static bool unswitchBestCondition(
   SmallVector<BasicBlock *, 4> ExitBlocks;
   L.getUniqueExitBlocks(ExitBlocks);
 
-  // We cannot unswitch if exit blocks contain a cleanuppad instruction as we
-  // don't know how to split those exit blocks.
+  // We cannot unswitch if exit blocks contain a cleanuppad/catchswitch
+  // instruction as we don't know how to split those exit blocks.
   // FIXME: We should teach SplitBlock to handle this and remove this
   // restriction.
   for (auto *ExitBB : ExitBlocks) {
-    if (isa<CleanupPadInst>(ExitBB->getFirstNonPHI())) {
-      LLVM_DEBUG(
-          dbgs() << "Cannot unswitch because of cleanuppad in exit block\n");
+    auto *I = ExitBB->getFirstNonPHI();
+    if (isa<CleanupPadInst>(I) || isa<CatchSwitchInst>(I)) {
+      LLVM_DEBUG(dbgs() << "Cannot unswitch because of cleanuppad/catchswitch "
+                           "in exit block\n");
       return false;
     }
   }
@@ -2957,7 +2971,7 @@ static bool unswitchBestCondition(
                     << "\n");
   unswitchNontrivialInvariants(L, *BestUnswitchTI, BestUnswitchInvariants,
                                ExitBlocks, PartialIVInfo, DT, LI, AC,
-                               UnswitchCB, SE, MSSAU);
+                               UnswitchCB, SE, MSSAU, DestroyLoopCB);
   return true;
 }
 
@@ -2984,9 +2998,11 @@ static bool unswitchBestCondition(
 /// done.
 static bool
 unswitchLoop(Loop &L, DominatorTree &DT, LoopInfo &LI, AssumptionCache &AC,
-             AAResults &AA, TargetTransformInfo &TTI, bool NonTrivial,
+             AAResults &AA, TargetTransformInfo &TTI, bool Trivial,
+             bool NonTrivial,
              function_ref<void(bool, bool, ArrayRef<Loop *>)> UnswitchCB,
-             ScalarEvolution *SE, MemorySSAUpdater *MSSAU) {
+             ScalarEvolution *SE, MemorySSAUpdater *MSSAU,
+             function_ref<void(Loop &, StringRef)> DestroyLoopCB) {
   assert(L.isRecursivelyLCSSAForm(DT, LI) &&
          "Loops must be in LCSSA form before unswitching.");
 
@@ -2995,7 +3011,7 @@ unswitchLoop(Loop &L, DominatorTree &DT, LoopInfo &LI, AssumptionCache &AC,
     return false;
 
   // Try trivial unswitch first before loop over other basic blocks in the loop.
-  if (unswitchAllTrivialConditions(L, DT, LI, SE, MSSAU)) {
+  if (Trivial && unswitchAllTrivialConditions(L, DT, LI, SE, MSSAU)) {
     // If we unswitched successfully we will want to clean up the loop before
     // processing it further so just mark it as unswitched and return.
     UnswitchCB(/*CurrentLoopValid*/ true, false, {});
@@ -3034,7 +3050,8 @@ unswitchLoop(Loop &L, DominatorTree &DT, LoopInfo &LI, AssumptionCache &AC,
 
   // Try to unswitch the best invariant condition. We prefer this full unswitch to
   // a partial unswitch when possible below the threshold.
-  if (unswitchBestCondition(L, DT, LI, AC, AA, TTI, UnswitchCB, SE, MSSAU))
+  if (unswitchBestCondition(L, DT, LI, AC, AA, TTI, UnswitchCB, SE, MSSAU,
+                            DestroyLoopCB))
     return true;
 
   // No other opportunities to unswitch.
@@ -3081,15 +3098,20 @@ PreservedAnalyses SimpleLoopUnswitchPass::run(Loop &L, LoopAnalysisManager &AM,
       U.markLoopAsDeleted(L, LoopName);
   };
 
+  auto DestroyLoopCB = [&U](Loop &L, StringRef Name) {
+    U.markLoopAsDeleted(L, Name);
+  };
+
   Optional<MemorySSAUpdater> MSSAU;
   if (AR.MSSA) {
     MSSAU = MemorySSAUpdater(AR.MSSA);
     if (VerifyMemorySSA)
       AR.MSSA->verifyMemorySSA();
   }
-  if (!unswitchLoop(L, AR.DT, AR.LI, AR.AC, AR.AA, AR.TTI, NonTrivial,
+  if (!unswitchLoop(L, AR.DT, AR.LI, AR.AC, AR.AA, AR.TTI, Trivial, NonTrivial,
                     UnswitchCB, &AR.SE,
-                    MSSAU.hasValue() ? MSSAU.getPointer() : nullptr))
+                    MSSAU.hasValue() ? MSSAU.getPointer() : nullptr,
+                    DestroyLoopCB))
     return PreservedAnalyses::all();
 
   if (AR.MSSA && VerifyMemorySSA)
@@ -3103,6 +3125,17 @@ PreservedAnalyses SimpleLoopUnswitchPass::run(Loop &L, LoopAnalysisManager &AM,
   if (AR.MSSA)
     PA.preserve<MemorySSAAnalysis>();
   return PA;
+}
+
+void SimpleLoopUnswitchPass::printPipeline(
+    raw_ostream &OS, function_ref<StringRef(StringRef)> MapClassName2PassName) {
+  static_cast<PassInfoMixin<SimpleLoopUnswitchPass> *>(this)->printPipeline(
+      OS, MapClassName2PassName);
+
+  OS << "<";
+  OS << (NonTrivial ? "" : "no-") << "nontrivial;";
+  OS << (Trivial ? "" : "no-") << "trivial";
+  OS << ">";
 }
 
 namespace {
@@ -3124,10 +3157,8 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AssumptionCacheTracker>();
     AU.addRequired<TargetTransformInfoWrapperPass>();
-    if (EnableMSSALoopDependency) {
-      AU.addRequired<MemorySSAWrapperPass>();
-      AU.addPreserved<MemorySSAWrapperPass>();
-    }
+    AU.addRequired<MemorySSAWrapperPass>();
+    AU.addPreserved<MemorySSAWrapperPass>();
     getLoopAnalysisUsage(AU);
   }
 };
@@ -3148,12 +3179,8 @@ bool SimpleLoopUnswitchLegacyPass::runOnLoop(Loop *L, LPPassManager &LPM) {
   auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
   auto &AA = getAnalysis<AAResultsWrapperPass>().getAAResults();
   auto &TTI = getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
-  MemorySSA *MSSA = nullptr;
-  Optional<MemorySSAUpdater> MSSAU;
-  if (EnableMSSALoopDependency) {
-    MSSA = &getAnalysis<MemorySSAWrapperPass>().getMSSA();
-    MSSAU = MemorySSAUpdater(MSSA);
-  }
+  MemorySSA *MSSA = &getAnalysis<MemorySSAWrapperPass>().getMSSA();
+  MemorySSAUpdater MSSAU(MSSA);
 
   auto *SEWP = getAnalysisIfAvailable<ScalarEvolutionWrapperPass>();
   auto *SE = SEWP ? &SEWP->getSE() : nullptr;
@@ -3177,14 +3204,17 @@ bool SimpleLoopUnswitchLegacyPass::runOnLoop(Loop *L, LPPassManager &LPM) {
       LPM.markLoopAsDeleted(*L);
   };
 
-  if (MSSA && VerifyMemorySSA)
+  auto DestroyLoopCB = [&LPM](Loop &L, StringRef /* Name */) {
+    LPM.markLoopAsDeleted(L);
+  };
+
+  if (VerifyMemorySSA)
     MSSA->verifyMemorySSA();
 
-  bool Changed =
-      unswitchLoop(*L, DT, LI, AC, AA, TTI, NonTrivial, UnswitchCB, SE,
-                   MSSAU.hasValue() ? MSSAU.getPointer() : nullptr);
+  bool Changed = unswitchLoop(*L, DT, LI, AC, AA, TTI, true, NonTrivial,
+                              UnswitchCB, SE, &MSSAU, DestroyLoopCB);
 
-  if (MSSA && VerifyMemorySSA)
+  if (VerifyMemorySSA)
     MSSA->verifyMemorySSA();
 
   // Historically this pass has had issues with the dominator tree so verify it

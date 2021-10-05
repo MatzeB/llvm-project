@@ -705,7 +705,7 @@ void DWARFRewriter::updateLineTableOffsets() {
 
   for (const std::unique_ptr<DWARFUnit> &CU : BC.DwCtx->compile_units()) {
     const unsigned CUID = CU->getOffset();
-    MCSymbol *Label = BC.Ctx->getMCDwarfLineTable(CUID).getLabel();
+    MCSymbol *Label = BC.getDwarfLineTable(CUID).getLabel();
     if (!Label)
       continue;
 
@@ -883,7 +883,8 @@ std::unique_ptr<BinaryContext>
 createDwarfOnlyBC(const object::ObjectFile &File) {
   return BinaryContext::createBinaryContext(
       &File, false,
-      DWARFContext::create(File, nullptr, "", WithColor::defaultErrorHandler,
+      DWARFContext::create(File, DWARFContext::ProcessDebugRelocations::Process,
+                           nullptr, "", WithColor::defaultErrorHandler,
                            WithColor::defaultWarningHandler));
 }
 
@@ -1485,8 +1486,13 @@ void DWARFRewriter::convertToRanges(const DWARFUnit &Unit,
                                     const DWARFAbbreviationDeclaration *Abbrev,
                                     DebugAbbrevWriter &AbbrevWriter,
                                     Optional<uint64_t> RangesBase) {
-  dwarf::Form HighPCForm = Abbrev->findAttribute(dwarf::DW_AT_high_pc)->Form;
-  dwarf::Form LowPCForm = Abbrev->findAttribute(dwarf::DW_AT_low_pc)->Form;
+  auto getAttributeForm = [&Abbrev](const dwarf::Attribute Attr) {
+    Optional<uint32_t> Index = Abbrev->findAttributeIndex(Attr);
+    assert(Index && "attribute not found");
+    return Abbrev->getFormByIndex(*Index);
+  };
+  dwarf::Form HighPCForm = getAttributeForm(dwarf::DW_AT_high_pc);
+  dwarf::Form LowPCForm = getAttributeForm(dwarf::DW_AT_low_pc);
 
   // DW_FORM_GNU_addr_index is already variable encoding so nothing to do
   // there. If HighForm is 8 bytes need to change low_pc to be variable

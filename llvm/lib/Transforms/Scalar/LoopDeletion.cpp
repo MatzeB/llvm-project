@@ -191,6 +191,12 @@ getValueOnFirstIteration(Value *V, DenseMap<Value *, Value *> &FirstIterValue,
     Value *RHS =
         getValueOnFirstIteration(BO->getOperand(1), FirstIterValue, SQ);
     FirstIterV = SimplifyBinOp(BO->getOpcode(), LHS, RHS, SQ);
+  } else if (auto *Cmp = dyn_cast<ICmpInst>(V)) {
+    Value *LHS =
+        getValueOnFirstIteration(Cmp->getOperand(0), FirstIterValue, SQ);
+    Value *RHS =
+        getValueOnFirstIteration(Cmp->getOperand(1), FirstIterValue, SQ);
+    FirstIterV = SimplifyICmpInst(Cmp->getPredicate(), LHS, RHS, SQ);
   }
   if (!FirstIterV)
     FirstIterV = V;
@@ -228,7 +234,7 @@ static bool canProveExitOnFirstIteration(Loop *L, DominatorTree &DT,
   SmallPtrSet<BasicBlock *, 4> LiveBlocks;
   // Edges that are reachable on the 1st iteration.
   DenseSet<BasicBlockEdge> LiveEdges;
-  LiveBlocks.insert(L->getHeader());
+  LiveBlocks.insert(Header);
 
   SmallPtrSet<BasicBlock *, 4> Visited;
   auto MarkLiveEdge = [&](BasicBlock *From, BasicBlock *To) {
@@ -286,7 +292,7 @@ static bool canProveExitOnFirstIteration(Loop *L, DominatorTree &DT,
   //     iteration, mark this successor live.
   // 3b. If we cannot prove it, conservatively assume that all successors are
   //     live.
-  auto &DL = L->getHeader()->getModule()->getDataLayout();
+  auto &DL = Header->getModule()->getDataLayout();
   const SimplifyQuery SQ(DL);
   for (auto *BB : RPOT) {
     Visited.insert(BB);
@@ -314,57 +320,65 @@ static bool canProveExitOnFirstIteration(Loop *L, DominatorTree &DT,
     }
 
     using namespace PatternMatch;
-    ICmpInst::Predicate Pred;
-    Value *LHS, *RHS;
+    Value *Cond;
     BasicBlock *IfTrue, *IfFalse;
     auto *Term = BB->getTerminator();
-    // TODO: Handle switch.
-    if (!match(Term, m_Br(m_ICmp(Pred, m_Value(LHS), m_Value(RHS)),
-                          m_BasicBlock(IfTrue), m_BasicBlock(IfFalse)))) {
-      MarkAllSuccessorsLive(BB);
-      continue;
-    }
+    if (match(Term, m_Br(m_Value(Cond),
+                         m_BasicBlock(IfTrue), m_BasicBlock(IfFalse)))) {
+      auto *ICmp = dyn_cast<ICmpInst>(Cond);
+      if (!ICmp || !ICmp->getType()->isIntegerTy()) {
+        MarkAllSuccessorsLive(BB);
+        continue;
+      }
 
-    if (!LHS->getType()->isIntegerTy()) {
-      MarkAllSuccessorsLive(BB);
-      continue;
-    }
-
-    // Can we prove constant true or false for this condition?
-    LHS = getValueOnFirstIteration(LHS, FirstIterValue, SQ);
-    RHS = getValueOnFirstIteration(RHS, FirstIterValue, SQ);
-    auto *KnownCondition = SimplifyICmpInst(Pred, LHS, RHS, SQ);
-    if (!KnownCondition) {
-      // Failed to simplify.
-      MarkAllSuccessorsLive(BB);
-      continue;
-    }
-    if (isa<UndefValue>(KnownCondition)) {
-      // TODO: According to langref, branching by undef is undefined behavior.
-      // It means that, theoretically, we should be able to just continue
-      // without marking any successors as live. However, we are not certain
-      // how correct our compiler is at handling such cases. So we are being
-      // very conservative here.
-      //
-      // If there is a non-loop successor, always assume this branch leaves the
-      // loop. Otherwise, arbitrarily take IfTrue.
-      //
-      // Once we are certain that branching by undef is handled correctly by
-      // other transforms, we should not mark any successors live here.
-      if (L->contains(IfTrue) && L->contains(IfFalse))
+      // Can we prove constant true or false for this condition?
+      auto *KnownCondition = getValueOnFirstIteration(ICmp, FirstIterValue, SQ);
+      if (KnownCondition == ICmp) {
+        // Failed to simplify.
+        MarkAllSuccessorsLive(BB);
+        continue;
+      }
+      if (isa<UndefValue>(KnownCondition)) {
+        // TODO: According to langref, branching by undef is undefined behavior.
+        // It means that, theoretically, we should be able to just continue
+        // without marking any successors as live. However, we are not certain
+        // how correct our compiler is at handling such cases. So we are being
+        // very conservative here.
+        //
+        // If there is a non-loop successor, always assume this branch leaves the
+        // loop. Otherwise, arbitrarily take IfTrue.
+        //
+        // Once we are certain that branching by undef is handled correctly by
+        // other transforms, we should not mark any successors live here.
+        if (L->contains(IfTrue) && L->contains(IfFalse))
+          MarkLiveEdge(BB, IfTrue);
+        continue;
+      }
+      auto *ConstCondition = dyn_cast<ConstantInt>(KnownCondition);
+      if (!ConstCondition) {
+        // Non-constant condition, cannot analyze any further.
+        MarkAllSuccessorsLive(BB);
+        continue;
+      }
+      if (ConstCondition->isAllOnesValue())
         MarkLiveEdge(BB, IfTrue);
-      continue;
-    }
-    auto *ConstCondition = dyn_cast<ConstantInt>(KnownCondition);
-    if (!ConstCondition) {
-      // Non-constant condition, cannot analyze any further.
+      else
+        MarkLiveEdge(BB, IfFalse);
+    } else if (SwitchInst *SI = dyn_cast<SwitchInst>(Term)) {
+      auto *SwitchValue = SI->getCondition();
+      auto *SwitchValueOnFirstIter =
+          getValueOnFirstIteration(SwitchValue, FirstIterValue, SQ);
+      auto *ConstSwitchValue = dyn_cast<ConstantInt>(SwitchValueOnFirstIter);
+      if (!ConstSwitchValue) {
+        MarkAllSuccessorsLive(BB);
+        continue;
+      }
+      auto CaseIterator = SI->findCaseValue(ConstSwitchValue);
+      MarkLiveEdge(BB, CaseIterator->getCaseSuccessor());
+    } else {
       MarkAllSuccessorsLive(BB);
       continue;
     }
-    if (ConstCondition->isAllOnesValue())
-      MarkLiveEdge(BB, IfTrue);
-    else
-      MarkLiveEdge(BB, IfFalse);
   }
 
   // We can break the latch if it wasn't live.
@@ -383,14 +397,23 @@ breakBackedgeIfNotTaken(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
   if (!L->getLoopLatch())
     return LoopDeletionResult::Unmodified;
 
-  auto *BTC = SE.getBackedgeTakenCount(L);
-  if (!isa<SCEVCouldNotCompute>(BTC) && SE.isKnownNonZero(BTC))
-    return LoopDeletionResult::Unmodified;
-  if (!BTC->isZero() && !canProveExitOnFirstIteration(L, DT, LI))
-    return LoopDeletionResult::Unmodified;
+  auto *BTC = SE.getSymbolicMaxBackedgeTakenCount(L);
+  if (BTC->isZero()) {
+    // SCEV knows this backedge isn't taken!
+    breakLoopBackedge(L, DT, SE, LI, MSSA);
+    return LoopDeletionResult::Deleted;
+  }
 
-  breakLoopBackedge(L, DT, SE, LI, MSSA);
-  return LoopDeletionResult::Deleted;
+  // If SCEV leaves open the possibility of a zero trip count, see if
+  // symbolically evaluating the first iteration lets us prove the backedge
+  // unreachable.
+  if (isa<SCEVCouldNotCompute>(BTC) || !SE.isKnownNonZero(BTC))
+    if (canProveExitOnFirstIteration(L, DT, LI)) {
+      breakLoopBackedge(L, DT, SE, LI, MSSA);
+      return LoopDeletionResult::Deleted;
+    }
+
+  return LoopDeletionResult::Unmodified;
 }
 
 /// Remove a loop if it is dead.

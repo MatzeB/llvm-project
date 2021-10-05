@@ -318,7 +318,7 @@ Every processor supports every OS ABI (see :ref:`amdgpu-os`) with the following 
                                                                                                         Add product
                                                                                                         names.
 
-     **GCN GFX9 (Vega)** [AMD-GCN-GFX9]_ [AMD-GCN-GFX908-CDNA1]_
+     **GCN GFX9 (Vega)** [AMD-GCN-GFX900-GFX904-VEGA]_ [AMD-GCN-GFX906-VEGA7NM]_ [AMD-GCN-GFX908-CDNA1]_
      -----------------------------------------------------------------------------------------------------------------------
      ``gfx900``                  ``amdgcn``   dGPU  - xnack           - Absolute      - *rocm-amdhsa* - Radeon Vega
                                                                         flat          - *pal-amdhsa*    Frontier Edition
@@ -873,6 +873,46 @@ The AMDGPU backend supports the following LLVM IR attributes.
      "amdgpu-dx10-clamp" true/false.         Specify whether the function expects the DX10_CLAMP field of
                                              the mode register to be set on entry. Overrides the default
                                              for the calling convention.
+
+     "amdgpu-no-workitem-id-x"               Indicates the function does not depend on the value of the
+                                             llvm.amdgcn.workitem.id.x intrinsic. If a function is marked with this
+                                             attribute, or reached through a call site marked with this attribute,
+                                             the value returned by the intrinsic is undefined. The backend can
+                                             generally infer this during code generation, so typically there is no
+                                             benefit to frontends marking functions with this.
+
+     "amdgpu-no-workitem-id-y"               The same as amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.workitem.id.y intrinsic.
+
+     "amdgpu-no-workitem-id-z"               The same as amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.workitem.id.z intrinsic.
+
+     "amdgpu-no-workgroup-id-x"              The same as amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.workgroup.id.x intrinsic.
+
+     "amdgpu-no-workgroup-id-y"              The same as amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.workgroup.id.y intrinsic.
+
+     "amdgpu-no-workgroup-id-z"              The same as amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.workgroup.id.z intrinsic.
+
+     "amdgpu-no-dispatch-ptr"                The same as amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.dispatch.ptr intrinsic.
+
+     "amdgpu-no-implicitarg-ptr"             The same as amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.implicitarg.ptr intrinsic.
+
+     "amdgpu-no-dispatch-id"                 The same as amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.dispatch.id intrinsic.
+
+     "amdgpu-no-queue-ptr"                   Similar to amdgpu-no-workitem-id-x, except for the
+                                             llvm.amdgcn.queue.ptr intrinsic. Note that unlike the other ABI hint
+                                             attributes, the queue pointer may be required in situations where the
+                                             intrinsic call does not directly appear in the program. Some subtargets
+                                             require the queue pointer for to handle some addrspacecasts, as well
+                                             as the llvm.amdgcn.is.shared, llvm.amdgcn.is.private, llvm.trap, and
+                                             llvm.debug intrinsics.
+
      ======================================= ==========================================================
 
 .. _amdgpu-elf-code-object:
@@ -1164,6 +1204,8 @@ The AMDGPU backend uses the following ELF header:
      *reserved*                           0x041      Reserved.
      ``EF_AMDGPU_MACH_AMDGCN_GFX1013``    0x042      ``gfx1013``
      *reserved*                           0x043      Reserved.
+     *reserved*                           0x044      Reserved.
+     *reserved*                           0x045      Reserved.
      ==================================== ========== =============================
 
 Sections
@@ -1574,6 +1616,7 @@ The following relocation types are supported:
      ``R_AMDGPU_REL32_HI``      Static  11     ``word32``  (S + A - P) >> 32
      *reserved*                         12
      ``R_AMDGPU_RELATIVE64``    Dynamic 13     ``word64``  B + A
+     ``R_AMDGPU_REL16``         Static  14     ``word16``  ((S + A - P) - 4) / 4
      ========================== ======= =====  ==========  ==============================
 
 ``R_AMDGPU_ABS32_LO`` and ``R_AMDGPU_ABS32_HI`` are only supported by
@@ -1588,7 +1631,7 @@ Loaded Code Object Path Uniform Resource Identifier (URI)
 ---------------------------------------------------------
 
 The AMD GPU code object loader represents the path of the ELF shared object from
-which the code object was loaded as a textual Unifom Resource Identifier (URI).
+which the code object was loaded as a textual Uniform Resource Identifier (URI).
 Note that the code object is the in memory loaded relocated form of the ELF
 shared object.  Multiple code objects may be loaded at different memory
 addresses in the same process from the same ELF shared object.
@@ -1716,7 +1759,7 @@ mapping.
    512            VCC_32            32       Vector Condition Code Register
                                              when executing in wavefront 32
                                              mode.
-   513-1023       *Reserved*                 *Reserved for future Vector
+   513-767        *Reserved*                 *Reserved for future Vector
                                              Architectural Registers when
                                              executing in wavefront 32 mode.*
    768            VCC_64            64       Vector Condition Code Register
@@ -3139,6 +3182,37 @@ same *vendor-name*.
                                                                   a register allocator
                                                                   created spill
                                                                   location.
+     ".kind"                             string                   The kind of the kernel
+                                                                  with the following
+                                                                  values:
+
+                                                                  "normal"
+                                                                    Regular kernels.
+
+                                                                  "init"
+                                                                    These kernels must be
+                                                                    invoked after loading
+                                                                    the containing code
+                                                                    object and must
+                                                                    complete before any
+                                                                    normal and fini
+                                                                    kernels in the same
+                                                                    code object are
+                                                                    invoked.
+
+                                                                  "fini"
+                                                                    These kernels must be
+                                                                    invoked before
+                                                                    unloading the
+                                                                    containing code object
+                                                                    and after all init and
+                                                                    normal kernels in the
+                                                                    same code object have
+                                                                    been invoked and
+                                                                    completed.
+
+                                                                  If omitted, "normal" is
+                                                                  assumed.
      =================================== ============== ========= ================================
 
 ..
@@ -10761,6 +10835,7 @@ On exit from a function:
           registers are intermixed at regular intervals in order to keep a
           similar ratio independent of the number of allocated VGPRs.
 
+    * GFX90A: All AGPR registers except the clobbered registers AGPR0-31.
     * Lanes of all VGPRs that are inactive at the call site.
 
       For the AMDGPU backend, an inter-procedural register allocation (IPRA)
@@ -10775,8 +10850,6 @@ On exit from a function:
     function is available to the caller.
 
 .. TODO::
-
-  - On gfx908 are all ACC registers clobbered?
 
   - How are function results returned? The address of structured types is passed
     by reference, but what about other types?
@@ -11527,7 +11600,8 @@ in this description.
 
 For more information about instructions, their semantics and supported
 combinations of operands, refer to one of instruction set architecture manuals
-[AMD-GCN-GFX6]_, [AMD-GCN-GFX7]_, [AMD-GCN-GFX8]_, [AMD-GCN-GFX9]_,
+[AMD-GCN-GFX6]_, [AMD-GCN-GFX7]_, [AMD-GCN-GFX8]_,
+[AMD-GCN-GFX900-GFX904-VEGA]_, [AMD-GCN-GFX906-VEGA7NM]_
 [AMD-GCN-GFX908-CDNA1]_, [AMD-GCN-GFX10-RDNA1]_ and [AMD-GCN-GFX10-RDNA2]_.
 
 Operands
@@ -12186,8 +12260,23 @@ Here is an example of a minimal assembly source file, defining one HSA kernel:
        .sgpr_count: 2
        .vgpr_count: 3
        .max_flat_workgroup_size: 256
-   ...
+       .args:
+         - .size: 8
+           .offset: 0
+           .value_kind: global_buffer
+           .address_space: global
+           .actual_access: write_only
+   //...
    .end_amdgpu_metadata
+
+This kernel is equivalent to the following HIP program:
+
+.. code::
+   :number-lines:
+
+   __global__ void hello_world(float *p) {
+       *p = 3.14159f;
+   }
 
 If an assembly source file contains multiple kernels and/or functions, the
 :ref:`amdgpu-amdhsa-assembler-symbol-next_free_vgpr` and
@@ -12270,7 +12359,8 @@ Additional Documentation
 .. [AMD-GCN-GFX6] `AMD Southern Islands Series ISA <http://developer.amd.com/wordpress/media/2012/12/AMD_Southern_Islands_Instruction_Set_Architecture.pdf>`__
 .. [AMD-GCN-GFX7] `AMD Sea Islands Series ISA <http://developer.amd.com/wordpress/media/2013/07/AMD_Sea_Islands_Instruction_Set_Architecture.pdf>`_
 .. [AMD-GCN-GFX8] `AMD GCN3 Instruction Set Architecture <http://amd-dev.wpengine.netdna-cdn.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf>`__
-.. [AMD-GCN-GFX9] `AMD Vega Instruction Set Architecture <http://developer.amd.com/wordpress/media/2013/12/Vega_Shader_ISA_28July2017.pdf>`__
+.. [AMD-GCN-GFX900-GFX904-VEGA] `AMD Vega Instruction Set Architecture <http://developer.amd.com/wordpress/media/2013/12/Vega_Shader_ISA_28July2017.pdf>`__
+.. [AMD-GCN-GFX906-VEGA7NM] `AMD Vega 7nm Instruction Set Architecture <https://gpuopen.com/wp-content/uploads/2019/11/Vega_7nm_Shader_ISA_26November2019.pdf>`__
 .. [AMD-GCN-GFX908-CDNA1] `AMD Instinct MI100 Instruction Set Architecture <https://developer.amd.com/wp-content/resources/CDNA1_Shader_ISA_14December2020.pdf>`__
 .. [AMD-GCN-GFX10-RDNA1] `AMD RDNA 1.0 Instruction Set Architecture <https://gpuopen.com/wp-content/uploads/2019/08/RDNA_Shader_ISA_5August2019.pdf>`__
 .. [AMD-GCN-GFX10-RDNA2] `AMD RDNA 2 Instruction Set Architecture <https://developer.amd.com/wp-content/resources/RDNA2_Shader_ISA_November2020.pdf>`__

@@ -4,12 +4,12 @@
 
 from typing import Dict, Sequence
 
-from mlir.ir import *
-from mlir.dialects import linalg
-from mlir.dialects import std
-# TODO: resolve name collision for Linalg functionality that is injected inside
-# the _mlir.dialects.linalg directly via pybind.
-from _mlir.dialects.linalg import fill_builtin_region
+from .....ir import *
+from ....._mlir_libs._mlir.dialects.linalg import fill_builtin_region
+
+from .... import linalg
+from .... import std
+from .... import math
 
 from .scalar_expr import *
 from .config import *
@@ -214,8 +214,8 @@ class _BodyBuilder:
       value_attr = Attribute.parse(expr.scalar_const.value)
       return std.ConstantOp(value_attr.type, value_attr).result
     elif expr.scalar_index:
-      dim_attr = IntegerAttr.get(
-          IntegerType.get_signless(64), expr.scalar_index.dim)
+      dim_attr = IntegerAttr.get(IntegerType.get_signless(64),
+                                 expr.scalar_index.dim)
       return linalg.IndexOp(IndexType.get(), dim_attr).result
     elif expr.scalar_apply:
       try:
@@ -292,6 +292,16 @@ class _BodyBuilder:
     if _is_integer_type(lhs.type) or _is_index_type(lhs.type):
       return std.AddIOp(lhs.type, lhs, rhs).result
     raise NotImplementedError("Unsupported 'add' operand: {lhs}")
+
+  def _eval_exp(self, x: Value) -> Value:
+    if _is_floating_point_type(x.type):
+      return math.ExpOp(x.type, x).result
+    raise NotImplementedError("Unsupported 'exp' operand: {x}")
+
+  def _eval_log(self, x: Value) -> Value:
+    if _is_floating_point_type(x.type):
+      return math.LogOp(x.type, x).result
+    raise NotImplementedError("Unsupported 'log' operand: {x}")
 
   def _eval_sub(self, lhs: Value, rhs: Value) -> Value:
     if _is_floating_point_type(lhs.type):

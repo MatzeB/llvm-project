@@ -6,6 +6,7 @@ add_llvm_component_library(LLVMMC
   MCAsmInfoCOFF.cpp
   MCAsmInfoDarwin.cpp
   MCAsmInfoELF.cpp
+  MCAsmInfoGOFF.cpp
   MCAsmInfoWasm.cpp
   MCAsmInfoXCOFF.cpp
   MCAsmMacro.cpp
@@ -70,7 +71,6 @@ add_llvm_component_library(LLVMMC
   Support
   BinaryFormat
   DebugInfoCodeView
-  ProfileData
   )
 
 add_subdirectory(MCParser)

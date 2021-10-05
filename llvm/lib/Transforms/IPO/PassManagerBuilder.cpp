@@ -99,6 +99,10 @@ cl::opt<bool> EnableLoopFlatten("enable-loop-flatten", cl::init(false),
                                 cl::Hidden,
                                 cl::desc("Enable the LoopFlatten Pass"));
 
+cl::opt<bool> EnableDFAJumpThreading("enable-dfa-jump-thread",
+                                     cl::desc("Enable DFA jump threading."),
+                                     cl::init(false), cl::Hidden);
+
 static cl::opt<bool>
     EnablePrepareForThinLTO("prepare-for-thinlto", cl::init(false), cl::Hidden,
                             cl::desc("Enable preparation for ThinLTO."));
@@ -433,6 +437,11 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createCFGSimplificationPass());      // Merge & remove BBs
   MPM.add(createReassociatePass());           // Reassociate expressions
 
+  // The matrix extension can introduce large vector operations early, which can
+  // benefit from running vector-combine early on.
+  if (EnableMatrix)
+    MPM.add(createVectorCombinePass());
+
   // Begin the loop pass pipeline.
   if (EnableSimpleLoopUnswitch) {
     // The simple loop unswitch pass relies on separate cleanup passes. Schedule
@@ -454,7 +463,7 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   else
     MPM.add(createLoopUnswitchPass(SizeLevel || OptLevel < 3, DivergentTarget));
   // FIXME: We break the loop pass pipeline here in order to do full
-  // simplify-cfg. Eventually loop-simplifycfg should be enhanced to replace the
+  // simplifycfg. Eventually loop-simplifycfg should be enhanced to replace the
   // need for this.
   MPM.add(createCFGSimplificationPass());
   MPM.add(createInstructionCombiningPass());
@@ -500,6 +509,9 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createInstructionCombiningPass());
   addExtensionsToPM(EP_Peephole, MPM);
   if (OptLevel > 1) {
+    if (EnableDFAJumpThreading && SizeLevel == 0)
+      MPM.add(createDFAJumpThreadingPass());
+
     MPM.add(createJumpThreadingPass());         // Thread jumps
     MPM.add(createCorrelatedValuePropagationPass());
   }

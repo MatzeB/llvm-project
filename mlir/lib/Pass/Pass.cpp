@@ -23,7 +23,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/Mutex.h"
-#include "llvm/Support/Parallel.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -564,8 +563,7 @@ void OpToOpPassAdaptor::runOnOperationAsyncImpl(bool verifyPasses) {
   // Create the async executors if they haven't been created, or if the main
   // pipeline has changed.
   if (asyncExecutors.empty() || hasSizeMismatch(asyncExecutors.front(), mgrs))
-    asyncExecutors.assign(llvm::hardware_concurrency().compute_thread_count(),
-                          mgrs);
+    asyncExecutors.assign(context->getThreadPool().getThreadCount(), mgrs);
 
   // Run a prepass over the operation to collect the nested operations to
   // execute over. This ensures that an analysis manager exists for each

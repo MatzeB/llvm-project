@@ -490,6 +490,8 @@ DeclRefExpr *DeclRefExpr::CreateEmpty(const ASTContext &Context,
 
 void DeclRefExpr::setDecl(ValueDecl *NewD) {
   D = NewD;
+  if (getType()->isUndeducedType())
+    setType(NewD->getType());
   setDependence(computeDependence(this, NewD->getASTContext()));
 }
 
@@ -543,20 +545,11 @@ std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
                                                   QualType Ty) {
   auto MangleCallback = [](ASTContext &Ctx,
                            const NamedDecl *ND) -> llvm::Optional<unsigned> {
-    // This replaces the 'lambda number' in the mangling with a unique number
-    // based on its order in the declaration.  To provide some level of visual
-    // notability (actual uniqueness from normal lambdas isn't necessary, as
-    // these are used differently), we add 10,000 to the number.
-    // For example:
-    // _ZTSZ3foovEUlvE10005_
-    // Demangles to: typeinfo name for foo()::'lambda10005'()
-    // Note that the mangler subtracts 2, since with normal lambdas the lambda
-    // mangling number '0' is an anonymous struct mangle, and '1' is omitted.
-    // So 10,002 results in the first number being 10,000.
-    if (Ctx.IsSYCLKernelNamingDecl(ND))
-      return 10'002 + Ctx.GetSYCLKernelNamingIndex(ND);
+    if (const auto *RD = dyn_cast<CXXRecordDecl>(ND))
+      return RD->getDeviceLambdaManglingNumber();
     return llvm::None;
   };
+
   std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
       Context, Context.getDiagnostics(), MangleCallback)};
 
@@ -1722,8 +1715,10 @@ MemberExpr *MemberExpr::CreateEmpty(const ASTContext &Context,
   return new (Mem) MemberExpr(EmptyShell());
 }
 
-void MemberExpr::setMemberDecl(ValueDecl *D) {
-  MemberDecl = D;
+void MemberExpr::setMemberDecl(ValueDecl *NewD) {
+  MemberDecl = NewD;
+  if (getType()->isUndeducedType())
+    setType(NewD->getType());
   setDependence(computeDependence(this));
 }
 
@@ -1913,6 +1908,7 @@ Expr *CastExpr::getSubExprAsWritten() {
       SubExpr =
         skipImplicitTemporary(cast<CXXConstructExpr>(SubExpr->IgnoreImplicit())->getArg(0));
     else if (E->getCastKind() == CK_UserDefinedConversion) {
+      SubExpr = SubExpr->IgnoreImplicit();
       assert((isa<CXXMemberCallExpr>(SubExpr) ||
               isa<BlockExpr>(SubExpr)) &&
              "Unexpected SubExpr for CK_UserDefinedConversion.");
@@ -2228,8 +2224,11 @@ APValue SourceLocExpr::EvaluateInContext(const ASTContext &Ctx,
   };
 
   switch (getIdentKind()) {
-  case SourceLocExpr::File:
-    return MakeStringLiteral(PLoc.getFilename());
+  case SourceLocExpr::File: {
+    SmallString<256> Path(PLoc.getFilename());
+    Ctx.getLangOpts().remapPathPrefix(Path);
+    return MakeStringLiteral(Path);
+  }
   case SourceLocExpr::Function: {
     const Decl *CurDecl = dyn_cast_or_null<Decl>(Context);
     return MakeStringLiteral(
@@ -2300,7 +2299,7 @@ bool InitListExpr::isStringLiteralInit() const {
   const Expr *Init = getInit(0);
   if (!Init)
     return false;
-  Init = Init->IgnoreParens();
+  Init = Init->IgnoreParenImpCasts();
   return isa<StringLiteral>(Init) || isa<ObjCEncodeExpr>(Init);
 }
 
@@ -2401,7 +2400,7 @@ bool Expr::isReadIfDiscardedInCPlusPlus11() const {
   // In C++11, discarded-value expressions of a certain form are special,
   // according to [expr]p10:
   //   The lvalue-to-rvalue conversion (4.1) is applied only if the
-  //   expression is an lvalue of volatile-qualified type and it has
+  //   expression is a glvalue of volatile-qualified type and it has
   //   one of the following forms:
   if (!isGLValue() || !getType().isVolatileQualified())
     return false;
@@ -3771,11 +3770,8 @@ Expr::isNullPointerConstant(ASTContext &Ctx,
         // has non-default address space it is not treated as nullptr.
         // (__generic void*)0 in OpenCL 2.0 should not be treated as nullptr
         // since it cannot be assigned to a pointer to constant address space.
-        if ((Ctx.getLangOpts().OpenCLVersion >= 200 &&
-             Pointee.getAddressSpace() == LangAS::opencl_generic) ||
-            (Ctx.getLangOpts().OpenCL &&
-             Ctx.getLangOpts().OpenCLVersion < 200 &&
-             Pointee.getAddressSpace() == LangAS::opencl_private))
+        if (Ctx.getLangOpts().OpenCL &&
+            Pointee.getAddressSpace() == Ctx.getDefaultOpenCLPointeeAddrSpace())
           Qs.removeAddressSpace();
 
         if (Pointee->isVoidType() && Qs.empty() && // to void*
@@ -3869,8 +3865,7 @@ Expr::isNullPointerConstant(ASTContext &Ctx,
 const ObjCPropertyRefExpr *Expr::getObjCProperty() const {
   const Expr *E = this;
   while (true) {
-    assert((E->getValueKind() == VK_LValue &&
-            E->getObjectKind() == OK_ObjCProperty) &&
+    assert((E->isLValue() && E->getObjectKind() == OK_ObjCProperty) &&
            "expression is not a property reference");
     E = E->IgnoreParenCasts();
     if (const BinaryOperator *BO = dyn_cast<BinaryOperator>(E)) {
@@ -3909,7 +3904,7 @@ FieldDecl *Expr::getSourceBitField() {
 
   while (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E)) {
     if (ICE->getCastKind() == CK_LValueToRValue ||
-        (ICE->getValueKind() != VK_PRValue && ICE->getCastKind() == CK_NoOp))
+        (ICE->isGLValue() && ICE->getCastKind() == CK_NoOp))
       E = ICE->getSubExpr()->IgnoreParens();
     else
       break;
@@ -3956,7 +3951,7 @@ bool Expr::refersToVectorElement() const {
   const Expr *E = this->IgnoreParens();
 
   while (const ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(E)) {
-    if (ICE->getValueKind() != VK_PRValue && ICE->getCastKind() == CK_NoOp)
+    if (ICE->isGLValue() && ICE->getCastKind() == CK_NoOp)
       E = ICE->getSubExpr()->IgnoreParens();
     else
       break;

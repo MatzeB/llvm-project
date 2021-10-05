@@ -138,15 +138,6 @@ void DWARFAbbreviationDeclaration::dump(raw_ostream &OS) const {
   OS << '\n';
 }
 
-const DWARFAbbreviationDeclaration::AttributeSpec *
-DWARFAbbreviationDeclaration::findAttribute(dwarf::Attribute Attr) const {
-  for (uint32_t i = 0, e = AttributeSpecs.size(); i != e; ++i) {
-    if (AttributeSpecs[i].Attr == Attr)
-      return &AttributeSpecs[i];
-  }
-  return nullptr;
-}
-
 Optional<uint32_t>
 DWARFAbbreviationDeclaration::findAttributeIndex(dwarf::Attribute Attr) const {
   for (uint32_t i = 0, e = AttributeSpecs.size(); i != e; ++i) {
@@ -176,8 +167,8 @@ uint64_t DWARFAbbreviationDeclaration::getAttributeOffsetFromIndex(
 Optional<DWARFFormValue>
 DWARFAbbreviationDeclaration::getAttributeValueFromOffset(
     uint32_t AttrIndex, uint64_t Offset, const DWARFUnit &U) const {
-  if (AttributeSpecs.size() <= AttrIndex)
-    return None;
+  assert(AttributeSpecs.size() > AttrIndex &&
+         "Attribute Index is out of bounds.");
 
   // We have arrived at the attribute to extract, extract if from Offset.
   const AttributeSpec &Spec = AttributeSpecs[AttrIndex];

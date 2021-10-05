@@ -13,15 +13,12 @@
 #include <__config>
 #include <__debug>
 #include <__iterator/iterator_traits.h>
-#include <__memory/pointer_traits.h> // __to_address
+#include <__memory/pointer_traits.h>
 #include <type_traits>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #pragma GCC system_header
 #endif
-
-_LIBCPP_PUSH_MACROS
-#include <__undef_macros>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
@@ -164,11 +161,29 @@ private:
     template <class _Tp, size_t> friend class _LIBCPP_TEMPLATE_VIS span;
 };
 
+template <class _Iter1>
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
+bool operator==(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter1>& __y) _NOEXCEPT
+{
+    return __x.base() == __y.base();
+}
+
 template <class _Iter1, class _Iter2>
 _LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
 bool operator==(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter2>& __y) _NOEXCEPT
 {
     return __x.base() == __y.base();
+}
+
+template <class _Iter1>
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
+bool operator<(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter1>& __y) _NOEXCEPT
+{
+#if _LIBCPP_DEBUG_LEVEL == 2
+    _LIBCPP_ASSERT(__get_const_db()->__less_than_comparable(&__x, &__y),
+                   "Attempted to compare incomparable iterators");
+#endif
+    return __x.base() < __y.base();
 }
 
 template <class _Iter1, class _Iter2>
@@ -182,11 +197,25 @@ bool operator<(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter2>& __y) _
     return __x.base() < __y.base();
 }
 
+template <class _Iter1>
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
+bool operator!=(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter1>& __y) _NOEXCEPT
+{
+    return !(__x == __y);
+}
+
 template <class _Iter1, class _Iter2>
 _LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
 bool operator!=(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter2>& __y) _NOEXCEPT
 {
     return !(__x == __y);
+}
+
+template <class _Iter1>
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
+bool operator>(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter1>& __y) _NOEXCEPT
+{
+    return __y < __x;
 }
 
 template <class _Iter1, class _Iter2>
@@ -196,11 +225,25 @@ bool operator>(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter2>& __y) _
     return __y < __x;
 }
 
+template <class _Iter1>
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
+bool operator>=(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter1>& __y) _NOEXCEPT
+{
+    return !(__x < __y);
+}
+
 template <class _Iter1, class _Iter2>
 _LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
 bool operator>=(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter2>& __y) _NOEXCEPT
 {
     return !(__x < __y);
+}
+
+template <class _Iter1>
+_LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_IF_NODEBUG
+bool operator<=(const __wrap_iter<_Iter1>& __x, const __wrap_iter<_Iter1>& __y) _NOEXCEPT
+{
+    return !(__y < __x);
 }
 
 template <class _Iter1, class _Iter2>
@@ -240,15 +283,19 @@ template <class _It>
 struct __is_cpp17_contiguous_iterator<__wrap_iter<_It> > : true_type {};
 #endif
 
-template <class _Iter>
-_LIBCPP_CONSTEXPR
-decltype(_VSTD::__to_address(declval<_Iter>()))
-__to_address(__wrap_iter<_Iter> __w) _NOEXCEPT {
-    return _VSTD::__to_address(__w.base());
-}
+template <class _It>
+struct _LIBCPP_TEMPLATE_VIS pointer_traits<__wrap_iter<_It> >
+{
+    typedef __wrap_iter<_It> pointer;
+    typedef typename pointer_traits<_It>::element_type element_type;
+    typedef typename pointer_traits<_It>::difference_type difference_type;
+
+    _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR
+    static element_type *to_address(pointer __w) _NOEXCEPT {
+        return _VSTD::__to_address(__w.base());
+    }
+};
 
 _LIBCPP_END_NAMESPACE_STD
-
-_LIBCPP_POP_MACROS
 
 #endif // _LIBCPP___ITERATOR_WRAP_ITER_H

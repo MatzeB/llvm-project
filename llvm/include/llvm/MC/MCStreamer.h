@@ -40,7 +40,6 @@ namespace llvm {
 
 class AssemblerConstantPools;
 class MCAsmBackend;
-class MCCFIInstruction;
 class MCCodeEmitter;
 class MCContext;
 struct MCDwarfFrameInfo;
@@ -124,6 +123,8 @@ public:
   /// This is used to emit bytes in \p Data as sequence of .byte directives.
   virtual void emitRawBytes(StringRef Data);
 
+  virtual void emitConstantPools();
+
   virtual void finish();
 };
 
@@ -166,7 +167,7 @@ public:
 
   virtual void emitThumbSet(MCSymbol *Symbol, const MCExpr *Value);
 
-  void finish() override;
+  void emitConstantPools() override;
 
   /// Reset any state between object emissions, i.e. the equivalent of
   /// MCStreamer's reset method.
@@ -446,7 +447,7 @@ public:
   }
 
   /// Create the default sections and set the initial one.
-  virtual void InitSections(bool NoExecStack);
+  virtual void initSections(bool NoExecStack, const MCSubtargetInfo &STI);
 
   MCSymbol *endSection(MCSection *Section);
 
@@ -798,7 +799,7 @@ public:
                         SMLoc Loc = SMLoc());
 
   virtual void emitNops(int64_t NumBytes, int64_t ControlledNopLength,
-                        SMLoc Loc);
+                        SMLoc Loc, const MCSubtargetInfo& STI);
 
   /// Emit NumBytes worth of zeros.
   /// This function properly handles data in virtual sections.
@@ -832,16 +833,19 @@ public:
   ///
   /// \param ByteAlignment - The alignment to reach. This must be a power of
   /// two on some targets.
+  /// \param STI - The MCSubtargetInfo in operation when padding is emitted.
   /// \param MaxBytesToEmit - The maximum numbers of bytes to emit, or 0. If
   /// the alignment cannot be reached in this many bytes, no bytes are
   /// emitted.
   virtual void emitCodeAlignment(unsigned ByteAlignment,
+                                 const MCSubtargetInfo *STI,
                                  unsigned MaxBytesToEmit = 0);
 
   /// If the end of the fragment following this NeverAlign fragment ever gets
   /// aligned to \p ByteAlignment, this fragment emits a single nop before the
   /// following fragment to break this end-alignment.
-  virtual void emitNeverAlignCodeAtEnd(unsigned ByteAlignment);
+  virtual void emitNeverAlignCodeAtEnd(unsigned ByteAlignment,
+                                       const MCSubtargetInfo &STI);
 
   /// Emit some number of copies of \p Value until the byte offset \p
   /// Offset is reached.
@@ -859,6 +863,10 @@ public:
   /// Switch to a new logical file.  This is used to implement the '.file
   /// "foo.c"' assembler directive.
   virtual void emitFileDirective(StringRef Filename);
+
+  /// Emit ".file assembler diretive with additioal info.
+  virtual void emitFileDirective(StringRef Filename, StringRef CompilerVerion,
+                                 StringRef TimeStamp, StringRef Description);
 
   /// Emit the "identifiers" directive.  This implements the
   /// '.ident "version foo"' assembler directive.
@@ -1115,10 +1123,6 @@ public:
                                         const MCSymbol *LastLabel,
                                         const MCSymbol *Label,
                                         unsigned PointerSize) {}
-
-  virtual void emitDwarfAdvanceLineAddrAbs(int64_t LineDelta, uint64_t Address,
-                                           uint64_t AddressDelta,
-                                           unsigned PointerSize) {}
 
   /// Do finalization for the streamer at the end of a section.
   virtual void doFinalizationAtSectionEnd(MCSection *Section) {}

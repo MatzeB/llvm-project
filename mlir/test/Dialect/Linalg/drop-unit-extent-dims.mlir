@@ -361,7 +361,7 @@ func @unit_dim_for_reduction(%arg0: tensor<1x?x1x?xf32>) -> tensor<1x?xf32> {
 
 // -----
 
-func @unit_dim_for_reduction_keep_one(%arg0: tensor<1x?x1x1xf32>) -> tensor<1x1xf32> {
+func @unit_dim_for_both_reduction(%arg0: tensor<1x?x1x1xf32>) -> tensor<1x1xf32> {
   %cst = constant 1.000000e+00 : f32
   %c3 = constant 3 : index
   %1 = linalg.init_tensor [1, 1] : tensor<1x1xf32>
@@ -378,17 +378,16 @@ func @unit_dim_for_reduction_keep_one(%arg0: tensor<1x?x1x1xf32>) -> tensor<1x1x
   } -> tensor<1x1xf32>
   return %3 : tensor<1x1xf32>
 }
-//  CHECK-DAG: #[[MAP2:.+]] = affine_map<(d0, d1) -> (d0, d1)>
-//  CHECK-DAG: #[[MAP3:.+]] = affine_map<(d0, d1) -> (d0)>
-//      CHECK: func @unit_dim_for_reduction_keep_one
+//  CHECK-DAG: #[[MAP2:.+]] = affine_map<(d0) -> (d0)>
+//      CHECK: func @unit_dim_for_both_reduction
 // CHECK-SAME:   %[[ARG0:.+]]: tensor<1x?x1x1xf32>
-//  CHECK-DAG:   %[[RESHAPE:.+]] = linalg.tensor_collapse_shape %[[ARG0]] {{\[}}[0, 1, 2], [3]]
+//  CHECK-DAG:   %[[RESHAPE:.+]] = linalg.tensor_collapse_shape %[[ARG0]] {{\[}}[0, 1, 2, 3]
 //      CHECK:   %[[INIT:.+]] = linalg.init_tensor [1] : tensor<1xf32>
 //      CHECK:   %[[FILL:.+]] = linalg.fill(%{{.+}}, %[[INIT]])
 //      CHECK:   %[[RESULT:.+]] = linalg.generic
-// CHECK-SAME:     indexing_maps = [#[[MAP2]], #[[MAP3]]]
-// CHECK-SAME:     iterator_types = ["parallel", "reduction"]
-// CHECK-SAME:     ins(%[[RESHAPE]] : tensor<?x1xf32>)
+// CHECK-SAME:     indexing_maps = [#[[MAP2]], #[[MAP2]]]
+// CHECK-SAME:     iterator_types = ["parallel"]
+// CHECK-SAME:     ins(%[[RESHAPE]] : tensor<?xf32>)
 // CHECK-SAME:     outs(%[[FILL]] : tensor<1xf32>)
 //      CHECK:   %[[RESULT_RESHAPE:.+]] = linalg.tensor_expand_shape %[[RESULT]] {{\[}}[0, 1]]
 //      CHECK:   return %[[RESULT_RESHAPE]]
@@ -479,7 +478,7 @@ func @drop_one_trip_loops(%arg0 : memref<?x1x?xf32>, %arg1 : f32, %shape: memref
 //   CHECK-DAG: #[[$MAP2:.*]] = affine_map<(d0, d1, d2) -> ()>
 //   CHECK-DAG: #[[$MAP3:.*]] = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
 // CHECK-LABEL: func @drop_one_trip_loops
-//       CHECK: linalg.collapse_shape %{{.*}} {{\[}}[0, 1], [2]]
+//       CHECK: memref.collapse_shape %{{.*}} {{\[}}[0, 1], [2]]
 //       CHECK: linalg.generic
 //  CHECK-SAME:   indexing_maps = [#[[$MAP1]], #[[$MAP2]], #[[$MAP3]]]
 //  CHECK-SAME:   iterator_types = ["parallel", "parallel", "parallel"]
@@ -556,7 +555,7 @@ func @drop_all_loops(%arg0 : memref<1x1xf32>) -> memref<1x1xf32>
 }
 //       CHECK: #[[$MAP0:.*]] = affine_map<() -> ()>
 // CHECK-LABEL: func @drop_all_loops
-//       CHECK:   linalg.collapse_shape %{{.*}} []
+//       CHECK:   memref.collapse_shape %{{.*}} []
 //       CHECK:   linalg.generic
 //  CHECK-SAME:     indexing_maps = [#[[$MAP0]], #[[$MAP0]]]
 //  CHECK-SAME:     iterator_types = []
@@ -617,7 +616,7 @@ func @leading_dim_1_canonicalization(%arg0: memref<1x5xf32>, %shape: memref<5xf3
 //   CHECK: #[[$MAP1:.*]] = affine_map<(d0) -> (d0)>
 
 // CHECK-LABEL: func @leading_dim_1_canonicalization
-//       CHECK:   linalg.collapse_shape %{{.*}} {{\[}}[0, 1]]
+//       CHECK:   memref.collapse_shape %{{.*}} {{\[}}[0, 1]]
 //       CHECK:   linalg.generic
 //  CHECK-SAME:     indexing_maps = [#[[$MAP1]], #[[$MAP1]]]
 //  CHECK-SAME:     iterator_types = ["parallel"]
@@ -638,8 +637,8 @@ func @leading_dim_1_canonicalization(%arg0: memref<1x5xf32>, %shape: memref<5xf3
 
 func @broadcast_test(%arg0 : memref<5xf32>, %arg1 : memref<5xf32>, %shape : memref<5x5xf32>) -> memref<5x5xf32>
 {
-  %0 = linalg.expand_shape %arg0 [[0, 1]] : memref<5xf32> into memref<1x5xf32>
-  %1 = linalg.expand_shape %arg1 [[0, 1]] : memref<5xf32> into memref<5x1xf32>
+  %0 = memref.expand_shape %arg0 [[0, 1]] : memref<5xf32> into memref<1x5xf32>
+  %1 = memref.expand_shape %arg1 [[0, 1]] : memref<5xf32> into memref<5x1xf32>
   linalg.generic #trait
      ins(%0, %1 : memref<1x5xf32>, memref<5x1xf32>)
     outs(%shape : memref<5x5xf32>) {
@@ -686,7 +685,7 @@ func @broadcast_scalar(%arg0 : memref<1x1xf32>, %shape : memref<?x?xf32>) -> mem
 //   CHECK-DAG: #[[$MAP1:.*]] = affine_map<(d0, d1) -> (d0, d1)>
 // CHECK-LABEL: func @broadcast_scalar
 //  CHECK-SAME:   %[[ARG0:.*]]: memref<1x1xf32>
-//       CHECK:   %[[A:.*]] = linalg.collapse_shape %[[ARG0]] []
+//       CHECK:   %[[A:.*]] = memref.collapse_shape %[[ARG0]] []
 //  CHECK-SAME:     memref<1x1xf32> into memref<f32>
 //       CHECK:   linalg.generic
 //  CHECK-SAME:     indexing_maps = [#[[$MAP0]], #[[$MAP1]]]
@@ -706,16 +705,16 @@ func @fold_unit_dim_memref_reshape_op(%arg0 : memref<5xf32>) -> memref<2x5xf32>
     ^bb0(%arg1: f32, %arg2: f32):  // no predecessors
       linalg.yield %arg1 : f32
     }
-  %3 = linalg.collapse_shape %1 [[0, 1], [2]]
+  %3 = memref.collapse_shape %1 [[0, 1], [2]]
     : memref<1x2x5xf32> into memref<2x5xf32>
   return %3 : memref<2x5xf32>
 }
 // CHECK-LABEL: func @fold_unit_dim_memref_reshape_op
 //       CHECK:   %[[ALLOC:.*]] = memref.alloc() : memref<1x2x5xf32>
-//       CHECK:   %[[OUT:.*]] = linalg.collapse_shape %[[ALLOC]]
+//       CHECK:   %[[OUT:.*]] = memref.collapse_shape %[[ALLOC]]
 //       CHECK:   linalg.generic
 //       CHECK-SAME:   outs(%[[OUT:.*]] :
-//       CHECK:   %[[RESULT:.*]] = linalg.collapse_shape %[[ALLOC]]
+//       CHECK:   %[[RESULT:.*]] = memref.collapse_shape %[[ALLOC]]
 //       CHECK:   return %[[RESULT]]
 
 // -----
@@ -740,8 +739,8 @@ func @fold_unit_dim_for_init_memref(%input: memref<1x1000xf32>) -> memref<1xf32>
 
 //       CHECK: func @fold_unit_dim_for_init_memref
 //       CHECK: %[[INIT:.+]] = memref.alloc() : memref<1xf32>
-//       CHECK: %[[INPUT_RESHAPE:.+]] = linalg.collapse_shape %{{.+}} {{\[}}[0, 1]] : memref<1x1000xf32> into memref<1000xf32>
-//       CHECK: %[[INIT_RESHAPE:.+]] = linalg.collapse_shape %[[INIT]] [] : memref<1xf32> into memref<f32>
+//       CHECK: %[[INPUT_RESHAPE:.+]] = memref.collapse_shape %{{.+}} {{\[}}[0, 1]] : memref<1x1000xf32> into memref<1000xf32>
+//       CHECK: %[[INIT_RESHAPE:.+]] = memref.collapse_shape %[[INIT]] [] : memref<1xf32> into memref<f32>
 //       CHECK: linalg.generic
 //  CHECK-SAME:     indexing_maps = [#[[MAP1]], #[[MAP2]]]
 //  CHECK-SAME:     iterator_types = ["reduction"]
@@ -750,4 +749,81 @@ func @fold_unit_dim_for_init_memref(%input: memref<1x1000xf32>) -> memref<1xf32>
 //       CHECK: return %[[INIT:.+]] : memref<1xf32>
 
 
+// -----
+// Test that nothing changes and no assertions are fired for memrefs with affine
+// maps while still changing the other operations.
 
+#map0 = affine_map<(d0, d1, d2)[s0] -> (d0 * s0 + d1 + d2)>
+
+#accesses = [
+  affine_map<(i, j, k, l, m) -> (i, k, m)>,
+  affine_map<(i, j, k, l, m) -> ()>,
+  affine_map<(i, j, k, l, m) -> (i, k, j, l, m)>
+]
+
+#trait = {
+  iterator_types = ["parallel", "parallel", "parallel", "parallel", "parallel"],
+  indexing_maps = #accesses,
+  library_call = "some_external_func"
+}
+
+func @input_stays_same(%arg0 : memref<?x1x?xf32, #map0>, %arg1 : f32, %shape: memref<?x1x?x1x?xf32>) -> memref<?x1x?x1x?xf32> {
+  linalg.generic #trait
+     ins(%arg0, %arg1 : memref<?x1x?xf32, #map0>, f32)
+    outs(%shape : memref<?x1x?x1x?xf32>) {
+       ^bb0(%arg2 : f32, %arg3 : f32, %arg4 : f32) :
+         linalg.yield %arg3 : f32
+       }
+  return %shape : memref<?x1x?x1x?xf32>
+}
+
+// CHECK:     #[[MAP0:.*]] = affine_map<(d0, d1, d2)[s0] -> (d0 * s0 + d1 + d2)>
+// CHECK:     #[[MAP1:.*]] = affine_map<(d0, d1, d2) -> (d0, 0, d2)>
+// CHECK:     #[[MAP2:.*]] = affine_map<(d0, d1, d2) -> ()>
+// CHECK:     #[[MAP3:.*]] = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+// CHECK:     func @input_stays_same(
+// CHECK-SAME:  %[[ARG0:.*]]: memref<?x1x?xf32, #[[MAP0]]>,
+// CHECK-SAME:  %[[ARG1:.*]]: f32, %[[ARG2:.*]]: memref<?x1x?x1x?xf32>)
+// CHECK-SAME   -> memref<?x1x?x1x?xf32> {
+// CHECK:      %[[OUT:.*]] = memref.collapse_shape %[[ARG2]] {{\[}}[0, 1], [2, 3], [4]]
+// CHECK-SAME:   : memref<?x1x?x1x?xf32> into memref<?x?x?xf32>
+// CHECK:      linalg.generic
+// CHECK-SAME:   {indexing_maps = [#[[MAP1]], #[[MAP2]], #[[MAP3]]],
+// CHECK-SAME:   iterator_types = ["parallel", "parallel", "parallel"]}
+// CHECK-SAME:   ins(%[[ARG0]], %[[ARG1]] : memref<?x1x?xf32, #[[MAP0]]>, f32)
+// CHECK-SAME:   outs(%[[OUT]] : memref<?x?x?xf32>) {
+// CHECK:      ^bb0(%{{.*}}: f32, %[[ARG:.*]]: f32, %{{.*}}: f32): // no predecessors
+// CHECK:       linalg.yield %[[ARG]] : f32
+// CHECK:      }
+// CHECK:      return %[[ARG2]] : memref<?x1x?x1x?xf32>
+
+// -----
+
+// Negative test for case with tensor encoding.
+#matvec = {
+  indexing_maps = [
+    affine_map<(i,j) -> (i,j)>, // A
+    affine_map<(i,j) -> (j)>,   // b
+    affine_map<(i,j) -> (i)>    // x (out)
+  ],
+  iterator_types = ["parallel", "reduction"]
+}
+
+#CSR = #sparse_tensor.encoding<{ dimLevelType = ["dense", "compressed"] }>
+
+func @sparse_case(%arg0: tensor<8x8xf32, #CSR>, %arg1: tensor<8xf32>) -> tensor<8xf32> {
+    %0 = linalg.init_tensor [8] : tensor<8xf32>
+    %1 = linalg.generic #matvec
+      ins(%arg0, %arg1: tensor<8x8xf32, #CSR>, tensor<8xf32>)
+      outs(%0: tensor<8xf32>) {
+      ^bb(%a: f32, %b: f32, %x: f32):
+        %m = mulf %a, %b : f32
+        %add = addf %x, %m : f32
+        linalg.yield %add : f32
+    } -> tensor<8xf32>
+    return %1: tensor<8xf32>
+}
+
+// CHECK-LABEL: func @sparse_case
+//  CHECK-NEXT:   linalg.init_tensor
+//  CHECK-NEXT:   linalg.generic
