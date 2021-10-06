@@ -59,7 +59,7 @@ public:
           FirstInstr = &MI;
         if (MI.isCall()) {
           if (DILocation *DL = MI.getDebugLoc()) {
-            auto Value = DL->getDiscriminator();
+            auto Value = DL->getProbeDiscriminator(); // facebook T96694365
             if (DILocation::isPseudoProbeDiscriminator(Value)) {
               // facebook begin T63349601
               auto Attr =

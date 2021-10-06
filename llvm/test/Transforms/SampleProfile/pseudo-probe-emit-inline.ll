@@ -41,13 +41,15 @@ define dso_local i32 @entry() !dbg !14 {
 ; CHECK-IL: ![[#SCOPE2:]] = distinct !DISubprogram(name: "foo"
 ; CHECK-IL: ![[#DL1]] = !DILocation(line: 3, column: 1,  scope: ![[#SCOPE1]], inlinedAt: ![[#INL1:]])
 ; CHECK-IL: ![[#INL1]] = distinct !DILocation(line: 7, column: 3, scope: ![[#BL1:]])
-;; A discriminator of 186646551 which is 0xb200017 in hexdecimal, stands for a direct call probe
+;; A discriminator of 801640832456196096 which is 0xb20001700000000 in hexdecimal, stands for a direct call probe
 ;; with an index of 2 and a scale of 100%.
-; CHECK-IL: ![[#BL1]] = !DILexicalBlockFile(scope: ![[#SCOPE2]], file: !1, discriminator: 186646551)
+;; facebook T96694365
+; CHECK-IL: ![[#BL1]] = !DILexicalBlockFile(scope: ![[#SCOPE2]], file: !1, discriminator: 801640832456196096)
 ; CHECK-IL: ![[#SCOPE3:]] = distinct !DISubprogram(name: "entry"
 ; CHECK-IL: ![[#DL2]] = !DILocation(line: 7, column: 3,  scope: ![[#SCOPE2]], inlinedAt: ![[#INL2:]])
 ; CHECK-IL: ![[#INL2]] = distinct !DILocation(line: 11, column: 3, scope: ![[#BL2:]])
-; CHECK-IL: ![[#BL2]] = !DILexicalBlockFile(scope: ![[#SCOPE3]], file: !1, discriminator: 186646551)
+;; facebook T96694365
+; CHECK-IL: ![[#BL2]] = !DILexicalBlockFile(scope: ![[#SCOPE3]], file: !1, discriminator: 801640832456196096)
 ; CHECK-IL: ![[#DL3]] = !DILocation(line: 3, column: 1,  scope: ![[#SCOPE1]], inlinedAt: ![[#INL3:]])
 ; CHECK-IL: ![[#INL3]] = distinct !DILocation(line: 7, column: 3,  scope: ![[#BL1]], inlinedAt: ![[#INL2]])
 

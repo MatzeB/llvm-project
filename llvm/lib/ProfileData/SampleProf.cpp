@@ -226,7 +226,7 @@ LineLocation FunctionSamples::getCallSiteIdentifier(const DILocation *DIL,
     // encoded in the Discriminator field of the call instruction's debug
     // metadata.
     return LineLocation(PseudoProbeDwarfDiscriminator::extractProbeIndex(
-                            DIL->getDiscriminator()),
+                            DIL->getProbeDiscriminator()), // facebook T96694365
                         0);
   } else {
     unsigned Discriminator =

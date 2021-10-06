@@ -1035,7 +1035,8 @@ DILexicalBlock *DILexicalBlock::getImpl(LLVMContext &Context, Metadata *Scope,
 
 DILexicalBlockFile *DILexicalBlockFile::getImpl(LLVMContext &Context,
                                                 Metadata *Scope, Metadata *File,
-                                                unsigned Discriminator,
+                                                // facebook T96694365
+                                                uint64_t Discriminator,
                                                 StorageType Storage,
                                                 bool ShouldCreate) {
   assert(Scope && "Expected scope");

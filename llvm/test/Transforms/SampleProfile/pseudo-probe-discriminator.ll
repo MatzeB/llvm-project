@@ -64,8 +64,10 @@ attributes #1 = { "disable-tail-calls"="false" "less-precise-fpmad"="false" "fra
 
            
 ; PROBE: ![[CALL1]] = !DILocation(line: 4, column: 3, scope: ![[CALL1BLOCK:[0-9]+]])
-; PROBE: ![[CALL1BLOCK]] = !DILexicalBlockFile({{.*}} discriminator: 186646575)
+;; facebook T96694365
+; PROBE: ![[CALL1BLOCK]] = !DILexicalBlockFile({{.*}} discriminator: 801640935535411202)
 ; PROBE: ![[CALL2]] = !DILocation(line: 4, column: 9, scope: ![[CALL2BLOCK:[0-9]+]])
-; PROBE: ![[CALL2BLOCK]] = !DILexicalBlockFile({{.*}} discriminator: 186646583)
+;; facebook T96694365
+; PROBE: ![[CALL2BLOCK]] = !DILexicalBlockFile({{.*}} discriminator: 801640969895149576)
 ; PROBE: ![[INST]] = !DILocation(line: 4, column: 15, scope: ![[INSTBLOCK:[0-9]+]])
 ; PROBE: ![[INSTBLOCK]] = !DILexicalBlockFile({{.*}} discriminator: 4)

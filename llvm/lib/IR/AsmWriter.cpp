@@ -2189,8 +2189,10 @@ static void writeDILexicalBlockFile(raw_ostream &Out,
   MDFieldPrinter Printer(Out, WriterCtx);
   Printer.printMetadata("scope", N->getRawScope(), /* ShouldSkipNull */ false);
   Printer.printMetadata("file", N->getRawFile());
-  Printer.printInt("discriminator", N->getDiscriminator(),
+  // facebook begin T96694365
+  Printer.printInt("discriminator", N->getDiscriminators(),
                    /* ShouldSkipZero */ false);
+  // facebook end T96694365
   Out << ")";
 }
 

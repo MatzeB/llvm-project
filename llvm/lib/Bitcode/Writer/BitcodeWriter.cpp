@@ -1872,7 +1872,7 @@ void ModuleBitcodeWriter::writeDILexicalBlockFile(
   Record.push_back(N->isDistinct());
   Record.push_back(VE.getMetadataOrNullID(N->getScope()));
   Record.push_back(VE.getMetadataOrNullID(N->getFile()));
-  Record.push_back(N->getDiscriminator());
+  Record.push_back(N->getDiscriminators()); // facebook T96694365
 
   Stream.EmitRecord(bitc::METADATA_LEXICAL_BLOCK_FILE, Record, Abbrev);
   Record.clear();

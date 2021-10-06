@@ -4976,12 +4976,14 @@ bool LLParser::parseDILexicalBlock(MDNode *&Result, bool IsDistinct) {
 /// parseDILexicalBlockFile:
 ///   ::= !DILexicalBlockFile(scope: !0, file: !2, discriminator: 9)
 bool LLParser::parseDILexicalBlockFile(MDNode *&Result, bool IsDistinct) {
+// facebook begin T96694365
 #define VISIT_MD_FIELDS(OPTIONAL, REQUIRED)                                    \
   REQUIRED(scope, MDField, (/* AllowNull */ false));                           \
   OPTIONAL(file, MDField, );                                                   \
-  REQUIRED(discriminator, MDUnsignedField, (0, UINT32_MAX));
+  REQUIRED(discriminator, MDUnsignedField, (0, UINT64_MAX));
   PARSE_MD_FIELDS();
 #undef VISIT_MD_FIELDS
+  // facebook end T96694365
 
   Result = GET_OR_DISTINCT(DILexicalBlockFile,
                            (Context, scope.Val, file.Val, discriminator.Val));

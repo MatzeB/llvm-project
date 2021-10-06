@@ -1679,8 +1679,13 @@ public:
     return ((Discriminator & 0x7) == 0x7) && (Discriminator & 0xFFFFFFF8);
   }
 
+  // facebook begin T96694365
+  /// Returns the probe discriminator stored in the discriminator.
+  inline unsigned getProbeDiscriminator() const;
+
   /// Returns a new DILocation with updated \p Discriminator.
-  inline const DILocation *cloneWithDiscriminator(unsigned Discriminator) const;
+  inline const DILocation *cloneWithDiscriminator(uint64_t Discriminator) const;
+  // facebook end T96694365
 
   /// Returns a new DILocation with updated base discriminator \p BD. Only the
   /// base discriminator is set in the new DILocation, the other encoded values
@@ -1688,6 +1693,11 @@ public:
   /// If the discriminator cannot be encoded, the function returns None.
   inline Optional<const DILocation *>
   cloneWithBaseDiscriminator(unsigned BD) const;
+
+  // facebook begin T96694365
+  /// Returns a new DILocation with updated \p ProbeDiscriminator.
+  inline const DILocation *cloneWithProbeDiscriminator(unsigned P) const;
+  // facebook end T96694365
 
   /// Returns the duplication factor stored in the discriminator, or 1 if no
   /// duplication factor (or 0) is encoded.
@@ -2141,16 +2151,19 @@ class DILexicalBlockFile : public DILexicalBlockBase {
   friend class LLVMContextImpl;
   friend class MDNode;
 
-  unsigned Discriminator;
+  // facebook begin T96694365
+  // The lower 32 bits serve as the dwarf discriminator while the upper 32 bits
+  // are for probe discriminator.
+  uint64_t Discriminator;
 
   DILexicalBlockFile(LLVMContext &C, StorageType Storage,
-                     unsigned Discriminator, ArrayRef<Metadata *> Ops)
+                     uint64_t Discriminator, ArrayRef<Metadata *> Ops)
       : DILexicalBlockBase(C, DILexicalBlockFileKind, Storage, Ops),
         Discriminator(Discriminator) {}
   ~DILexicalBlockFile() = default;
 
   static DILexicalBlockFile *getImpl(LLVMContext &Context, DILocalScope *Scope,
-                                     DIFile *File, unsigned Discriminator,
+                                     DIFile *File, uint64_t Discriminator,
                                      StorageType Storage,
                                      bool ShouldCreate = true) {
     return getImpl(Context, static_cast<Metadata *>(Scope),
@@ -2159,26 +2172,33 @@ class DILexicalBlockFile : public DILexicalBlockBase {
   }
 
   static DILexicalBlockFile *getImpl(LLVMContext &Context, Metadata *Scope,
-                                     Metadata *File, unsigned Discriminator,
+                                     Metadata *File, uint64_t Discriminator,
                                      StorageType Storage,
                                      bool ShouldCreate = true);
 
   TempDILexicalBlockFile cloneImpl() const {
     return getTemporary(getContext(), getScope(), getFile(),
-                        getDiscriminator());
+                        getDiscriminators());
   }
 
 public:
   DEFINE_MDNODE_GET(DILexicalBlockFile,
                     (DILocalScope * Scope, DIFile *File,
-                     unsigned Discriminator),
+                     uint64_t Discriminator),
                     (Scope, File, Discriminator))
   DEFINE_MDNODE_GET(DILexicalBlockFile,
-                    (Metadata * Scope, Metadata *File, unsigned Discriminator),
+                    (Metadata * Scope, Metadata *File, uint64_t Discriminator),
                     (Scope, File, Discriminator))
+  // facebook end T96694365
 
   TempDILexicalBlockFile clone() const { return cloneImpl(); }
   unsigned getDiscriminator() const { return Discriminator; }
+
+  // facebook begin T96694365
+  unsigned getProbeDiscriminator() const { return Discriminator >> 32; }
+
+  uint64_t getDiscriminators() const { return Discriminator; }
+  // facebook end T96694365
 
   static bool classof(const Metadata *MD) {
     return MD->getMetadataID() == DILexicalBlockFileKind;
@@ -2191,8 +2211,16 @@ unsigned DILocation::getDiscriminator() const {
   return 0;
 }
 
+// facebook begin T96694365
+unsigned DILocation::getProbeDiscriminator() const {
+  if (auto *F = dyn_cast<DILexicalBlockFile>(getScope()))
+    return F->getProbeDiscriminator();
+  return 0;
+}
+
 const DILocation *
-DILocation::cloneWithDiscriminator(unsigned Discriminator) const {
+DILocation::cloneWithDiscriminator(uint64_t Discriminator) const {
+  // facebook end T96694365
   DIScope *Scope = getScope();
   // Skip all parent DILexicalBlockFile that already have a discriminator
   // assigned. We do not want to have nested DILexicalBlockFiles that have
@@ -2254,6 +2282,15 @@ DILocation::cloneByMultiplyingDuplicationFactor(unsigned DF) const {
     return cloneWithDiscriminator(*D);
   return None;
 }
+
+// facebook begin T96694365
+const DILocation *DILocation::cloneWithProbeDiscriminator(unsigned P) const {
+  if (P == getProbeDiscriminator())
+    return this;
+  unsigned D = getDiscriminator();
+  return cloneWithDiscriminator((((uint64_t)P) << 32) | (uint64_t)D);
+}
+// facebook end T96694365
 
 class DINamespace : public DIScope {
   friend class LLVMContextImpl;

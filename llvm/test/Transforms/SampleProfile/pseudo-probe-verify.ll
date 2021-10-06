@@ -54,10 +54,11 @@ bb24:
   ret void
 }
 
-;; A discriminator of 186646583 which is 0xb200037 in hexdecimal, stands for a direct call probe
+;; facebook T96694365
+;; A discriminator of 801640969895149568 which is 0xb20003700000000 in hexdecimal, stands for a direct call probe
 ;; with an index of 6 and a scale of -1%.
 ; CHECK: ![[#PROBE6]] = !DILocation(line: 2, column: 20, scope: ![[#SCOPE:]])
-; CHECK: ![[#SCOPE]] = !DILexicalBlockFile(scope: ![[#]], file: ![[#]], discriminator: 186646583)
+; CHECK: ![[#SCOPE]] = !DILexicalBlockFile(scope: ![[#]], file: ![[#]], discriminator: 801640969895149568)
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!9, !10}

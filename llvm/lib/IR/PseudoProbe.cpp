@@ -27,7 +27,7 @@ Optional<PseudoProbe> extractProbeFromDiscriminator(const Instruction &Inst) {
          "Dwarf discriminators");
   if (const DebugLoc &DLoc = Inst.getDebugLoc()) {
     const DILocation *DIL = DLoc;
-    auto Discriminator = DIL->getDiscriminator();
+    auto Discriminator = DIL->getProbeDiscriminator(); // facebook T96694365
     if (DILocation::isPseudoProbeDiscriminator(Discriminator)) {
       PseudoProbe Probe;
       Probe.Id =
@@ -76,7 +76,7 @@ void setProbeDistributionFactor(Instruction &Inst, float Factor) {
   } else if (isa<CallBase>(&Inst) && !isa<IntrinsicInst>(&Inst)) {
     if (const DebugLoc &DLoc = Inst.getDebugLoc()) {
       const DILocation *DIL = DLoc;
-      auto Discriminator = DIL->getDiscriminator();
+      auto Discriminator = DIL->getProbeDiscriminator(); // facebook T96694365
       if (DILocation::isPseudoProbeDiscriminator(Discriminator)) {
         auto Index =
             PseudoProbeDwarfDiscriminator::extractProbeIndex(Discriminator);
@@ -91,7 +91,7 @@ void setProbeDistributionFactor(Instruction &Inst, float Factor) {
           IntFactor *= Factor;
         uint32_t V = PseudoProbeDwarfDiscriminator::packProbeData(
             Index, Type, Attr, IntFactor);
-        DIL = DIL->cloneWithDiscriminator(V);
+        DIL = DIL->cloneWithProbeDiscriminator(V); // facebook T96694365
         Inst.setDebugLoc(DIL);
       }
     }

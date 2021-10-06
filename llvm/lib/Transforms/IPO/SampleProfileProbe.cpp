@@ -361,7 +361,7 @@ void SampleProfileProber::instrumentOneFunc(Function &F, TargetMachine *TM) {
     uint32_t V = PseudoProbeDwarfDiscriminator::packProbeData(
         Index, Type, 0, PseudoProbeDwarfDiscriminator::FullDistributionFactor);
     if (auto DIL = Call->getDebugLoc()) {
-      DIL = DIL->cloneWithDiscriminator(V);
+      DIL = DIL->cloneWithProbeDiscriminator(V); // facebook T96694365
       Call->setDebugLoc(DIL);
     }
   }

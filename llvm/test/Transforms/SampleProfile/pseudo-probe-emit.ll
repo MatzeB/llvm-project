@@ -76,13 +76,15 @@ entry:
 ; CHECK-IL: ![[#FAKELINE]] = !DILocation(line: 0, scope: ![[#FOO]])
 ; CHECK-IL: ![[#REALLINE]] = !DILocation(line: 2, scope: ![[#FOO]])
 ; CHECK-IL: ![[#PROBE0]] = !DILocation(line: 2, column: 20, scope: ![[#SCOPE0:]])
-;; A discriminator of 67108887 which is 0x7200017 in hexdecimal, stands for a direct call probe
+;; facebook T96694365
+;; A discriminator of 513410456304484352 which is 0x720001700000000 in hexdecimal, stands for a direct call probe
 ;; with an index of 2.
-; CHECK-IL: ![[#SCOPE0]] = !DILexicalBlockFile(scope: ![[#]], file: ![[#]], discriminator: 119537687)
+; CHECK-IL: ![[#SCOPE0]] = !DILexicalBlockFile(scope: ![[#]], file: ![[#]], discriminator: 513410456304484352)
 ; CHECK-IL: ![[#PROBE1]] = !DILocation(line: 0, scope: ![[#SCOPE1:]])
-;; A discriminator of 186646559 which is 0xb20001f in hexdecimal, stands for a direct call probe
+;; facebook T96694365
+;; A discriminator of 801640866815934464 which is 0xb20001f00000000 in hexdecimal, stands for a direct call probe
 ;; with an index of 3.
-; CHECK-IL: ![[#SCOPE1]] = !DILexicalBlockFile(scope: ![[#]], file: ![[#]], discriminator: 186646559)
+; CHECK-IL: ![[#SCOPE1]] = !DILexicalBlockFile(scope: ![[#]], file: ![[#]], discriminator: 801640866815934464)
 
 ; Check the generation of .pseudo_probe_desc section
 ; CHECK-ASM: .section .pseudo_probe_desc,"G",@progbits,.pseudo_probe_desc_foo,comdat

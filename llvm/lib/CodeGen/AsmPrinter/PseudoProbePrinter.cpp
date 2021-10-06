@@ -42,7 +42,7 @@ void PseudoProbeHandler::emitPseudoProbe(uint64_t Guid, uint64_t Index,
     if (!CallerGuid)
       CallerGuid = Function::getGUID(Name);
     uint64_t CallerProbeId = PseudoProbeDwarfDiscriminator::extractProbeIndex(
-        InlinedAt->getDiscriminator());
+        InlinedAt->getProbeDiscriminator()); // facebook T96694365
     ReversedInlineStack.emplace_back(CallerGuid, CallerProbeId);
     InlinedAt = InlinedAt->getInlinedAt();
   }

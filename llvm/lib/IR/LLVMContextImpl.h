@@ -845,18 +845,20 @@ template <> struct MDNodeKeyImpl<DILexicalBlock> {
 template <> struct MDNodeKeyImpl<DILexicalBlockFile> {
   Metadata *Scope;
   Metadata *File;
-  unsigned Discriminator;
+  // facebook begin T96694365
+  uint64_t Discriminator;
 
-  MDNodeKeyImpl(Metadata *Scope, Metadata *File, unsigned Discriminator)
+  MDNodeKeyImpl(Metadata *Scope, Metadata *File, uint64_t Discriminator)
       : Scope(Scope), File(File), Discriminator(Discriminator) {}
   MDNodeKeyImpl(const DILexicalBlockFile *N)
       : Scope(N->getRawScope()), File(N->getRawFile()),
-        Discriminator(N->getDiscriminator()) {}
+        Discriminator(N->getDiscriminators()) {}
 
   bool isKeyOf(const DILexicalBlockFile *RHS) const {
     return Scope == RHS->getRawScope() && File == RHS->getRawFile() &&
-           Discriminator == RHS->getDiscriminator();
+           Discriminator == RHS->getDiscriminators();
   }
+  // facebook end T96694365
 
   unsigned getHashValue() const {
     return hash_combine(Scope, File, Discriminator);
