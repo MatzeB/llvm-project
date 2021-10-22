@@ -452,6 +452,68 @@ INITIALIZE_PASS_END(CodeGenPrepare, DEBUG_TYPE,
 
 FunctionPass *llvm::createCodeGenPreparePass() { return new CodeGenPrepare(); }
 
+static bool optimizeDeltas(Function &F) {
+  struct DeltaInfo {
+    APInt Delta;
+    Value *LastValue;
+    bool IsNSW;
+    bool IsNUW;
+  };
+  IRBuilder<> Builder(F.getContext());
+  DenseMap<Value*, DeltaInfo> Values;
+  for (BasicBlock &BB : F) {
+    Values.clear();
+    for (Instruction &I : BB) {
+      if (ICmpInst *Cmp = dyn_cast<ICmpInst>(&I)) {
+        auto I = Values.find(Cmp->getOperand(0));
+        if (I != Values.end() &&
+            ((Cmp->isSigned() && I->second.IsNSW) ||
+             (Cmp->isUnsigned() && I->second.IsNUW))) {
+          if (ConstantInt *C = dyn_cast<ConstantInt>(Cmp->getOperand(1))) {
+            APInt NewConstantValue(C->getValue());
+            NewConstantValue += I->second.Delta;
+            Value *NewConstant = ConstantInt::get(C->getType(), NewConstantValue);
+            Cmp->setOperand(0, I->second.LastValue);
+            Cmp->setOperand(1, NewConstant);
+          }
+        }
+      }
+
+      if (AddOperator *Add = dyn_cast<AddOperator>(&I)) {
+        if (ConstantInt *C = dyn_cast<ConstantInt>(Add->getOperand(1))) {
+          auto I = Values.find(Add->getOperand(0));
+          if (I != Values.end()) {
+            APInt NewConstantValue(C->getValue());
+            NewConstantValue -= I->second.Delta;
+            Value *NewConstant = ConstantInt::get(C->getType(), NewConstantValue);
+            Add->setOperand(0, I->second.LastValue);
+            Add->setOperand(1, NewConstant);
+#if 0
+            Add->setHasNoSignedWrap(false);
+            Add->setHasNoUnsignedWrap(false);
+#else
+            // hacky
+            Add->clearSubclassOptionalData();
+#endif
+          }
+        }
+      }
+
+      // Record value.
+      if (AddOperator *Add = dyn_cast<AddOperator>(&I)) {
+        if (ConstantInt *C = dyn_cast<ConstantInt>(Add->getOperand(1))) {
+          Value* Base = Add->getOperand(0);
+          Values.try_emplace(Base, DeltaInfo{C->getValue(), Add,
+                             Add->hasNoSignedWrap(),
+                             Add->hasNoUnsignedWrap()});
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 bool CodeGenPrepare::runOnFunction(Function &F) {
   if (skipFunction(F))
     return false;
@@ -508,6 +570,8 @@ bool CodeGenPrepare::runOnFunction(Function &F) {
       BB = Next;
     }
   }
+
+  EverMadeChange |= optimizeDeltas(F);
 
   // Get rid of @llvm.assume builtins before attempting to eliminate empty
   // blocks, since there might be blocks that only contain @llvm.assume calls
