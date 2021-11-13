@@ -40,6 +40,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#if defined (__x86_64__)
 #include "common.h"
 
 // Enables a very verbose logging to stderr useful when debugging
@@ -610,7 +611,7 @@ bool parseAddressRange(const char *Str, uint64_t &StartAddress,
 /// /proc/self/map_files
 static char *getBinaryPath() {
   const uint32_t BufSize = 1024;
-  const uint32_t NameMax = 256;
+  const uint32_t NameMax = 4096;
   const char DirPath[] = "/proc/self/map_files/";
   static char TargetPath[NameMax] = {};
   char Buf[BufSize];
@@ -1485,6 +1486,7 @@ __bolt_instr_data_dump() {
   writeIndirectCallProfile(FD, Ctx);
   Ctx.CallFlowTable->forEachElement(visitCallFlowEntry, FD, &Ctx);
 
+  __fsync(FD);
   __close(FD);
   __munmap(Ctx.MMapPtr, Ctx.MMapSize);
   __close(Ctx.FileDesc);
@@ -1509,6 +1511,7 @@ void watchProcess() {
     ppid = __getppid();
     if (ppid == 1) {
       // Parent already dead
+      __bolt_instr_data_dump();
       goto out;
     }
   }
@@ -1668,4 +1671,5 @@ void _bolt_instr_fini() {
   __bolt_instr_data_dump();
 }
 
+#endif
 #endif

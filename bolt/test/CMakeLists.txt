@@ -1,3 +1,7 @@
+llvm_canonicalize_cmake_booleans(
+  BOLT_ENABLE_RUNTIME
+  )
+
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py
@@ -18,6 +22,7 @@ list(APPEND BOLT_TEST_DEPS
   merge-fdata
   llvm-nm
   llvm-objdump
+  llvm-readelf
   llvm-readobj
   yaml2obj
   llvm-strip
