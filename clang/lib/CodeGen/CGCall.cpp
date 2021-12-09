@@ -1564,11 +1564,11 @@ bool CodeGenModule::ReturnTypeUsesFPRet(QualType ResultType) {
     default:
       return false;
     case BuiltinType::Float:
-      return getTarget().useObjCFPRetForRealType(TargetInfo::Float);
+      return getTarget().useObjCFPRetForRealType(FloatModeKind::Float);
     case BuiltinType::Double:
-      return getTarget().useObjCFPRetForRealType(TargetInfo::Double);
+      return getTarget().useObjCFPRetForRealType(FloatModeKind::Double);
     case BuiltinType::LongDouble:
-      return getTarget().useObjCFPRetForRealType(TargetInfo::LongDouble);
+      return getTarget().useObjCFPRetForRealType(FloatModeKind::LongDouble);
     }
   }
 
@@ -1748,8 +1748,7 @@ static void AddAttributesFromFunctionProtoType(ASTContext &Ctx,
 }
 
 static void AddAttributesFromAssumes(llvm::AttrBuilder &FuncAttrs,
-                                     const Decl *Callee, const Decl *Caller,
-                                     bool AssumptionOnCallSite) {
+                                     const Decl *Callee) {
   if (!Callee)
     return;
 
@@ -1757,10 +1756,6 @@ static void AddAttributesFromAssumes(llvm::AttrBuilder &FuncAttrs,
 
   for (const AssumptionAttr *AA : Callee->specific_attrs<AssumptionAttr>())
     AA->getAssumption().split(Attrs, ",");
-
-  if (Caller && Caller->hasAttrs() && AssumptionOnCallSite)
-    for (const AssumptionAttr *AA : Caller->specific_attrs<AssumptionAttr>())
-      AA->getAssumption().split(Attrs, ",");
 
   if (!Attrs.empty())
     FuncAttrs.addAttribute(llvm::AssumptionAttrKey,
@@ -1848,6 +1843,8 @@ void CodeGenModule::getDefaultFunctionAttributes(StringRef Name,
       FuncAttrs.addAttribute("no-infs-fp-math", "true");
     if (LangOpts.NoHonorNaNs)
       FuncAttrs.addAttribute("no-nans-fp-math", "true");
+    if (LangOpts.ApproxFunc)
+      FuncAttrs.addAttribute("approx-func-fp-math", "true");
     if (LangOpts.UnsafeFPMath)
       FuncAttrs.addAttribute("unsafe-fp-math", "true");
     if (CodeGenOpts.SoftFloat)
@@ -2017,10 +2014,12 @@ static bool DetermineNoUndef(QualType QTy, CodeGenTypes &Types,
 ///     attributes that restrict how the frontend generates code must be
 ///     added here rather than getDefaultFunctionAttributes.
 ///
-void CodeGenModule::ConstructAttributeList(
-    StringRef Name, const CGFunctionInfo &FI, CGCalleeInfo CalleeInfo,
-    llvm::AttributeList &AttrList, unsigned &CallingConv, bool AttrOnCallSite,
-    bool IsThunk, const Decl *Caller) {
+void CodeGenModule::ConstructAttributeList(StringRef Name,
+                                           const CGFunctionInfo &FI,
+                                           CGCalleeInfo CalleeInfo,
+                                           llvm::AttributeList &AttrList,
+                                           unsigned &CallingConv,
+                                           bool AttrOnCallSite, bool IsThunk) {
   llvm::AttrBuilder FuncAttrs;
   llvm::AttrBuilder RetAttrs;
 
@@ -2038,12 +2037,9 @@ void CodeGenModule::ConstructAttributeList(
 
   const Decl *TargetDecl = CalleeInfo.getCalleeDecl().getDecl();
 
-  // Only attach assumptions to call sites in OpenMP mode.
-  bool AssumptionOnCallSite = getLangOpts().OpenMP && AttrOnCallSite;
-
   // Attach assumption attributes to the declaration. If this is a call
   // site, attach assumptions from the caller to the call as well.
-  AddAttributesFromAssumes(FuncAttrs, TargetDecl, Caller, AssumptionOnCallSite);
+  AddAttributesFromAssumes(FuncAttrs, TargetDecl);
 
   bool HasOptnone = false;
   // The NoBuiltinAttr attached to the target FunctionDecl.
@@ -2799,7 +2795,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
             // so the UBSAN check could function.
             llvm::ConstantInt *AlignmentCI =
                 cast<llvm::ConstantInt>(EmitScalarExpr(AVAttr->getAlignment()));
-            unsigned AlignmentInt =
+            uint64_t AlignmentInt =
                 AlignmentCI->getLimitedValue(llvm::Value::MaximumAlignment);
             if (AI->getParamAlign().valueOrOne() < AlignmentInt) {
               AI->removeAttr(llvm::Attribute::AttrKind::Alignment);
@@ -5021,12 +5017,12 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         auto scalarAlign = CGM.getDataLayout().getPrefTypeAlignment(scalarType);
 
         // Materialize to a temporary.
-        addr = CreateTempAlloca(
-            RV.getScalarVal()->getType(),
-            CharUnits::fromQuantity(std::max(
-                (unsigned)layout->getAlignment().value(), scalarAlign)),
-            "tmp",
-            /*ArraySize=*/nullptr, &AllocaAddr);
+        addr =
+            CreateTempAlloca(RV.getScalarVal()->getType(),
+                             CharUnits::fromQuantity(std::max(
+                                 layout->getAlignment().value(), scalarAlign)),
+                             "tmp",
+                             /*ArraySize=*/nullptr, &AllocaAddr);
         tempSize = EmitLifetimeStart(scalarSize, AllocaAddr.getPointer());
 
         Builder.CreateStore(RV.getScalarVal(), addr);
@@ -5178,7 +5174,7 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   CGM.ConstructAttributeList(CalleePtr->getName(), CallInfo,
                              Callee.getAbstractInfo(), Attrs, CallingConv,
                              /*AttrOnCallSite=*/true,
-                             /*IsThunk=*/false, CurFuncDecl);
+                             /*IsThunk=*/false);
 
   if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(CurFuncDecl))
     if (FD->hasAttr<StrictFPAttr>())

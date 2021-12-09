@@ -1084,14 +1084,10 @@ namespace {
 
     void performLifetimeExtension() {
       // Disable the cleanups for lifetime-extended temporaries.
-      CleanupStack.erase(std::remove_if(CleanupStack.begin(),
-                                        CleanupStack.end(),
-                                        [](Cleanup &C) {
-                                          return !C.isDestroyedAtEndOf(
-                                              ScopeKind::FullExpression);
-                                        }),
-                         CleanupStack.end());
-     }
+      llvm::erase_if(CleanupStack, [](Cleanup &C) {
+        return !C.isDestroyedAtEndOf(ScopeKind::FullExpression);
+      });
+    }
 
     /// Throw away any remaining cleanups at the end of evaluation. If any
     /// cleanups would have had a side-effect, note that as an unmodeled
@@ -2757,8 +2753,8 @@ static bool handleIntIntBinOp(EvalInfo &Info, const Expr *E, const APSInt &LHS,
     Result = (Opcode == BO_Rem ? LHS % RHS : LHS / RHS);
     // Check for overflow case: INT_MIN / -1 or INT_MIN % -1. APSInt supports
     // this operation and gives the two's complement result.
-    if (RHS.isNegative() && RHS.isAllOnesValue() &&
-        LHS.isSigned() && LHS.isMinSignedValue())
+    if (RHS.isNegative() && RHS.isAllOnes() && LHS.isSigned() &&
+        LHS.isMinSignedValue())
       return HandleOverflow(Info, E, -LHS.extend(LHS.getBitWidth() + 1),
                             E->getType());
     return true;
@@ -5195,7 +5191,10 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
       }
     }
     bool Cond;
-    if (!EvaluateCond(Info, IS->getConditionVariable(), IS->getCond(), Cond))
+    if (IS->isConsteval())
+      Cond = IS->isNonNegatedConsteval();
+    else if (!EvaluateCond(Info, IS->getConditionVariable(), IS->getCond(),
+                           Cond))
       return ESR_Failed;
 
     if (const Stmt *SubStmt = Cond ? IS->getThen() : IS->getElse()) {
@@ -5319,6 +5318,11 @@ static EvalStmtResult EvaluateStmt(StmtResult &Result, EvalInfo &Info,
         return ESR_Failed;
       return ESR;
     }
+
+    // In error-recovery cases it's possible to get here even if we failed to
+    // synthesize the __begin and __end variables.
+    if (!FS->getBeginStmt() || !FS->getEndStmt() || !FS->getCond())
+      return ESR_Failed;
 
     // Create the __begin and __end iterators.
     ESR = EvaluateStmt(Result, Info, FS->getBeginStmt());
@@ -7479,7 +7483,7 @@ public:
     const Expr *Source = E->getSourceExpr();
     if (!Source)
       return Error(E);
-    if (Source == E) { // sanity checking.
+    if (Source == E) {
       assert(0 && "OpaqueValueExpr recursively refers to itself");
       return Error(E);
     }
@@ -10611,8 +10615,8 @@ bool ArrayExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E,
     for (unsigned I = 0; I != N; ++I)
       if (!VisitCXXConstructExpr(E, ArrayElt, &Value->getArrayInitializedElt(I),
                                  CAT->getElementType()) ||
-          !HandleLValueArrayAdjustment(Info, E, ArrayElt,
-                                       CAT->getElementType(), 1))
+          !HandleLValueArrayAdjustment(Info, E, ArrayElt, CAT->getElementType(),
+                                       1))
         return false;
 
     return true;
@@ -15324,7 +15328,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
           llvm::APSInt REval = Exp->getRHS()->EvaluateKnownConstInt(Ctx);
           if (REval == 0)
             return ICEDiag(IK_ICEIfUnevaluated, E->getBeginLoc());
-          if (REval.isSigned() && REval.isAllOnesValue()) {
+          if (REval.isSigned() && REval.isAllOnes()) {
             llvm::APSInt LEval = Exp->getLHS()->EvaluateKnownConstInt(Ctx);
             if (LEval.isMinSignedValue())
               return ICEDiag(IK_ICEIfUnevaluated, E->getBeginLoc());
@@ -15502,8 +15506,10 @@ bool Expr::isIntegerConstantExpr(const ASTContext &Ctx,
 Optional<llvm::APSInt> Expr::getIntegerConstantExpr(const ASTContext &Ctx,
                                                     SourceLocation *Loc,
                                                     bool isEvaluated) const {
-  assert(!isValueDependent() &&
-         "Expression evaluator can't be called on a dependent expression.");
+  if (isValueDependent()) {
+    // Expression evaluator can't succeed on a dependent expression.
+    return None;
+  }
 
   APSInt Value;
 

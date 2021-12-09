@@ -646,10 +646,6 @@ public:
            Inst.getOpcode() == X86::LEAVE64;
   }
 
-  bool isEnter(const MCInst &Inst) const override {
-    return Inst.getOpcode() == X86::ENTER;
-  }
-
   bool isMoveMem2Reg(const MCInst &Inst) const override {
     switch (Inst.getOpcode()) {
     case X86::MOV16rm:
@@ -2874,7 +2870,7 @@ public:
   }
 
   bool createReturn(MCInst &Inst) const override {
-    Inst.setOpcode(X86::RETQ);
+    Inst.setOpcode(X86::RET64);
     return true;
   }
 
@@ -3276,21 +3272,6 @@ public:
     Inst.setOpcode(X86::CALL64pcrel32);
     Inst.addOperand(MCOperand::createExpr(
         MCSymbolRefExpr::create(Target, MCSymbolRefExpr::VK_None, *Ctx)));
-    return true;
-  }
-
-  bool createIndirectCall(MCInst &Inst, const MCSymbol *TargetLocation,
-                          MCContext *Ctx, bool IsTailCall) override {
-    Inst.setOpcode(IsTailCall ? X86::JMP32m : X86::CALL64m);
-    Inst.addOperand(MCOperand::createReg(X86::RIP));        // BaseReg
-    Inst.addOperand(MCOperand::createImm(1));               // ScaleAmt
-    Inst.addOperand(MCOperand::createReg(X86::NoRegister)); // IndexReg
-    Inst.addOperand(MCOperand::createExpr(                  // Displacement
-        MCSymbolRefExpr::create(TargetLocation, MCSymbolRefExpr::VK_None,
-                                *Ctx)));
-    Inst.addOperand(MCOperand::createReg(X86::NoRegister)); // AddrSegmentReg
-    if (IsTailCall)
-      setTailCall(Inst);
     return true;
   }
 

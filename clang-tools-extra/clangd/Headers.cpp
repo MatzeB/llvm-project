@@ -22,12 +22,12 @@
 
 namespace clang {
 namespace clangd {
-namespace {
 
-class RecordHeaders : public PPCallbacks {
+class IncludeStructure::RecordHeaders : public PPCallbacks {
 public:
-  RecordHeaders(const SourceManager &SM, IncludeStructure *Out)
-      : SM(SM), Out(Out) {}
+  RecordHeaders(const SourceManager &SM, HeaderSearch &HeaderInfo,
+                IncludeStructure *Out)
+      : SM(SM), HeaderInfo(HeaderInfo), Out(Out) {}
 
   // Record existing #includes - both written and resolved paths. Only #includes
   // in the main file are collected.
@@ -56,6 +56,8 @@ public:
           SM.getLineNumber(SM.getFileID(HashLoc), Inc.HashOffset) - 1;
       Inc.FileKind = FileKind;
       Inc.Directive = IncludeTok.getIdentifierInfo()->getPPKeywordID();
+      if (File)
+        Inc.HeaderID = static_cast<unsigned>(Out->getOrCreateID(File));
     }
 
     // Record include graph (not just for main-file includes)
@@ -67,8 +69,8 @@ public:
         // Treat as if included from the main file.
         IncludingFileEntry = SM.getFileEntryForID(MainFID);
       }
-      auto IncludingID = Out->getOrCreateID(IncludingFileEntry, SM),
-           IncludedID = Out->getOrCreateID(File, SM);
+      auto IncludingID = Out->getOrCreateID(IncludingFileEntry),
+           IncludedID = Out->getOrCreateID(File);
       Out->IncludeChildren[IncludingID].push_back(IncludedID);
     }
   }
@@ -83,10 +85,17 @@ public:
         InBuiltinFile = true;
       }
       break;
-    case PPCallbacks::ExitFile:
+    case PPCallbacks::ExitFile: {
       if (PrevFID == BuiltinFile)
         InBuiltinFile = false;
+      // At file exit time HeaderSearchInfo is valid and can be used to
+      // determine whether the file was a self-contained header or not.
+      if (const FileEntry *FE = SM.getFileEntryForID(PrevFID))
+        if (!isSelfContainedHeader(FE, PrevFID, SM, HeaderInfo))
+          Out->NonSelfContained.insert(
+              *Out->getID(SM.getFileEntryForID(PrevFID)));
       break;
+    }
     case PPCallbacks::RenameFile:
     case PPCallbacks::SystemHeaderPragma:
       break;
@@ -95,6 +104,7 @@ public:
 
 private:
   const SourceManager &SM;
+  HeaderSearch &HeaderInfo;
   // Set after entering the <built-in> file.
   FileID BuiltinFile;
   // Indicates whether <built-in> file is part of include stack.
@@ -102,8 +112,6 @@ private:
 
   IncludeStructure *Out;
 };
-
-} // namespace
 
 bool isLiteralInclude(llvm::StringRef Include) {
   return Include.startswith("<") || Include.startswith("\"");
@@ -150,16 +158,17 @@ llvm::SmallVector<llvm::StringRef, 1> getRankedIncludes(const Symbol &Sym) {
 }
 
 std::unique_ptr<PPCallbacks>
-collectIncludeStructureCallback(const SourceManager &SM,
-                                IncludeStructure *Out) {
-  return std::make_unique<RecordHeaders>(SM, Out);
+IncludeStructure::collect(const CompilerInstance &CI) {
+  auto &SM = CI.getSourceManager();
+  MainFileEntry = SM.getFileEntryForID(SM.getMainFileID());
+  return std::make_unique<RecordHeaders>(
+      SM, CI.getPreprocessor().getHeaderSearchInfo(), this);
 }
 
 llvm::Optional<IncludeStructure::HeaderID>
-IncludeStructure::getID(const FileEntry *Entry,
-                        const SourceManager &SM) const {
+IncludeStructure::getID(const FileEntry *Entry) const {
   // HeaderID of the main file is always 0;
-  if (SM.getMainFileID() == SM.translateFile(Entry)) {
+  if (Entry == MainFileEntry) {
     return static_cast<IncludeStructure::HeaderID>(0u);
   }
   auto It = UIDToIndex.find(Entry->getUniqueID());
@@ -169,12 +178,12 @@ IncludeStructure::getID(const FileEntry *Entry,
 }
 
 IncludeStructure::HeaderID
-IncludeStructure::getOrCreateID(const FileEntry *Entry,
-                                const SourceManager &SM) {
-  // Main file's FileID was not known at IncludeStructure creation time.
-  if (SM.getMainFileID() == SM.translateFile(Entry)) {
-    UIDToIndex[Entry->getUniqueID()] =
-        static_cast<IncludeStructure::HeaderID>(0u);
+IncludeStructure::getOrCreateID(const FileEntry *Entry) {
+  // Main file's FileEntry was not known at IncludeStructure creation time.
+  if (Entry == MainFileEntry) {
+    if (RealPathNames.front().empty())
+      RealPathNames.front() = MainFileEntry->tryGetRealPathName().str();
+    return MainFileID;
   }
   auto R = UIDToIndex.try_emplace(
       Entry->getUniqueID(),

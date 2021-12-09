@@ -531,12 +531,10 @@ std::unique_ptr<DebugBufferVector> DebugAbbrevWriter::finalize() {
     // We expect abbrev_offset to always be zero for DWO units as there
     // should be one CU per DWO, and TUs should share the same abbreviation
     // set with the CU.
-    // NOTE: this check could be expensive for DWPs as it iterates over
-    //       all units and we invoke it for every unit. Hence only run
-    //       it once per DWP.
+    // For DWP AbbreviationsOffset is an Abbrev contribution in the DWP file, so
+    // can be none zero. Thus we are skipping the check for DWP.
     bool IsDWP = !Context.getCUIndex().getRows().empty();
-    static bool CheckedDWP = false;
-    if (!IsDWP || !CheckedDWP) {
+    if (!IsDWP) {
       for (const std::unique_ptr<DWARFUnit> &Unit : Context.dwo_units()) {
         if (Unit->getAbbreviationsOffset() != 0) {
           errs() << "BOLT-ERROR: detected DWO unit with non-zero abbr_offset. "
@@ -544,8 +542,6 @@ std::unique_ptr<DebugBufferVector> DebugAbbrevWriter::finalize() {
           exit(1);
         }
       }
-      if (IsDWP)
-        CheckedDWP = true;
     }
 
     // Issue abbreviations for the DWO CU only.
@@ -782,13 +778,22 @@ static inline void emitDwarfLineTable(
 }
 
 void DwarfLineTable::emitCU(MCStreamer *MCOS, MCDwarfLineTableParams Params,
-                            Optional<MCDwarfLineStr> &LineStr) const {
+                            Optional<MCDwarfLineStr> &LineStr,
+                            BinaryContext &BC) const {
   if (!RawData.empty()) {
     assert(MCLineSections.getMCLineEntries().empty() &&
            InputSequences.empty() &&
            "cannot combine raw data with new line entries");
     MCOS->emitLabel(getLabel());
     MCOS->emitBytes(RawData);
+
+    // Emit fake relocation for RuntimeDyld to always allocate the section.
+    //
+    // FIXME: remove this once RuntimeDyld stops skipping allocatable sections
+    //        without relocations.
+    MCOS->emitRelocDirective(
+        *MCConstantExpr::create(0, *BC.Ctx), "BFD_RELOC_NONE",
+        MCSymbolRefExpr::create(getLabel(), *BC.Ctx), SMLoc(), *BC.STI);
 
     return;
   }
@@ -830,7 +835,7 @@ void DwarfLineTable::emit(BinaryContext &BC, MCStreamer &Streamer) {
 
   // Handle the rest of the Compile Units.
   for (auto &CUIDTablePair : LineTables) {
-    CUIDTablePair.second.emitCU(&Streamer, Params, LineStr);
+    CUIDTablePair.second.emitCU(&Streamer, Params, LineStr, BC);
   }
 }
 

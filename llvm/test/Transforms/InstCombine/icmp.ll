@@ -100,8 +100,8 @@ define <2 x i1> @test5_zero() {
 
 define i32 @test6(i32 %a, i32 %b) {
 ; CHECK-LABEL: @test6(
-; CHECK-NEXT:    [[A_LOBIT_NEG:%.*]] = ashr i32 [[A:%.*]], 31
-; CHECK-NEXT:    [[F:%.*]] = and i32 [[A_LOBIT_NEG]], [[B:%.*]]
+; CHECK-NEXT:    [[ISNEG:%.*]] = icmp slt i32 [[A:%.*]], 0
+; CHECK-NEXT:    [[F:%.*]] = select i1 [[ISNEG]], i32 [[B:%.*]], i32 0
 ; CHECK-NEXT:    ret i32 [[F]]
 ;
   %c = icmp sle i32 %a, -1
@@ -676,8 +676,8 @@ define i1 @test37_extra_uses(i32 %x, i32 %y, i32 %z) {
 define i32 @neg_max_s32(i32 %x, i32 %y) {
 ; CHECK-LABEL: @neg_max_s32(
 ; CHECK-NEXT:    [[C:%.*]] = icmp slt i32 [[Y:%.*]], [[X:%.*]]
-; CHECK-NEXT:    [[S_V:%.*]] = select i1 [[C]], i32 [[Y]], i32 [[X]]
-; CHECK-NEXT:    ret i32 [[S_V]]
+; CHECK-NEXT:    [[S_NEG:%.*]] = select i1 [[C]], i32 [[Y]], i32 [[X]]
+; CHECK-NEXT:    ret i32 [[S_NEG]]
 ;
   %nx = sub nsw i32 0, %x
   %ny = sub nsw i32 0, %y
@@ -690,8 +690,8 @@ define i32 @neg_max_s32(i32 %x, i32 %y) {
 define <4 x i32> @neg_max_v4s32(<4 x i32> %x, <4 x i32> %y) {
 ; CHECK-LABEL: @neg_max_v4s32(
 ; CHECK-NEXT:    [[C:%.*]] = icmp sgt <4 x i32> [[Y:%.*]], [[X:%.*]]
-; CHECK-NEXT:    [[S_V:%.*]] = select <4 x i1> [[C]], <4 x i32> [[X]], <4 x i32> [[Y]]
-; CHECK-NEXT:    ret <4 x i32> [[S_V]]
+; CHECK-NEXT:    [[S_NEG:%.*]] = select <4 x i1> [[C]], <4 x i32> [[X]], <4 x i32> [[Y]]
+; CHECK-NEXT:    ret <4 x i32> [[S_NEG]]
 ;
   %nx = sub nsw <4 x i32> zeroinitializer, %x
   %ny = sub nsw <4 x i32> zeroinitializer, %y
@@ -1129,9 +1129,13 @@ define void @test58() {
 }
 declare i32 @test58_d(i64)
 
+; Negative test: GEP inbounds may cross sign boundary.
 define i1 @test62(i8* %a) {
 ; CHECK-LABEL: @test62(
-; CHECK-NEXT:    ret i1 true
+; CHECK-NEXT:    [[ARRAYIDX1:%.*]] = getelementptr inbounds i8, i8* [[A:%.*]], i64 1
+; CHECK-NEXT:    [[ARRAYIDX2:%.*]] = getelementptr inbounds i8, i8* [[A]], i64 10
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i8* [[ARRAYIDX1]], [[ARRAYIDX2]]
+; CHECK-NEXT:    ret i1 [[CMP]]
 ;
   %arrayidx1 = getelementptr inbounds i8, i8* %a, i64 1
   %arrayidx2 = getelementptr inbounds i8, i8* %a, i64 10
@@ -1141,7 +1145,10 @@ define i1 @test62(i8* %a) {
 
 define i1 @test62_as1(i8 addrspace(1)* %a) {
 ; CHECK-LABEL: @test62_as1(
-; CHECK-NEXT:    ret i1 true
+; CHECK-NEXT:    [[ARRAYIDX1:%.*]] = getelementptr inbounds i8, i8 addrspace(1)* [[A:%.*]], i16 1
+; CHECK-NEXT:    [[ARRAYIDX2:%.*]] = getelementptr inbounds i8, i8 addrspace(1)* [[A]], i16 10
+; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i8 addrspace(1)* [[ARRAYIDX1]], [[ARRAYIDX2]]
+; CHECK-NEXT:    ret i1 [[CMP]]
 ;
   %arrayidx1 = getelementptr inbounds i8, i8 addrspace(1)* %a, i64 1
   %arrayidx2 = getelementptr inbounds i8, i8 addrspace(1)* %a, i64 10

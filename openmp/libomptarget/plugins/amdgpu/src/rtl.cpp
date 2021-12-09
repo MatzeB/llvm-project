@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// RTL for hsa machine
+// RTL for AMD hsa machine
 //
 //===----------------------------------------------------------------------===//
 
@@ -30,6 +30,7 @@
 #include "internal.h"
 #include "rt.h"
 
+#include "DeviceEnvironment.h"
 #include "get_elf_mach_gfx_name.h"
 #include "omptargetplugin.h"
 #include "print_tracing.h"
@@ -594,9 +595,7 @@ public:
       hsa_status_t Err = hsa_amd_agent_iterate_memory_pools(
           Agent, core::addMemoryPool, static_cast<void *>(&HostPools));
       if (Err != HSA_STATUS_SUCCESS) {
-        DP("[%s:%d] %s failed: %s\n", __FILE__, __LINE__,
-           "Iterate all memory pools", get_error_string(Err));
-        return Err;
+        DP("addMemoryPool returned %s, continuing\n", get_error_string(Err));
       }
     }
 
@@ -801,14 +800,6 @@ public:
 };
 
 pthread_mutex_t SignalPoolT::mutex = PTHREAD_MUTEX_INITIALIZER;
-
-// TODO: May need to drop the trailing to fields until deviceRTL is updated
-struct omptarget_device_environmentTy {
-  int32_t debug_level; // gets value of envvar LIBOMPTARGET_DEVICE_RTL_DEBUG
-                       // only useful for Debug build of deviceRTLs
-  int32_t num_devices; // gets number of active offload devices
-  int32_t device_num;  // gets a value 0 to num_devices-1
-};
 
 static RTLDeviceInfoTy DeviceInfo;
 
@@ -1300,15 +1291,12 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id,
 }
 
 struct device_environment {
-  // initialise an omptarget_device_environmentTy in the deviceRTL
+  // initialise an DeviceEnvironmentTy in the deviceRTL
   // patches around differences in the deviceRTL between trunk, aomp,
   // rocmcc. Over time these differences will tend to zero and this class
   // simplified.
-  // Symbol may be in .data or .bss, and may be missing fields:
-  //  - aomp has debug_level, num_devices, device_num
-  //  - trunk has debug_level
-  //  - under review in trunk is debug_level, device_num
-  //  - rocmcc matches aomp, patch to swap num_devices and device_num
+  // Symbol may be in .data or .bss, and may be missing fields, todo:
+  // review aomp/trunk/rocm and simplify the following
 
   // The symbol may also have been deadstripped because the device side
   // accessors were unused.
@@ -1318,7 +1306,7 @@ struct device_environment {
   // gpu (trunk) and initialize after loading.
   const char *sym() { return "omptarget_device_environment"; }
 
-  omptarget_device_environmentTy host_device_env;
+  DeviceEnvironmentTy host_device_env;
   symbol_info si;
   bool valid = false;
 
@@ -1329,14 +1317,13 @@ struct device_environment {
                      __tgt_device_image *image, const size_t img_size)
       : image(image), img_size(img_size) {
 
-    host_device_env.num_devices = number_devices;
-    host_device_env.device_num = device_id;
-    host_device_env.debug_level = 0;
-#ifdef OMPTARGET_DEBUG
+    host_device_env.NumDevices = number_devices;
+    host_device_env.DeviceNum = device_id;
+    host_device_env.DebugKind = 0;
+    host_device_env.DynamicMemSize = 0;
     if (char *envStr = getenv("LIBOMPTARGET_DEVICE_RTL_DEBUG")) {
-      host_device_env.debug_level = std::stoi(envStr);
+      host_device_env.DebugKind = std::stoi(envStr);
     }
-#endif
 
     int rc = get_symbol_info_without_loading((char *)image->ImageStart,
                                              img_size, sym(), &si);
@@ -1374,7 +1361,7 @@ struct device_environment {
       if (!in_image()) {
         DP("Setting global device environment after load (%u bytes)\n",
            si.size);
-        int device_id = host_device_env.device_num;
+        int device_id = host_device_env.DeviceNum;
         auto &SymbolInfo = DeviceInfo.SymbolInfoTable[device_id];
         void *state_ptr;
         uint32_t state_ptr_size;
@@ -1430,9 +1417,9 @@ __tgt_target_table *__tgt_rtl_load_binary_locked(int32_t device_id,
   // This function loads the device image onto gpu[device_id] and does other
   // per-image initialization work. Specifically:
   //
-  // - Initialize an omptarget_device_environmentTy instance embedded in the
+  // - Initialize an DeviceEnvironmentTy instance embedded in the
   //   image at the symbol "omptarget_device_environment"
-  //   Fields debug_level, device_num, num_devices. Used by the deviceRTL.
+  //   Fields DebugKind, DeviceNum, NumDevices. Used by the deviceRTL.
   //
   // - Allocate a large array per-gpu (could be moved to init_device)
   //   - Read a uint64_t at symbol omptarget_nvptx_device_State_size
@@ -1633,19 +1620,21 @@ __tgt_target_table *__tgt_rtl_load_binary_locked(int32_t device_id,
 
     DP("to find the kernel name: %s size: %lu\n", e->name, strlen(e->name));
 
-    uint32_t kernarg_segment_size;
+    // errors in kernarg_segment_size previously treated as = 0 (or as undef)
+    uint32_t kernarg_segment_size = 0;
     auto &KernelInfoMap = DeviceInfo.KernelInfoTable[device_id];
-    hsa_status_t err = interop_hsa_get_kernel_info(
-        KernelInfoMap, device_id, e->name,
-        HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
-        &kernarg_segment_size);
-
-    // each arg is a void * in this openmp implementation
-    uint32_t arg_num = kernarg_segment_size / sizeof(void *);
-    std::vector<size_t> arg_sizes(arg_num);
-    for (std::vector<size_t>::iterator it = arg_sizes.begin();
-         it != arg_sizes.end(); it++) {
-      *it = sizeof(void *);
+    hsa_status_t err = HSA_STATUS_SUCCESS;
+    if (!e->name) {
+      err = HSA_STATUS_ERROR;
+    } else {
+      std::string kernelStr = std::string(e->name);
+      auto It = KernelInfoMap.find(kernelStr);
+      if (It != KernelInfoMap.end()) {
+        atl_kernel_info_t info = It->second;
+        kernarg_segment_size = info.kernel_segment_size;
+      } else {
+        err = HSA_STATUS_ERROR;
+      }
     }
 
     // default value GENERIC (in case symbol is missing from cubin file)
@@ -2082,7 +2071,7 @@ int32_t __tgt_rtl_run_target_team_region_locked(
   const uint32_t sgpr_spill_count = KernelInfoEntry.sgpr_spill_count;
   const uint32_t vgpr_spill_count = KernelInfoEntry.vgpr_spill_count;
 
-  assert(arg_num == (int)KernelInfoEntry.num_args);
+  assert(arg_num == (int)KernelInfoEntry.explicit_argument_count);
 
   /*
    * Set limit based on ThreadsPerGroup and GroupsPerDevice
@@ -2184,14 +2173,31 @@ int32_t __tgt_rtl_run_target_team_region_locked(
         // under a multiple reader lock, not a writer lock.
         static pthread_mutex_t hostcall_init_lock = PTHREAD_MUTEX_INITIALIZER;
         pthread_mutex_lock(&hostcall_init_lock);
-        impl_args->hostcall_ptr = hostrpc_assign_buffer(
+        unsigned long buffer = hostrpc_assign_buffer(
             DeviceInfo.HSAAgents[device_id], queue, device_id);
         pthread_mutex_unlock(&hostcall_init_lock);
-        if (!impl_args->hostcall_ptr) {
+        if (!buffer) {
           DP("hostrpc_assign_buffer failed, gpu would dereference null and "
              "error\n");
           return OFFLOAD_FAIL;
         }
+
+        if (KernelInfoEntry.implicit_argument_count >= 4) {
+          // Initialise pointer for implicit_argument_count != 0 ABI
+          // Guess that the right implicit argument is at offset 24 after
+          // the explicit arguments. In the future, should be able to read
+          // the offset from msgpack. Clang is not annotating it at present.
+          uint64_t Offset =
+              sizeof(void *) * (KernelInfoEntry.explicit_argument_count + 3);
+          if ((Offset + 8) > (ArgPool->kernarg_segment_size)) {
+            DP("Bad offset of hostcall, exceeds kernarg segment size\n");
+          } else {
+            memcpy(static_cast<char *>(kernarg) + Offset, &buffer, 8);
+          }
+        }
+
+        // initialise pointer for implicit_argument_count == 0 ABI
+        impl_args->hostcall_ptr = buffer;
       }
 
       packet->kernarg_address = kernarg;

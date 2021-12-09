@@ -675,7 +675,7 @@ TEST(LocateSymbol, All) {
 
       R"cpp(// Declaration of explicit template specialization
         template <typename T>
-        struct $decl[[Foo]] {};
+        struct $decl[[$def[[Foo]]]] {};
 
         template <>
         struct Fo^o<int> {};
@@ -683,10 +683,23 @@ TEST(LocateSymbol, All) {
 
       R"cpp(// Declaration of partial template specialization
         template <typename T>
-        struct $decl[[Foo]] {};
+        struct $decl[[$def[[Foo]]]] {};
 
         template <typename T>
         struct Fo^o<T*> {};
+      )cpp",
+
+      R"cpp(// Definition on ClassTemplateDecl
+        namespace ns {
+          // Forward declaration.
+          template<typename T>
+          struct $decl[[Foo]];
+
+          template <typename T>
+          struct $def[[Foo]] {};
+        }
+
+        using ::ns::Fo^o;
       )cpp",
 
       R"cpp(// auto builtin type (not supported)
@@ -878,6 +891,19 @@ TEST(LocateSymbol, All) {
           enum class E { [[A]], B };
           E e = E::A^;
         };
+      )cpp",
+
+      R"cpp(// Enum base
+        typedef int $decl[[MyTypeDef]];
+        enum Foo : My^TypeDef {};
+      )cpp",
+      R"cpp(// Enum base
+        typedef int $decl[[MyTypeDef]];
+        enum Foo : My^TypeDef;
+      )cpp",
+      R"cpp(// Enum base
+        using $decl[[MyTypeDef]] = int;
+        enum Foo : My^TypeDef {};
       )cpp",
 
       R"objc(
@@ -1780,11 +1806,13 @@ void checkFindRefs(llvm::StringRef Test, bool UseIndex = false) {
         AllOf(RangeIs(R), AttrsAre(ReferencesResult::Declaration |
                                    ReferencesResult::Definition |
                                    ReferencesResult::Override)));
-  EXPECT_THAT(
-      findReferences(AST, T.point(), 0, UseIndex ? TU.index().get() : nullptr)
-          .References,
-      UnorderedElementsAreArray(ExpectedLocations))
-      << Test;
+  for (const auto &P : T.points()) {
+    EXPECT_THAT(findReferences(AST, P, 0, UseIndex ? TU.index().get() : nullptr)
+                    .References,
+                UnorderedElementsAreArray(ExpectedLocations))
+        << "Failed for Refs at " << P << "\n"
+        << Test;
+  }
 }
 
 TEST(FindReferences, WithinAST) {
@@ -1951,6 +1979,20 @@ TEST(FindReferences, WithinAST) {
           [[f^oo]](s);
         }
       )cpp",
+
+      // Enum base
+      R"cpp(
+        typedef int $def[[MyTypeD^ef]];
+        enum MyEnum : [[MyTy^peDef]] { };
+      )cpp",
+      R"cpp(
+        typedef int $def[[MyType^Def]];
+        enum MyEnum : [[MyTypeD^ef]];
+      )cpp",
+      R"cpp(
+        using $def[[MyTypeD^ef]] = int;
+        enum MyEnum : [[MyTy^peDef]] { };
+      )cpp",
   };
   for (const char *Test : Tests)
     checkFindRefs(Test);
@@ -1961,7 +2003,7 @@ TEST(FindReferences, IncludeOverrides) {
       R"cpp(
         class Base {
         public:
-          virtual void $decl[[f^unc]]() = 0;
+          virtu^al void $decl[[f^unc]]() ^= ^0;
         };
         class Derived : public Base {
         public:
@@ -1990,13 +2032,13 @@ TEST(FindReferences, RefsToBaseMethod) {
         };
         class Derived : public Base {
         public:
-          void $decl[[fu^nc]]() override;
+          void $decl[[fu^nc]]() over^ride;
         };
         void test(BaseBase* BB, Base* B, Derived* D) {
           // refs to overridden methods in complete type hierarchy are reported.
           BB->[[func]]();
           B->[[func]]();
-          D->[[func]]();
+          D->[[fu^nc]]();
         })cpp";
   checkFindRefs(Test, /*UseIndex=*/true);
 }

@@ -38,6 +38,16 @@ public:
   virtual void generateProfile() = 0;
   void write();
 
+  static uint32_t getDuplicationFactor(unsigned Discriminator) {
+    return llvm::DILocation::getDuplicationFactorFromDiscriminator(
+        Discriminator);
+  }
+
+  static uint32_t getBaseDiscriminator(unsigned Discriminator) {
+    return DILocation::getBaseDiscriminatorFromDiscriminator(
+        Discriminator, /* IsFSDiscriminator */ false);
+  }
+
 protected:
   // Use SampleProfileWriter to serialize profile map
   void write(std::unique_ptr<SampleProfileWriter> Writer,
@@ -64,6 +74,23 @@ protected:
   void updateBodySamplesforFunctionProfile(FunctionSamples &FunctionProfile,
                                            const SampleContextFrame &LeafLoc,
                                            uint64_t Count);
+  void updateTotalSamples();
+
+  StringRef getCalleeNameForOffset(uint64_t TargetOffset);
+
+  void computeSummaryAndThreshold();
+
+  void calculateAndShowDensity(const SampleProfileMap &Profiles);
+
+  double calculateDensity(const SampleProfileMap &Profiles,
+                          uint64_t HotCntThreshold);
+
+  void showDensitySuggestion(double Density);
+
+  // Thresholds from profile summary to answer isHotCount/isColdCount queries.
+  uint64_t HotCountThreshold;
+
+  uint64_t ColdCountThreshold;
 
   // Used by SampleProfileWriter
   SampleProfileMap ProfileMap;
@@ -89,11 +116,11 @@ private:
   // inline stack and meanwhile it adds the total samples for each frame's
   // function profile.
   FunctionSamples &
-  getLeafProfileAndAddTotalSamples(const SampleContextFrameVector &FrameVec,
-                                   uint64_t Count);
+  getLeafFrameProfile(const SampleContextFrameVector &FrameVec);
   void populateBodySamplesForAllFunctions(const RangeSample &RangeCounter);
   void
   populateBoundarySamplesForAllFunctions(const BranchSample &BranchCounters);
+  void postProcessProfiles();
 };
 
 using ProbeCounterMap =
@@ -235,8 +262,6 @@ private:
   // and trimming cold profiles, running preinliner on profiles.
   void postProcessProfiles();
 
-  void computeSummaryAndThreshold();
-
   void populateBodySamplesForFunction(FunctionSamples &FunctionProfile,
                                       const RangeSample &RangeCounters);
   void populateBoundarySamplesForFunction(SampleContextFrames ContextId,
@@ -259,9 +284,6 @@ private:
   FunctionSamples &
   getFunctionProfileForLeafProbe(SampleContextFrames ContextStack,
                                  const MCDecodedPseudoProbe *LeafProbe);
-  // Thresholds from profile summary to answer isHotCount/isColdCount queries.
-  uint64_t HotCountThreshold;
-  uint64_t ColdCountThreshold;
 
   // Underlying context table serves for sample profile writer.
   std::unordered_set<SampleContextFrameVector, SampleContextFrameHash> Contexts;

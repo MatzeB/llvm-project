@@ -1,4 +1,4 @@
-//===------------------------- cxa_default_handlers.cpp -------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -105,7 +105,8 @@ _LIBCPP_SAFE_STATIC std::terminate_handler __cxa_terminate_handler = default_ter
 _LIBCXXABI_DATA_VIS
 _LIBCPP_SAFE_STATIC std::unexpected_handler __cxa_unexpected_handler = default_unexpected_handler;
 
-std::new_handler __cxa_new_handler = 0;
+_LIBCXXABI_DATA_VIS
+_LIBCPP_SAFE_STATIC std::new_handler __cxa_new_handler = 0;
 
 namespace std
 {

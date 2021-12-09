@@ -39,7 +39,6 @@ class RISCVSubtarget : public RISCVGenSubtargetInfo {
   bool HasStdExtF = false;
   bool HasStdExtD = false;
   bool HasStdExtC = false;
-  bool HasStdExtB = false;
   bool HasStdExtZba = false;
   bool HasStdExtZbb = false;
   bool HasStdExtZbc = false;
@@ -53,6 +52,7 @@ class RISCVSubtarget : public RISCVGenSubtargetInfo {
   bool HasStdExtV = false;
   bool HasStdExtZvlsseg = false;
   bool HasStdExtZvamo = false;
+  bool HasStdExtZfhmin = false;
   bool HasStdExtZfh = false;
   bool HasRV64 = false;
   bool IsRV32E = false;
@@ -106,7 +106,6 @@ public:
   bool hasStdExtF() const { return HasStdExtF; }
   bool hasStdExtD() const { return HasStdExtD; }
   bool hasStdExtC() const { return HasStdExtC; }
-  bool hasStdExtB() const { return HasStdExtB; }
   bool hasStdExtZba() const { return HasStdExtZba; }
   bool hasStdExtZbb() const { return HasStdExtZbb; }
   bool hasStdExtZbc() const { return HasStdExtZbc; }
@@ -120,6 +119,7 @@ public:
   bool hasStdExtV() const { return HasStdExtV; }
   bool hasStdExtZvlsseg() const { return HasStdExtZvlsseg; }
   bool hasStdExtZvamo() const { return HasStdExtZvamo; }
+  bool hasStdExtZfhmin() const { return HasStdExtZfhmin; }
   bool hasStdExtZfh() const { return HasStdExtZfh; }
   bool is64Bit() const { return HasRV64; }
   bool isRV32E() const { return IsRV32E; }
@@ -133,8 +133,17 @@ public:
     assert(i < RISCV::NUM_TARGET_REGS && "Register out of range");
     return UserReservedRegister[i];
   }
+
+  // Vector codegen related methods.
+  bool hasVInstructions() const { return HasStdExtV; }
+  bool hasVInstructionsI64() const { return HasStdExtV; }
+  bool hasVInstructionsF16() const { return HasStdExtV && hasStdExtZfh(); }
+  bool hasVInstructionsF32() const { return HasStdExtV && hasStdExtF(); }
+  bool hasVInstructionsF64() const { return HasStdExtV && hasStdExtD(); }
+  // F16 and F64 both require F32.
+  bool hasVInstructionsAnyF() const { return hasVInstructionsF32(); }
   unsigned getMaxInterleaveFactor() const {
-    return hasStdExtV() ? MaxInterleaveFactor : 1;
+    return hasVInstructions() ? MaxInterleaveFactor : 1;
   }
 
 protected:

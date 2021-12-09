@@ -3572,7 +3572,7 @@ void CXXNameMangler::mangleAArch64NeonVectorType(const DependentVectorType *T) {
 // mangling scheme, it will be specified in the next revision. The mangling
 // scheme is otherwise defined in the appendices to the Procedure Call Standard
 // for the Arm Architecture, see
-// https://github.com/ARM-software/abi-aa/blob/master/aapcs64/aapcs64.rst#appendix-c-mangling
+// https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#appendix-c-mangling
 void CXXNameMangler::mangleAArch64FixedSveVectorType(const VectorType *T) {
   assert((T->getVectorKind() == VectorType::SveFixedLengthDataVector ||
           T->getVectorKind() == VectorType::SveFixedLengthPredicateVector) &&
@@ -4181,7 +4181,6 @@ recurse:
   case Expr::ArrayInitIndexExprClass:
   case Expr::NoInitExprClass:
   case Expr::ParenListExprClass:
-  case Expr::LambdaExprClass:
   case Expr::MSPropertyRefExprClass:
   case Expr::MSPropertySubscriptExprClass:
   case Expr::TypoExprClass: // This should no longer exist in the AST by now.
@@ -4963,6 +4962,16 @@ recurse:
   case Expr::CXXNullPtrLiteralExprClass: {
     // <expr-primary>
     Out << "LDnE";
+    break;
+  }
+
+  case Expr::LambdaExprClass: {
+    // A lambda-expression can't appear in the signature of an
+    // externally-visible declaration, so there's no standard mangling for
+    // this, but mangling as a literal of the closure type seems reasonable.
+    Out << "L";
+    mangleType(Context.getASTContext().getRecordType(cast<LambdaExpr>(E)->getLambdaClass()));
+    Out << "E";
     break;
   }
 

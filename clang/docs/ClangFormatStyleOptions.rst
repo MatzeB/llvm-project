@@ -149,7 +149,7 @@ the configuration (without a prefix: ``Auto``).
     <https://google.github.io/styleguide/cppguide.html>`_
   * ``Chromium``
     A style complying with `Chromium's style guide
-    <https://chromium.googlesource.com/chromium/src/+/master/styleguide/styleguide.md>`_
+    <https://chromium.googlesource.com/chromium/src/+/refs/heads/main/styleguide/styleguide.md>`_
   * ``Mozilla``
     A style complying with `Mozilla's style guide
     <https://developer.mozilla.org/en-US/docs/Developer_Guide/Coding_Style>`_
@@ -247,7 +247,7 @@ the configuration (without a prefix: ``Auto``).
 
 
 
-**AlignConsecutiveAssignments** (``AlignConsecutiveStyle``) :versionbadge:`clang-format 13`
+**AlignConsecutiveAssignments** (``AlignConsecutiveStyle``) :versionbadge:`clang-format 3.8`
   Style of aligning consecutive assignments.
 
   ``Consecutive`` will result in formattings like:
@@ -320,7 +320,7 @@ the configuration (without a prefix: ``Auto``).
        /* A comment. */
        double e         = 4;
 
-**AlignConsecutiveBitFields** (``AlignConsecutiveStyle``) :versionbadge:`clang-format 13`
+**AlignConsecutiveBitFields** (``AlignConsecutiveStyle``) :versionbadge:`clang-format 11`
   Style of aligning consecutive bit field.
 
   ``Consecutive`` will align the bitfield separators of consecutive lines.
@@ -394,7 +394,7 @@ the configuration (without a prefix: ``Auto``).
        /* A comment. */
        int ee   : 3;
 
-**AlignConsecutiveDeclarations** (``AlignConsecutiveStyle``) :versionbadge:`clang-format 13`
+**AlignConsecutiveDeclarations** (``AlignConsecutiveStyle``) :versionbadge:`clang-format 3.8`
   Style of aligning consecutive declarations.
 
   ``Consecutive`` will align the declaration names of consecutive lines.
@@ -468,7 +468,7 @@ the configuration (without a prefix: ``Auto``).
        /* A comment. */
        bool        c = false;
 
-**AlignConsecutiveMacros** (``AlignConsecutiveStyle``) :versionbadge:`clang-format 13`
+**AlignConsecutiveMacros** (``AlignConsecutiveStyle``) :versionbadge:`clang-format 9`
   Style of aligning consecutive macro definitions.
 
   ``Consecutive`` will result in formattings like:
@@ -1082,7 +1082,7 @@ the configuration (without a prefix: ``Auto``).
 
 
 
-**AttributeMacros** (``List of Strings``) :versionbadge:`clang-format 13`
+**AttributeMacros** (``List of Strings``) :versionbadge:`clang-format 12`
   A vector of strings that should be interpreted as attributes/qualifiers
   instead of identifiers. This can be useful for language extensions or
   static analyzer annotations.
@@ -1135,7 +1135,7 @@ the configuration (without a prefix: ``Auto``).
            int aaaaaaaaaaaaaaaaaaaa,
            int aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) {}
 
-**BitFieldColonSpacing** (``BitFieldColonSpacingStyle``) :versionbadge:`clang-format 13`
+**BitFieldColonSpacing** (``BitFieldColonSpacingStyle``) :versionbadge:`clang-format 12`
   The BitFieldColonSpacingStyle to use for bitfields.
 
   Possible values:
@@ -3197,7 +3197,7 @@ the configuration (without a prefix: ``Auto``).
 **PenaltyExcessCharacter** (``Unsigned``) :versionbadge:`clang-format 3.7`
   The penalty for each character outside of the column limit.
 
-**PenaltyIndentedWhitespace** (``Unsigned``) :versionbadge:`clang-format 13`
+**PenaltyIndentedWhitespace** (``Unsigned``) :versionbadge:`clang-format 12`
   Penalty for each character of whitespace indentation
   (counted relative to leading non-whitespace column).
 
@@ -3236,9 +3236,13 @@ the configuration (without a prefix: ``Auto``).
 **QualifierAlignment** (``QualifierAlignmentStyle``) :versionbadge:`clang-format 14`
   Different ways to arrange specifiers and qualifiers (e.g. const/volatile).
 
-  .. warning:: 
+  .. warning::
 
-   ``QualifierAlignment`` COULD lead to incorrect code generation.
+   Setting ``QualifierAlignment``  to something other than `Leave`, COULD
+   lead to incorrect code formatting due to incorrect decisions made due to
+   clang-formats lack of complete semantic information.
+   As such extra care should be taken to review code changes made by the use
+   of this option.
 
   Possible values:
 
@@ -3297,8 +3301,9 @@ the configuration (without a prefix: ``Auto``).
     * type
 
   Note: it MUST contain 'type'.
-  Items to the left of 'type' will be placed to the left of the type and aligned in the order supplied.
-  Items to the right of 'type' will be placed to the right of the type and aligned in the order supplied.
+  Items to the left of 'type' will be placed to the left of the type and
+  aligned in the order supplied. Items to the right of 'type' will be placed
+  to the right of the type and aligned in the order supplied.
 
 
   .. code-block:: yaml
@@ -3457,7 +3462,7 @@ the configuration (without a prefix: ``Auto``).
 
 
 
-**SortJavaStaticImport** (``SortJavaStaticImportOptions``) :versionbadge:`clang-format 13`
+**SortJavaStaticImport** (``SortJavaStaticImportOptions``) :versionbadge:`clang-format 12`
   When sorting Java imports, by default static imports are placed before
   non-static imports. If ``JavaStaticImportAfterImport`` is ``After``,
   static imports are placed after non-static imports.
@@ -3525,7 +3530,7 @@ the configuration (without a prefix: ``Auto``).
      true:                                  false:
      template <int> void foo();     vs.     template<int> void foo();
 
-**SpaceAroundPointerQualifiers** (``SpaceAroundPointerQualifiersStyle``) :versionbadge:`clang-format 13`
+**SpaceAroundPointerQualifiers** (``SpaceAroundPointerQualifiersStyle``) :versionbadge:`clang-format 12`
   Defines in which cases to put a space before or after pointer qualifiers
 
   Possible values:
@@ -3574,7 +3579,7 @@ the configuration (without a prefix: ``Auto``).
      int a = 5;                     vs.     int a= 5;
      a += 42;                               a+= 42;
 
-**SpaceBeforeCaseColon** (``Boolean``) :versionbadge:`clang-format 13`
+**SpaceBeforeCaseColon** (``Boolean``) :versionbadge:`clang-format 12`
   If ``false``, spaces will be removed before case colon.
 
   .. code-block:: c++
@@ -3613,7 +3618,7 @@ the configuration (without a prefix: ``Auto``).
      true:                                  false:
      class Foo : Bar {}             vs.     class Foo: Bar {}
 
-**SpaceBeforeParens** (``SpaceBeforeParensOptions``) :versionbadge:`clang-format 3.5`
+**SpaceBeforeParens** (``SpaceBeforeParensStyle``) :versionbadge:`clang-format 3.5`
   Defines in which cases to put a space before opening parentheses.
 
   Possible values:
@@ -3683,6 +3688,78 @@ the configuration (without a prefix: ``Auto``).
          }
        }
 
+  * ``SBPO_Custom`` (in configuration: ``Custom``)
+    Configure each individual space before parentheses in
+    `SpaceBeforeParensOptions`.
+
+
+
+**SpaceBeforeParensOptions** (``SpaceBeforeParensCustom``) :versionbadge:`clang-format 14`
+  Control of individual space before parentheses.
+
+  If ``SpaceBeforeParens`` is set to ``Custom``, use this to specify
+  how each individual space before parentheses case should be handled.
+  Otherwise, this is ignored.
+
+  .. code-block:: yaml
+
+    # Example of usage:
+    SpaceBeforeParens: Custom
+    SpaceBeforeParensOptions:
+      AfterControlStatements: true
+      AfterFunctionDefinitionName: true
+
+  Nested configuration flags:
+
+
+  * ``bool AfterControlStatements`` If ``true``, put space betwee control statement keywords
+    (for/if/while...) and opening parentheses.
+
+    .. code-block:: c++
+
+       true:                                  false:
+       if (...) {}                     vs.    if(...) {}
+
+  * ``bool AfterForeachMacros`` If ``true``, put space between foreach macros and opening parentheses.
+
+    .. code-block:: c++
+
+       true:                                  false:
+       FOREACH (...)                   vs.    FOREACH(...)
+         <loop-body>                            <loop-body>
+
+  * ``bool AfterFunctionDeclarationName`` If ``true``, put a space between function declaration name and opening
+    parentheses.
+
+    .. code-block:: c++
+
+       true:                                  false:
+       void f ();                      vs.    void f();
+
+  * ``bool AfterFunctionDefinitionName`` If ``true``, put a space between function definition name and opening
+    parentheses.
+
+    .. code-block:: c++
+
+       true:                                  false:
+       void f () {}                    vs.    void f() {}
+
+  * ``bool AfterIfMacros`` If ``true``, put space between if macros and opening parentheses.
+
+    .. code-block:: c++
+
+       true:                                  false:
+       IF (...)                        vs.    IF(...)
+         <conditional-body>                     <conditional-body>
+
+  * ``bool BeforeNonEmptyParentheses`` If ``true``, put a space before opening parentheses only if the
+    parentheses are not empty.
+
+    .. code-block:: c++
+
+       true:                                  false:
+       void f (int a);                 vs.    void f();
+       f (a);                                 f();
 
 
 **SpaceBeforeRangeBasedForLoopColon** (``Boolean``) :versionbadge:`clang-format 7`
@@ -3802,30 +3879,34 @@ the configuration (without a prefix: ``Auto``).
   How many spaces are allowed at the start of a line comment. To disable the
   maximum set it to ``-1``, apart from that the maximum takes precedence
   over the minimum.
-  Minimum = 1 Maximum = -1
-  // One space is forced
 
-  //  but more spaces are possible
+  .. code-block:: c++
 
-  Minimum = 0
-  Maximum = 0
-  //Forces to start every comment directly after the slashes
+    Minimum = 1
+    Maximum = -1
+    // One space is forced
+
+    //  but more spaces are possible
+
+    Minimum = 0
+    Maximum = 0
+    //Forces to start every comment directly after the slashes
 
   Note that in line comment sections the relative indent of the subsequent
   lines is kept, that means the following:
 
   .. code-block:: c++
 
-  before:                                   after:
-  Minimum: 1
-  //if (b) {                                // if (b) {
-  //  return true;                          //   return true;
-  //}                                       // }
+    before:                                   after:
+    Minimum: 1
+    //if (b) {                                // if (b) {
+    //  return true;                          //   return true;
+    //}                                       // }
 
-  Maximum: 0
-  /// List:                                 ///List:
-  ///  - Foo                                /// - Foo
-  ///    - Bar                              ///   - Bar
+    Maximum: 0
+    /// List:                                 ///List:
+    ///  - Foo                                /// - Foo
+    ///    - Bar                              ///   - Bar
 
   Nested configuration flags:
 
@@ -3889,7 +3970,7 @@ the configuration (without a prefix: ``Auto``).
 
 
 
-**StatementAttributeLikeMacros** (``List of Strings``) :versionbadge:`clang-format 13`
+**StatementAttributeLikeMacros** (``List of Strings``) :versionbadge:`clang-format 12`
   Macros which are ignored in front of a statement, as if they were an
   attribute. So that they are not parsed as identifier, for example for Qts
   emit.

@@ -3,6 +3,7 @@ set(LLVM_LINK_COMPONENTS
   BOLTProfile
   BOLTRewrite
   BOLTUtils
+  MC
   Object
   Support
   )

@@ -43,6 +43,7 @@
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/Casting.h"
@@ -52,7 +53,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/ManagedStatic.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
@@ -122,6 +122,16 @@ FunctionNamesFile("funcs-file",
   cl::desc("file with list of functions to optimize"),
   cl::Hidden,
   cl::cat(BoltCategory));
+
+static cl::list<std::string> ForceFunctionNamesNR(
+    "funcs-no-regex", cl::CommaSeparated,
+    cl::desc("limit optimizations to functions from the list (non-regex)"),
+    cl::value_desc("func1,func2,func3,..."), cl::Hidden, cl::cat(BoltCategory));
+
+static cl::opt<std::string> FunctionNamesFileNR(
+    "funcs-file-no-regex",
+    cl::desc("file with list of functions to optimize (non-regex)"), cl::Hidden,
+    cl::cat(BoltCategory));
 
 cl::opt<bool>
 KeepTmp("keep-tmp",
@@ -2547,8 +2557,15 @@ void RewriteInstance::selectFunctionsToProcess() {
   };
   populateFunctionNames(opts::FunctionNamesFile, opts::ForceFunctionNames);
   populateFunctionNames(opts::SkipFunctionNamesFile, opts::SkipFunctionNames);
+  populateFunctionNames(opts::FunctionNamesFileNR, opts::ForceFunctionNamesNR);
 
-  if (!opts::ForceFunctionNames.empty() && !opts::SkipFunctionNames.empty()) {
+  // Make a set of functions to process to speed up lookups.
+  std::unordered_set<std::string> ForceFunctionsNR(
+      opts::ForceFunctionNamesNR.begin(), opts::ForceFunctionNamesNR.end());
+
+  if ((!opts::ForceFunctionNames.empty() ||
+       !opts::ForceFunctionNamesNR.empty()) &&
+      !opts::SkipFunctionNames.empty()) {
     errs() << "BOLT-ERROR: cannot select functions to process and skip at the "
               "same time. Please use only one type of selection.\n";
     exit(1);
@@ -2589,13 +2606,19 @@ void RewriteInstance::selectFunctionsToProcess() {
     }
 
     // If the list is not empty, only process functions from the list.
-    if (!opts::ForceFunctionNames.empty()) {
+    if (!opts::ForceFunctionNames.empty() || !ForceFunctionsNR.empty()) {
+      // Regex check (-funcs and -funcs-file options).
       for (std::string &Name : opts::ForceFunctionNames) {
         if (Function.hasNameRegex(Name)) {
           return true;
         }
       }
-      return false;
+      // Non-regex check (-funcs-no-regex and -funcs-file-no-regex).
+      Optional<StringRef> Match =
+          Function.forEachName([&ForceFunctionsNR](StringRef Name) {
+            return ForceFunctionsNR.count(Name.str());
+          });
+      return Match.hasValue();
     }
 
     for (std::string &Name : opts::SkipFunctionNames) {
@@ -2883,10 +2906,8 @@ namespace {
 
 class BOLTSymbolResolver : public JITSymbolResolver {
   BinaryContext &BC;
-  RuntimeDyld &RTDyld;
 public:
-  BOLTSymbolResolver(BinaryContext &BC, RuntimeDyld &RTDyld)
-      : BC(BC), RTDyld(RTDyld) {}
+  BOLTSymbolResolver(BinaryContext &BC) : BC(BC) {}
 
   // We are responsible for all symbols
   Expected<LookupSet> getResponsibilitySet(const LookupSet &Symbols) override {
@@ -2905,20 +2926,16 @@ public:
       for (const StringRef &Symbol : Symbols) {
         std::string SymName = Symbol.str();
         LLVM_DEBUG(dbgs() << "BOLT: looking for " << SymName << "\n");
-        JITEvaluatedSymbol Result = RTDyld.getSymbol(SymName);
-        if (Result.getAddress() == 0) {
-          // Resolve to a PLT entry if possible
-          if (BinaryData *I = BC.getBinaryDataByName(SymName + "@PLT")) {
-            AllResults[Symbol] =
-                JITEvaluatedSymbol(I->getAddress(), JITSymbolFlags());
-            continue;
-          }
-          OnResolved(make_error<StringError>(
-              "Symbol not found required by runtime: " + Symbol,
-              inconvertibleErrorCode()));
-          return;
+        // Resolve to a PLT entry if possible
+        if (BinaryData *I = BC.getBinaryDataByName(SymName + "@PLT")) {
+          AllResults[Symbol] =
+              JITEvaluatedSymbol(I->getAddress(), JITSymbolFlags());
+          continue;
         }
-        AllResults[Symbol] = Result;
+        OnResolved(make_error<StringError>(
+            "Symbol not found required by runtime: " + Symbol,
+            inconvertibleErrorCode()));
+        return;
       }
       OnResolved(std::move(AllResults));
       return;
@@ -2995,7 +3012,7 @@ void RewriteInstance::emitAndLink() {
       object::ObjectFile::createObjectFile(ObjectMemBuffer->getMemBufferRef()),
       "error creating in-memory object");
 
-  BOLTSymbolResolver Resolver = BOLTSymbolResolver(*BC, *RTDyld);
+  BOLTSymbolResolver Resolver = BOLTSymbolResolver(*BC);
 
   MCAsmLayout FinalLayout(
         static_cast<MCObjectStreamer *>(Streamer.get())->getAssembler());

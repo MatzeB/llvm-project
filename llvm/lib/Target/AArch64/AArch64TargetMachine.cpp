@@ -25,6 +25,7 @@
 #include "llvm/CodeGen/GlobalISel/IRTranslator.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
+#include "llvm/CodeGen/GlobalISel/LoadStoreOpt.h"
 #include "llvm/CodeGen/GlobalISel/Localizer.h"
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MIRParser/MIParser.h"
@@ -36,10 +37,10 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/CFGuard.h"
@@ -174,6 +175,16 @@ static cl::opt<unsigned> SVEVectorBitsMinOpt(
     cl::init(0), cl::Hidden);
 
 extern cl::opt<bool> EnableHomogeneousPrologEpilog;
+
+static cl::opt<bool> EnableGISelLoadStoreOptPreLegal(
+    "aarch64-enable-gisel-ldst-prelegal",
+    cl::desc("Enable GlobalISel's pre-legalizer load/store optimization pass"),
+    cl::init(true), cl::Hidden);
+
+static cl::opt<bool> EnableGISelLoadStoreOptPostLegal(
+    "aarch64-enable-gisel-ldst-postlegal",
+    cl::desc("Enable GlobalISel's post-legalizer load/store optimization pass"),
+    cl::init(false), cl::Hidden);
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAArch64Target() {
   // Register the target.
@@ -355,10 +366,13 @@ AArch64TargetMachine::~AArch64TargetMachine() = default;
 const AArch64Subtarget *
 AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
+  Attribute TuneAttr = F.getFnAttribute("tune-cpu");
   Attribute FSAttr = F.getFnAttribute("target-features");
 
   std::string CPU =
       CPUAttr.isValid() ? CPUAttr.getValueAsString().str() : TargetCPU;
+  std::string TuneCPU =
+      TuneAttr.isValid() ? TuneAttr.getValueAsString().str() : CPU;
   std::string FS =
       FSAttr.isValid() ? FSAttr.getValueAsString().str() : TargetFS;
 
@@ -399,6 +413,7 @@ AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
   Key += "SVEMax";
   Key += std::to_string(MaxSVEVectorSize);
   Key += CPU;
+  Key += TuneCPU;
   Key += FS;
 
   auto &I = SubtargetMap[Key];
@@ -407,8 +422,8 @@ AArch64TargetMachine::getSubtargetImpl(const Function &F) const {
     // creation will depend on the TM and the code generation flags on the
     // function that reside in TargetOptions.
     resetTargetOptions(F);
-    I = std::make_unique<AArch64Subtarget>(TargetTriple, CPU, FS, *this,
-                                           isLittle, MinSVEVectorSize,
+    I = std::make_unique<AArch64Subtarget>(TargetTriple, CPU, TuneCPU, FS,
+                                           *this, isLittle, MinSVEVectorSize,
                                            MaxSVEVectorSize);
   }
   return I.get();
@@ -626,8 +641,11 @@ bool AArch64PassConfig::addIRTranslator() {
 void AArch64PassConfig::addPreLegalizeMachineIR() {
   if (getOptLevel() == CodeGenOpt::None)
     addPass(createAArch64O0PreLegalizerCombiner());
-  else
+  else {
     addPass(createAArch64PreLegalizerCombiner());
+    if (EnableGISelLoadStoreOptPreLegal)
+      addPass(new LoadStoreOpt());
+  }
 }
 
 bool AArch64PassConfig::addLegalizeMachineIR() {
@@ -637,8 +655,11 @@ bool AArch64PassConfig::addLegalizeMachineIR() {
 
 void AArch64PassConfig::addPreRegBankSelect() {
   bool IsOptNone = getOptLevel() == CodeGenOpt::None;
-  if (!IsOptNone)
+  if (!IsOptNone) {
     addPass(createAArch64PostLegalizerCombiner(IsOptNone));
+    if (EnableGISelLoadStoreOptPostLegal)
+      addPass(new LoadStoreOpt());
+  }
   addPass(createAArch64PostLegalizerLowering());
 }
 

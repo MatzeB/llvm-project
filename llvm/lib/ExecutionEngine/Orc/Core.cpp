@@ -29,7 +29,6 @@ char SymbolsNotFound::ID = 0;
 char SymbolsCouldNotBeRemoved::ID = 0;
 char MissingSymbolDefinitions::ID = 0;
 char UnexpectedSymbolDefinitions::ID = 0;
-char Task::ID = 0;
 char MaterializationTask::ID = 0;
 
 RegisterDependenciesFunction NoDependenciesToRegister =
@@ -1365,7 +1364,7 @@ Error JITDylib::remove(const SymbolNameSet &Names) {
 
 void JITDylib::dump(raw_ostream &OS) {
   ES.runSessionLocked([&, this]() {
-    OS << "JITDylib \"" << JITDylibName << "\" (ES: "
+    OS << "JITDylib \"" << getName() << "\" (ES: "
        << format("0x%016" PRIx64, reinterpret_cast<uintptr_t>(&ES)) << "):\n"
        << "Link order: " << LinkOrder << "\n"
        << "Symbol table:\n";
@@ -1451,7 +1450,7 @@ JITDylib::MaterializingInfo::takeQueriesMeeting(SymbolState RequiredState) {
 }
 
 JITDylib::JITDylib(ExecutionSession &ES, std::string Name)
-    : ES(ES), JITDylibName(std::move(Name)) {
+    : JITLinkDylib(std::move(Name)), ES(ES) {
   LinkOrder.push_back({this, JITDylibLookupFlags::MatchAllSymbols});
 }
 
@@ -1799,8 +1798,6 @@ void Platform::lookupInitSymbolsAsync(
   }
 }
 
-void Task::anchor() {}
-
 void MaterializationTask::printDescription(raw_ostream &OS) {
   OS << "Materialization task: " << MU->getName() << " in "
      << MR->getTargetJITDylib().getName();
@@ -2092,8 +2089,8 @@ Error ExecutionSession::registerJITDispatchHandlers(
 }
 
 void ExecutionSession::runJITDispatchHandler(
-    ExecutorProcessControl::SendResultFunction SendResult,
-    JITTargetAddress HandlerFnTagAddr, ArrayRef<char> ArgBuffer) {
+    SendResultFunction SendResult, JITTargetAddress HandlerFnTagAddr,
+    ArrayRef<char> ArgBuffer) {
 
   std::shared_ptr<JITDispatchHandlerFunction> F;
   {

@@ -86,13 +86,6 @@ bool GDBRemoteCommunicationClient::HandshakeWithServer(Status *error_ptr) {
   std::chrono::steady_clock::time_point start_of_handshake =
       std::chrono::steady_clock::now();
   if (SendAck()) {
-    // Wait for any responses that might have been queued up in the remote
-    // GDB server and flush them all
-    StringExtractorGDBRemote response;
-    PacketResult packet_result = PacketResult::Success;
-    while (packet_result == PacketResult::Success)
-      packet_result = ReadPacket(response, milliseconds(10), false);
-
     // The return value from QueryNoAckModeSupported() is true if the packet
     // was sent and _any_ response (including UNIMPLEMENTED) was received), or
     // false if no response was received. This quickly tells us if we have a
@@ -106,17 +99,15 @@ bool GDBRemoteCommunicationClient::HandshakeWithServer(Status *error_ptr) {
           std::chrono::duration<double>(end_of_handshake - start_of_handshake)
               .count();
       if (error_ptr) {
-        if (packet_result == PacketResult::ErrorDisconnected)
+        if (!IsConnected())
           error_ptr->SetErrorString("Connection shut down by remote side "
                                     "while waiting for reply to initial "
                                     "handshake packet");
-        else if (packet_result == PacketResult::ErrorReplyTimeout)
+        else
           error_ptr->SetErrorStringWithFormat(
               "failed to get reply to handshake packet within timeout of "
               "%.1f seconds",
               handshake_timeout);
-        else
-          error_ptr->SetErrorString("failed to get reply to handshake packet");
       }
     }
   } else {
@@ -283,6 +274,7 @@ void GDBRemoteCommunicationClient::ResetDiscoverableSettings(bool did_exec) {
     m_supports_qXfer_features_read = eLazyBoolCalculate;
     m_supports_qXfer_memory_map_read = eLazyBoolCalculate;
     m_supports_augmented_libraries_svr4_read = eLazyBoolCalculate;
+    m_uses_native_signals = eLazyBoolCalculate;
     m_supports_qProcessInfoPID = true;
     m_supports_qfProcessInfo = true;
     m_supports_qUserName = true;
@@ -333,6 +325,7 @@ void GDBRemoteCommunicationClient::GetRemoteQSupported() {
   m_supports_QPassSignals = eLazyBoolNo;
   m_supports_memory_tagging = eLazyBoolNo;
   m_supports_qSaveCore = eLazyBoolNo;
+  m_uses_native_signals = eLazyBoolNo;
 
   m_max_packet_size = UINT64_MAX; // It's supposed to always be there, but if
                                   // not, we assume no limit
@@ -355,7 +348,7 @@ void GDBRemoteCommunicationClient::GetRemoteQSupported() {
     // configuration of the transport before attaching/launching the process.
     m_qSupported_response = response.GetStringRef().str();
 
-    for (llvm::StringRef x : llvm::Split(response.GetStringRef(), ';')) {
+    for (llvm::StringRef x : llvm::split(response.GetStringRef(), ';')) {
       if (x == "qXfer:auxv:read+")
         m_supports_qXfer_auxv_read = eLazyBoolYes;
       else if (x == "qXfer:libraries-svr4:read+")
@@ -379,6 +372,8 @@ void GDBRemoteCommunicationClient::GetRemoteQSupported() {
         m_supports_memory_tagging = eLazyBoolYes;
       else if (x == "qSaveCore+")
         m_supports_qSaveCore = eLazyBoolYes;
+      else if (x == "native-signals+")
+        m_uses_native_signals = eLazyBoolYes;
       // Look for a list of compressions in the features list e.g.
       // qXfer:features:read+;PacketSize=20000;qEcho+;SupportedCompressions=zlib-
       // deflate,lzma
@@ -686,54 +681,6 @@ bool GDBRemoteCommunicationClient::GetxPacketSupported() {
   return m_supports_x;
 }
 
-GDBRemoteCommunicationClient::PacketResult
-GDBRemoteCommunicationClient::SendPacketsAndConcatenateResponses(
-    const char *payload_prefix, std::string &response_string) {
-  Lock lock(*this);
-  if (!lock) {
-    Log *log(ProcessGDBRemoteLog::GetLogIfAnyCategoryIsSet(GDBR_LOG_PROCESS |
-                                                           GDBR_LOG_PACKETS));
-    LLDB_LOGF(log,
-              "error: failed to get packet sequence mutex, not sending "
-              "packets with prefix '%s'",
-              payload_prefix);
-    return PacketResult::ErrorNoSequenceLock;
-  }
-
-  response_string = "";
-  std::string payload_prefix_str(payload_prefix);
-  unsigned int response_size = 0x1000;
-  if (response_size > GetRemoteMaxPacketSize()) { // May send qSupported packet
-    response_size = GetRemoteMaxPacketSize();
-  }
-
-  for (unsigned int offset = 0; true; offset += response_size) {
-    StringExtractorGDBRemote this_response;
-    // Construct payload
-    char sizeDescriptor[128];
-    snprintf(sizeDescriptor, sizeof(sizeDescriptor), "%x,%x", offset,
-             response_size);
-    PacketResult result = SendPacketAndWaitForResponseNoLock(
-        payload_prefix_str + sizeDescriptor, this_response);
-    if (result != PacketResult::Success)
-      return result;
-
-    const std::string &this_string = std::string(this_response.GetStringRef());
-
-    // Check for m or l as first character; l seems to mean this is the last
-    // chunk
-    char first_char = *this_string.c_str();
-    if (first_char != 'm' && first_char != 'l') {
-      return PacketResult::ErrorReplyInvalid;
-    }
-    // Concatenate the result so far (skipping 'm' or 'l')
-    response_string.append(this_string, 1, std::string::npos);
-    if (first_char == 'l')
-      // We're done
-      return PacketResult::Success;
-  }
-}
-
 lldb::pid_t GDBRemoteCommunicationClient::GetCurrentProcessID(bool allow_lazy) {
   if (allow_lazy && m_curr_pid_is_valid == eLazyBoolYes)
     return m_curr_pid;
@@ -1018,26 +965,21 @@ llvm::VersionTuple GDBRemoteCommunicationClient::GetMacCatalystVersion() {
   return m_maccatalyst_version;
 }
 
-bool GDBRemoteCommunicationClient::GetOSBuildString(std::string &s) {
+llvm::Optional<std::string> GDBRemoteCommunicationClient::GetOSBuildString() {
   if (GetHostInfo()) {
-    if (!m_os_build.empty()) {
-      s = m_os_build;
-      return true;
-    }
+    if (!m_os_build.empty())
+      return m_os_build;
   }
-  s.clear();
-  return false;
+  return llvm::None;
 }
 
-bool GDBRemoteCommunicationClient::GetOSKernelDescription(std::string &s) {
+llvm::Optional<std::string>
+GDBRemoteCommunicationClient::GetOSKernelDescription() {
   if (GetHostInfo()) {
-    if (!m_os_kernel.empty()) {
-      s = m_os_kernel;
-      return true;
-    }
+    if (!m_os_kernel.empty())
+      return m_os_kernel;
   }
-  s.clear();
-  return false;
+  return llvm::None;
 }
 
 bool GDBRemoteCommunicationClient::GetHostname(std::string &s) {
@@ -1162,9 +1104,8 @@ void GDBRemoteCommunicationClient::MaybeEnableCompression(
 
   if (avail_type != CompressionType::None) {
     StringExtractorGDBRemote response;
-    llvm::Twine packet = "QEnableCompression:type:" + avail_name + ";";
-    if (SendPacketAndWaitForResponse(packet.str(), response) !=
-        PacketResult::Success)
+    std::string packet = "QEnableCompression:type:" + avail_name.str() + ";";
+    if (SendPacketAndWaitForResponse(packet, response) != PacketResult::Success)
       return;
 
     if (response.IsOKResponse()) {
@@ -1591,17 +1532,17 @@ Status GDBRemoteCommunicationClient::GetMemoryRegionInfo(
                    region_info.GetRange().IsValid()) {
           saw_permissions = true;
           if (region_info.GetRange().Contains(addr)) {
-            if (value.find('r') != llvm::StringRef::npos)
+            if (value.contains('r'))
               region_info.SetReadable(MemoryRegionInfo::eYes);
             else
               region_info.SetReadable(MemoryRegionInfo::eNo);
 
-            if (value.find('w') != llvm::StringRef::npos)
+            if (value.contains('w'))
               region_info.SetWritable(MemoryRegionInfo::eYes);
             else
               region_info.SetWritable(MemoryRegionInfo::eNo);
 
-            if (value.find('x') != llvm::StringRef::npos)
+            if (value.contains('x'))
               region_info.SetExecutable(MemoryRegionInfo::eYes);
             else
               region_info.SetExecutable(MemoryRegionInfo::eNo);
@@ -1657,7 +1598,7 @@ Status GDBRemoteCommunicationClient::GetMemoryRegionInfo(
           error.SetErrorString(error_string.c_str());
         } else if (name.equals("dirty-pages")) {
           std::vector<addr_t> dirty_page_list;
-          for (llvm::StringRef x : llvm::Split(value, ',')) {
+          for (llvm::StringRef x : llvm::split(value, ',')) {
             addr_t page;
             x.consume_front("0x");
             if (llvm::to_integer(x, page, 16))
@@ -1751,17 +1692,13 @@ Status GDBRemoteCommunicationClient::LoadQXferMemoryMap() {
     return error;
   }
 
-  std::string xml;
-  lldb_private::Status lldberr;
-  if (!ReadExtFeature(ConstString("memory-map"), ConstString(""), xml,
-                      lldberr)) {
-    error.SetErrorString("Failed to read memory map");
-    return error;
-  }
+  llvm::Expected<std::string> xml = ReadExtFeature("memory-map", "");
+  if (!xml)
+    return Status(xml.takeError());
 
   XMLDocument xml_document;
 
-  if (!xml_document.ParseMemory(xml.c_str(), xml.size())) {
+  if (!xml_document.ParseMemory(xml->c_str(), xml->size())) {
     error.SetErrorString("Failed to parse memory map xml");
     return error;
   }
@@ -3931,15 +3868,14 @@ GDBRemoteCommunicationClient::GetModulesInfo(
 
 // query the target remote for extended information using the qXfer packet
 //
-// example: object='features', annex='target.xml', out=<xml output> return:
-// 'true'  on success
-//          'false' on failure (err set)
-bool GDBRemoteCommunicationClient::ReadExtFeature(
-    const lldb_private::ConstString object,
-    const lldb_private::ConstString annex, std::string &out,
-    lldb_private::Status &err) {
+// example: object='features', annex='target.xml'
+// return: <xml output> or error
+llvm::Expected<std::string>
+GDBRemoteCommunicationClient::ReadExtFeature(llvm::StringRef object,
+                                             llvm::StringRef annex) {
 
-  std::stringstream output;
+  std::string output;
+  llvm::raw_string_ostream output_stream(output);
   StringExtractorGDBRemote chunk;
 
   uint64_t size = GetRemoteMaxPacketSize();
@@ -3953,28 +3889,22 @@ bool GDBRemoteCommunicationClient::ReadExtFeature(
   while (active) {
 
     // send query extended feature packet
-    std::stringstream packet;
-    packet << "qXfer:" << object.AsCString("")
-           << ":read:" << annex.AsCString("") << ":" << std::hex << offset
-           << "," << std::hex << size;
+    std::string packet =
+        ("qXfer:" + object + ":read:" + annex + ":" +
+         llvm::Twine::utohexstr(offset) + "," + llvm::Twine::utohexstr(size))
+            .str();
 
     GDBRemoteCommunication::PacketResult res =
-        SendPacketAndWaitForResponse(packet.str(), chunk);
+        SendPacketAndWaitForResponse(packet, chunk);
 
-    if (res != GDBRemoteCommunication::PacketResult::Success) {
-      err.SetErrorString("Error sending $qXfer packet");
-      return false;
-    }
-
-    const std::string &str = std::string(chunk.GetStringRef());
-    if (str.length() == 0) {
-      // should have some data in chunk
-      err.SetErrorString("Empty response from $qXfer packet");
-      return false;
+    if (res != GDBRemoteCommunication::PacketResult::Success ||
+        chunk.GetStringRef().empty()) {
+      return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                     "Error sending $qXfer packet");
     }
 
     // check packet code
-    switch (str[0]) {
+    switch (chunk.GetStringRef()[0]) {
     // last chunk
     case ('l'):
       active = false;
@@ -3982,21 +3912,19 @@ bool GDBRemoteCommunicationClient::ReadExtFeature(
 
     // more chunks
     case ('m'):
-      if (str.length() > 1)
-        output << &str[1];
-      offset += str.length() - 1;
+      output_stream << chunk.GetStringRef().drop_front();
+      offset += chunk.GetStringRef().size() - 1;
       break;
 
     // unknown chunk
     default:
-      err.SetErrorString("Invalid continuation code from $qXfer packet");
-      return false;
+      return llvm::createStringError(
+          llvm::inconvertibleErrorCode(),
+          "Invalid continuation code from $qXfer packet");
     }
   }
 
-  out = output.str();
-  err.Success();
-  return true;
+  return output_stream.str();
 }
 
 // Notify the target that gdb is prepared to serve symbol lookup requests.
@@ -4286,4 +4214,15 @@ Status GDBRemoteCommunicationClient::ConfigureRemoteStructuredData(
 void GDBRemoteCommunicationClient::OnRunPacketSent(bool first) {
   GDBRemoteClientBase::OnRunPacketSent(first);
   m_curr_tid = LLDB_INVALID_THREAD_ID;
+}
+
+bool GDBRemoteCommunicationClient::UsesNativeSignals() {
+  if (m_uses_native_signals == eLazyBoolCalculate)
+    GetRemoteQSupported();
+  if (m_uses_native_signals == eLazyBoolYes)
+    return true;
+
+  // If the remote didn't indicate native-signal support explicitly,
+  // check whether it is an old version of lldb-server.
+  return GetThreadSuffixSupported();
 }

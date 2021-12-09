@@ -1,5 +1,4 @@
-#if 0 /*===-- include/flang/Runtime/magic-numbers.h \
-         -----------------------===*/
+#if 0 /*===-- include/flang/Runtime/magic-numbers.h -----------------------===*/
 /*
  * Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
  * See https://llvm.org/LICENSE.txt for license information.
@@ -47,4 +46,10 @@ to be -1, the others must be positive.
 #define FORTRAN_RUNTIME_STAT_INVALID_ARG_NUMBER 107
 #define FORTRAN_RUNTIME_STAT_MISSING_ARG 108
 #define FORTRAN_RUNTIME_STAT_VALUE_TOO_SHORT -1
+
+#if 0
+Status codes for GET_ENVIRONMENT_VARIABLE. Values mandated by the standard.
+#endif
+#define FORTRAN_RUNTIME_STAT_MISSING_ENV_VAR 1
+#define FORTRAN_RUNTIME_STAT_ENV_VARS_UNSUPPORTED 2
 #endif
