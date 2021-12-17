@@ -163,10 +163,10 @@ private:
 /// function overloading to implement "partial" method specialization.
 class SparseTensorStorageBase {
 public:
-  // Dimension size query.
+  /// Dimension size query.
   virtual uint64_t getDimSize(uint64_t) = 0;
 
-  // Overhead storage.
+  /// Overhead storage.
   virtual void getPointers(std::vector<uint64_t> **, uint64_t) { fatal("p64"); }
   virtual void getPointers(std::vector<uint32_t> **, uint64_t) { fatal("p32"); }
   virtual void getPointers(std::vector<uint16_t> **, uint64_t) { fatal("p16"); }
@@ -176,7 +176,7 @@ public:
   virtual void getIndices(std::vector<uint16_t> **, uint64_t) { fatal("i16"); }
   virtual void getIndices(std::vector<uint8_t> **, uint64_t) { fatal("i8"); }
 
-  // Primary storage.
+  /// Primary storage.
   virtual void getValues(std::vector<double> **) { fatal("valf64"); }
   virtual void getValues(std::vector<float> **) { fatal("valf32"); }
   virtual void getValues(std::vector<int64_t> **) { fatal("vali64"); }
@@ -184,13 +184,35 @@ public:
   virtual void getValues(std::vector<int16_t> **) { fatal("vali16"); }
   virtual void getValues(std::vector<int8_t> **) { fatal("vali8"); }
 
-  // Element-wise insertion in lexicographic index order.
+  /// Element-wise insertion in lexicographic index order.
   virtual void lexInsert(uint64_t *, double) { fatal("insf64"); }
   virtual void lexInsert(uint64_t *, float) { fatal("insf32"); }
   virtual void lexInsert(uint64_t *, int64_t) { fatal("insi64"); }
   virtual void lexInsert(uint64_t *, int32_t) { fatal("insi32"); }
   virtual void lexInsert(uint64_t *, int16_t) { fatal("ins16"); }
   virtual void lexInsert(uint64_t *, int8_t) { fatal("insi8"); }
+
+  /// Expanded insertion.
+  virtual void expInsert(uint64_t *, double *, bool *, uint64_t *, uint64_t) {
+    fatal("expf64");
+  }
+  virtual void expInsert(uint64_t *, float *, bool *, uint64_t *, uint64_t) {
+    fatal("expf32");
+  }
+  virtual void expInsert(uint64_t *, int64_t *, bool *, uint64_t *, uint64_t) {
+    fatal("expi64");
+  }
+  virtual void expInsert(uint64_t *, int32_t *, bool *, uint64_t *, uint64_t) {
+    fatal("expi32");
+  }
+  virtual void expInsert(uint64_t *, int16_t *, bool *, uint64_t *, uint64_t) {
+    fatal("expi16");
+  }
+  virtual void expInsert(uint64_t *, int8_t *, bool *, uint64_t *, uint64_t) {
+    fatal("expi8");
+  }
+
+  /// Finishes insertion.
   virtual void endInsert() = 0;
 
   virtual ~SparseTensorStorageBase() {}
@@ -287,6 +309,35 @@ public:
     }
     // Then continue with insertion path.
     insPath(cursor, diff, top, val);
+  }
+
+  /// Partially specialize expanded insertions based on template types.
+  /// Note that this method resets the values/filled-switch array back
+  /// to all-zero/false while only iterating over the nonzero elements.
+  void expInsert(uint64_t *cursor, V *values, bool *filled, uint64_t *added,
+                 uint64_t count) override {
+    if (count == 0)
+      return;
+    // Sort.
+    std::sort(added, added + count);
+    // Restore insertion path for first insert.
+    uint64_t rank = getRank();
+    uint64_t index = added[0];
+    cursor[rank - 1] = index;
+    lexInsert(cursor, values[index]);
+    assert(filled[index]);
+    values[index] = 0;
+    filled[index] = false;
+    // Subsequent insertions are quick.
+    for (uint64_t i = 1; i < count; i++) {
+      assert(index < added[i] && "non-lexicographic insertion");
+      index = added[i];
+      cursor[rank - 1] = index;
+      insPath(cursor, rank - 1, added[i - 1] + 1, values[index]);
+      assert(filled[index]);
+      values[index] = 0.0;
+      filled[index] = false;
+    }
   }
 
   /// Finalizes lexicographic insertions.
@@ -630,7 +681,7 @@ static SparseTensorCOO<V> *openSparseTensorCOO(char *filename, uint64_t rank,
   return tensor;
 }
 
-} // anonymous namespace
+} // namespace
 
 extern "C" {
 
@@ -683,8 +734,7 @@ typedef uint64_t index_t;
 
 #define IMPL_SPARSEVALUES(NAME, TYPE, LIB)                                     \
   void _mlir_ciface_##NAME(StridedMemRefType<TYPE, 1> *ref, void *tensor) {    \
-    assert(ref);                                                               \
-    assert(tensor);                                                            \
+    assert(ref &&tensor);                                                      \
     std::vector<TYPE> *v;                                                      \
     static_cast<SparseTensorStorageBase *>(tensor)->LIB(&v);                   \
     ref->basePtr = ref->data = v->data();                                      \
@@ -696,8 +746,7 @@ typedef uint64_t index_t;
 #define IMPL_GETOVERHEAD(NAME, TYPE, LIB)                                      \
   void _mlir_ciface_##NAME(StridedMemRefType<TYPE, 1> *ref, void *tensor,      \
                            index_t d) {                                        \
-    assert(ref);                                                               \
-    assert(tensor);                                                            \
+    assert(ref &&tensor);                                                      \
     std::vector<TYPE> *v;                                                      \
     static_cast<SparseTensorStorageBase *>(tensor)->LIB(&v, d);                \
     ref->basePtr = ref->data = v->data();                                      \
@@ -710,9 +759,7 @@ typedef uint64_t index_t;
   void *_mlir_ciface_##NAME(void *tensor, TYPE value,                          \
                             StridedMemRefType<index_t, 1> *iref,               \
                             StridedMemRefType<index_t, 1> *pref) {             \
-    assert(tensor);                                                            \
-    assert(iref);                                                              \
-    assert(pref);                                                              \
+    assert(tensor &&iref &&pref);                                              \
     assert(iref->strides[0] == 1 && pref->strides[0] == 1);                    \
     assert(iref->sizes[0] == pref->sizes[0]);                                  \
     const index_t *indx = iref->data + iref->offset;                           \
@@ -726,10 +773,11 @@ typedef uint64_t index_t;
   }
 
 #define IMPL_GETNEXT(NAME, V)                                                  \
-  bool _mlir_ciface_##NAME(void *tensor, StridedMemRefType<uint64_t, 1> *iref, \
+  bool _mlir_ciface_##NAME(void *tensor, StridedMemRefType<index_t, 1> *iref,  \
                            StridedMemRefType<V, 0> *vref) {                    \
+    assert(tensor &&iref &&vref);                                              \
     assert(iref->strides[0] == 1);                                             \
-    uint64_t *indx = iref->data + iref->offset;                                \
+    index_t *indx = iref->data + iref->offset;                                 \
     V *value = vref->data + vref->offset;                                      \
     const uint64_t isize = iref->sizes[0];                                     \
     auto iter = static_cast<SparseTensorCOO<V> *>(tensor);                     \
@@ -747,10 +795,30 @@ typedef uint64_t index_t;
 #define IMPL_LEXINSERT(NAME, V)                                                \
   void _mlir_ciface_##NAME(void *tensor, StridedMemRefType<index_t, 1> *cref,  \
                            V val) {                                            \
+    assert(tensor &&cref);                                                     \
     assert(cref->strides[0] == 1);                                             \
-    uint64_t *cursor = cref->data + cref->offset;                              \
+    index_t *cursor = cref->data + cref->offset;                               \
     assert(cursor);                                                            \
     static_cast<SparseTensorStorageBase *>(tensor)->lexInsert(cursor, val);    \
+  }
+
+#define IMPL_EXPINSERT(NAME, V)                                                \
+  void _mlir_ciface_##NAME(                                                    \
+      void *tensor, StridedMemRefType<index_t, 1> *cref,                       \
+      StridedMemRefType<V, 1> *vref, StridedMemRefType<bool, 1> *fref,         \
+      StridedMemRefType<index_t, 1> *aref, index_t count) {                    \
+    assert(tensor &&cref &&vref &&fref &&aref);                                \
+    assert(cref->strides[0] == 1);                                             \
+    assert(vref->strides[0] == 1);                                             \
+    assert(fref->strides[0] == 1);                                             \
+    assert(aref->strides[0] == 1);                                             \
+    assert(vref->sizes[0] == fref->sizes[0]);                                  \
+    index_t *cursor = cref->data + cref->offset;                               \
+    V *values = vref->data + vref->offset;                                     \
+    bool *filled = fref->data + fref->offset;                                  \
+    index_t *added = aref->data + aref->offset;                                \
+    static_cast<SparseTensorStorageBase *>(tensor)->expInsert(                 \
+        cursor, values, filled, added, count);                                 \
   }
 
 /// Constructs a new sparse tensor. This is the "swiss army knife"
@@ -912,12 +980,21 @@ IMPL_LEXINSERT(lexInsertI32, int32_t)
 IMPL_LEXINSERT(lexInsertI16, int16_t)
 IMPL_LEXINSERT(lexInsertI8, int8_t)
 
+/// Helper to insert using expansion, one per value type.
+IMPL_EXPINSERT(expInsertF64, double)
+IMPL_EXPINSERT(expInsertF32, float)
+IMPL_EXPINSERT(expInsertI64, int64_t)
+IMPL_EXPINSERT(expInsertI32, int32_t)
+IMPL_EXPINSERT(expInsertI16, int16_t)
+IMPL_EXPINSERT(expInsertI8, int8_t)
+
 #undef CASE
 #undef IMPL_SPARSEVALUES
 #undef IMPL_GETOVERHEAD
 #undef IMPL_ADDELT
 #undef IMPL_GETNEXT
-#undef IMPL_INSERTLEX
+#undef IMPL_LEXINSERT
+#undef IMPL_EXPINSERT
 
 //===----------------------------------------------------------------------===//
 //
@@ -994,6 +1071,59 @@ void *convertToMLIRSparseTensor(uint64_t rank, uint64_t nse, uint64_t *shape,
       rank, shape, perm.data(), sparse.data(), tensor);
 }
 
+/// Converts a sparse tensor to COO-flavored format expressed using C-style
+/// data structures. The expected output parameters are pointers for these
+/// values:
+///
+///   rank:    rank of tensor
+///   nse:     number of specified elements (usually the nonzeros)
+///   shape:   array with dimension size for each rank
+///   values:  a "nse" array with values for all specified elements
+///   indices: a flat "nse x rank" array with indices for all specified elements
+///
+/// The input is a pointer to SparseTensorStorage<P, I, V>, typically returned
+/// from convertToMLIRSparseTensor.
+///
+//  TODO: Currently, values are copied from SparseTensorStorage to
+//  SparseTensorCOO, then to the output. We may want to reduce the number of
+//  copies.
+//
+//  TODO: for now f64 tensors only, no dim ordering, all dimensions compressed
+//
+void convertFromMLIRSparseTensor(void *tensor, uint64_t *p_rank,
+                                 uint64_t *p_nse, uint64_t **p_shape,
+                                 double **p_values, uint64_t **p_indices) {
+  SparseTensorStorage<uint64_t, uint64_t, double> *sparse_tensor =
+      static_cast<SparseTensorStorage<uint64_t, uint64_t, double> *>(tensor);
+  uint64_t rank = sparse_tensor->getRank();
+  std::vector<uint64_t> perm(rank);
+  std::iota(perm.begin(), perm.end(), 0);
+  SparseTensorCOO<double> *coo = sparse_tensor->toCOO(perm.data());
+
+  const std::vector<Element<double>> &elements = coo->getElements();
+  uint64_t nse = elements.size();
+
+  uint64_t *shape = new uint64_t[rank];
+  for (uint64_t i = 0; i < rank; i++)
+    shape[i] = coo->getSizes()[i];
+
+  double *values = new double[nse];
+  uint64_t *indices = new uint64_t[rank * nse];
+
+  for (uint64_t i = 0, base = 0; i < nse; i++) {
+    values[i] = elements[i].value;
+    for (uint64_t j = 0; j < rank; j++)
+      indices[base + j] = elements[i].indices[j];
+    base += rank;
+  }
+
+  delete coo;
+  *p_rank = rank;
+  *p_nse = nse;
+  *p_shape = shape;
+  *p_values = values;
+  *p_indices = indices;
+}
 } // extern "C"
 
 #endif // MLIR_CRUNNERUTILS_DEFINE_FUNCTIONS

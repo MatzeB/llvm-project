@@ -15192,12 +15192,10 @@ static SDValue lowerV8I16GeneralSingleInputShuffle(
       // need
       // to balance this to ensure we don't form a 3-1 shuffle in the other
       // half.
-      int NumFlippedAToBInputs =
-          std::count(AToBInputs.begin(), AToBInputs.end(), 2 * ADWord) +
-          std::count(AToBInputs.begin(), AToBInputs.end(), 2 * ADWord + 1);
-      int NumFlippedBToBInputs =
-          std::count(BToBInputs.begin(), BToBInputs.end(), 2 * BDWord) +
-          std::count(BToBInputs.begin(), BToBInputs.end(), 2 * BDWord + 1);
+      int NumFlippedAToBInputs = llvm::count(AToBInputs, 2 * ADWord) +
+                                 llvm::count(AToBInputs, 2 * ADWord + 1);
+      int NumFlippedBToBInputs = llvm::count(BToBInputs, 2 * BDWord) +
+                                 llvm::count(BToBInputs, 2 * BDWord + 1);
       if ((NumFlippedAToBInputs == 1 &&
            (NumFlippedBToBInputs == 0 || NumFlippedBToBInputs == 2)) ||
           (NumFlippedBToBInputs == 1 &&
@@ -23190,6 +23188,10 @@ static SDValue EmitCmp(SDValue Op0, SDValue Op1, unsigned X86CC,
 bool X86TargetLowering::isFsqrtCheap(SDValue Op, SelectionDAG &DAG) const {
   EVT VT = Op.getValueType();
 
+  // We don't need to replace SQRT with RSQRT for half type.
+  if (VT.getScalarType() == MVT::f16)
+    return true;
+
   // We never want to use both SQRT and RSQRT instructions for the same input.
   if (DAG.getNodeIfExists(X86ISD::FRSQRT, DAG.getVTList(VT), Op))
     return false;
@@ -23228,11 +23230,15 @@ SDValue X86TargetLowering::getSqrtEstimate(SDValue Op,
     UseOneConstNR = false;
     // There is no FSQRT for 512-bits, but there is RSQRT14.
     unsigned Opcode = VT == MVT::v16f32 ? X86ISD::RSQRT14 : X86ISD::FRSQRT;
-    return DAG.getNode(Opcode, DL, VT, Op);
+    SDValue Estimate = DAG.getNode(Opcode, DL, VT, Op);
+    if (RefinementSteps == 0 && !Reciprocal)
+      Estimate = DAG.getNode(ISD::FMUL, DL, VT, Op, Estimate);
+    return Estimate;
   }
 
   if (VT.getScalarType() == MVT::f16 && isTypeLegal(VT) &&
       Subtarget.hasFP16()) {
+    assert(Reciprocal && "Don't replace SQRT with RSQRT for half type");
     if (RefinementSteps == ReciprocalEstimate::Unspecified)
       RefinementSteps = 0;
 
@@ -29812,12 +29818,18 @@ static SDValue LowerRotate(SDValue Op, const X86Subtarget &Subtarget,
 
   assert(IsROTL && "Only ROTL supported");
 
+  // Split 256-bit integers on XOP/pre-AVX2 targets.
+  if (VT.is256BitVector() && (Subtarget.hasXOP() || !Subtarget.hasAVX2()))
+    return splitVectorIntBinary(Op, DAG);
+
+  // Split 512-bit integers on non 512-bit BWI targets.
+  if (VT.is512BitVector() && !Subtarget.useBWIRegs())
+    return splitVectorIntBinary(Op, DAG);
+
   // XOP has 128-bit vector variable + immediate rotates.
   // +ve/-ve Amt = rotate left/right - just need to handle ISD::ROTL.
   // XOP implicitly uses modulo rotation amounts.
   if (Subtarget.hasXOP()) {
-    if (VT.is256BitVector())
-      return splitVectorIntBinary(Op, DAG);
     assert(VT.is128BitVector() && "Only rotate 128-bit vectors!");
 
     // Attempt to rotate by immediate.
@@ -29831,14 +29843,10 @@ static SDValue LowerRotate(SDValue Op, const X86Subtarget &Subtarget,
     return Op;
   }
 
-  // Split 256-bit integers on pre-AVX2 targets.
-  if (VT.is256BitVector() && !Subtarget.hasAVX2())
-    return splitVectorIntBinary(Op, DAG);
-
   assert((VT == MVT::v4i32 || VT == MVT::v8i16 || VT == MVT::v16i8 ||
-          ((VT == MVT::v8i32 || VT == MVT::v16i16 || VT == MVT::v32i8 ||
-            VT == MVT::v32i16) &&
-           Subtarget.hasAVX2())) &&
+          ((VT == MVT::v8i32 || VT == MVT::v16i16 || VT == MVT::v32i8) &&
+           Subtarget.hasAVX2()) ||
+          (VT == MVT::v32i16 && !Subtarget.useBWIRegs())) &&
          "Only vXi32/vXi16/vXi8 vector rotates supported");
 
   // Rotate by an uniform constant - expand back to shifts.
@@ -36241,9 +36249,10 @@ static bool matchUnaryShuffle(MVT MaskVT, ArrayRef<int> Mask,
         (V1.getOpcode() == ISD::SCALAR_TO_VECTOR &&
          isUndefOrZeroInRange(Mask, 1, NumMaskElts - 1))) {
       Shuffle = X86ISD::VZEXT_MOVL;
-      SrcVT = DstVT = MaskEltSize == 16      ? MVT::v8f16
-                      : !Subtarget.hasSSE2() ? MVT::v4f32
-                                             : MaskVT;
+      if (MaskEltSize == 16)
+        SrcVT = DstVT = MaskVT.changeVectorElementType(MVT::f16);
+      else
+        SrcVT = DstVT = !Subtarget.hasSSE2() ? MVT::v4f32 : MaskVT;
       return true;
     }
   }
@@ -36292,9 +36301,10 @@ static bool matchUnaryShuffle(MVT MaskVT, ArrayRef<int> Mask,
       isUndefOrEqual(Mask[0], 0) &&
       isUndefOrZeroInRange(Mask, 1, NumMaskElts - 1)) {
     Shuffle = X86ISD::VZEXT_MOVL;
-    SrcVT = DstVT = MaskEltSize == 16      ? MVT::v8f16
-                    : !Subtarget.hasSSE2() ? MVT::v4f32
-                                           : MaskVT;
+    if (MaskEltSize == 16)
+      SrcVT = DstVT = MaskVT.changeVectorElementType(MVT::f16);
+    else
+      SrcVT = DstVT = !Subtarget.hasSSE2() ? MVT::v4f32 : MaskVT;
     return true;
   }
 
@@ -48562,20 +48572,50 @@ static SDValue combinePMULH(SDValue Src, EVT VT, const SDLoc &DL,
   SDValue LHS = Src.getOperand(0).getOperand(0);
   SDValue RHS = Src.getOperand(0).getOperand(1);
 
-  unsigned ExtOpc = LHS.getOpcode();
-  if ((ExtOpc != ISD::SIGN_EXTEND && ExtOpc != ISD::ZERO_EXTEND) ||
-      RHS.getOpcode() != ExtOpc)
+  // Count leading sign/zero bits on both inputs - if there are enough then
+  // truncation back to vXi16 will be cheap - either as a pack/shuffle
+  // sequence or using AVX512 truncations. If the inputs are sext/zext then the
+  // truncations may actually be free by peeking through to the ext source.
+  auto IsSext = [&DAG](SDValue V) {
+    return DAG.ComputeMinSignedBits(V) <= 16;
+  };
+  auto IsZext = [&DAG](SDValue V) {
+    return DAG.computeKnownBits(V).countMaxActiveBits() <= 16;
+  };
+
+  bool IsSigned = IsSext(LHS) && IsSext(RHS);
+  bool IsUnsigned = IsZext(LHS) && IsZext(RHS);
+  if (!IsSigned && !IsUnsigned)
     return SDValue();
 
-  // Peek through the extends.
-  LHS = LHS.getOperand(0);
-  RHS = RHS.getOperand(0);
+  // Check if both inputs are extensions, which will be removed by truncation.
+  bool IsTruncateFree = (LHS.getOpcode() == ISD::SIGN_EXTEND ||
+                         LHS.getOpcode() == ISD::ZERO_EXTEND) &&
+                        (RHS.getOpcode() == ISD::SIGN_EXTEND ||
+                         RHS.getOpcode() == ISD::ZERO_EXTEND) &&
+                        LHS.getOperand(0).getScalarValueSizeInBits() <= 16 &&
+                        RHS.getOperand(0).getScalarValueSizeInBits() <= 16;
 
-  // Ensure the input types match.
-  if (LHS.getValueType() != VT || RHS.getValueType() != VT)
-    return SDValue();
+  // For AVX2+ targets, with the upper bits known zero, we can perform MULHU on
+  // the (bitcasted) inputs directly, and then cheaply pack/truncate the result
+  // (upper elts will be zero). Don't attempt this with just AVX512F as MULHU
+  // will have to split anyway.
+  unsigned InSizeInBits = InVT.getSizeInBits();
+  if (IsUnsigned && !IsTruncateFree && Subtarget.hasInt256() &&
+      !(Subtarget.hasAVX512() && !Subtarget.hasBWI() && VT.is256BitVector()) &&
+      (InSizeInBits % 16) == 0) {
+    EVT BCVT = EVT::getVectorVT(*DAG.getContext(), MVT::i16,
+                                InVT.getSizeInBits() / 16);
+    SDValue Res = DAG.getNode(ISD::MULHU, DL, BCVT, DAG.getBitcast(BCVT, LHS),
+                              DAG.getBitcast(BCVT, RHS));
+    return DAG.getNode(ISD::TRUNCATE, DL, VT, DAG.getBitcast(InVT, Res));
+  }
 
-  unsigned Opc = ExtOpc == ISD::SIGN_EXTEND ? ISD::MULHS : ISD::MULHU;
+  // Truncate back to source type.
+  LHS = DAG.getNode(ISD::TRUNCATE, DL, VT, LHS);
+  RHS = DAG.getNode(ISD::TRUNCATE, DL, VT, RHS);
+
+  unsigned Opc = IsSigned ? ISD::MULHS : ISD::MULHU;
   return DAG.getNode(Opc, DL, VT, LHS, RHS);
 }
 

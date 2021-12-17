@@ -400,9 +400,11 @@ void DWARFRewriter::updateUnitDebugInfo(uint64_t CUIndex, DWARFUnit &Unit,
       uint64_t RangesSectionOffset =
           RangesSectionWriter->getEmptyRangesOffset();
       Expected<DWARFAddressRangesVector> RangesOrError = DIE.getAddressRanges();
-      const BinaryFunction *Function = RangesOrError && !RangesOrError->empty()
-          ? BC.getBinaryFunctionContainingAddress(RangesOrError->front().LowPC)
-          : nullptr;
+      const BinaryFunction *Function =
+          RangesOrError && !RangesOrError->empty()
+              ? BC.getBinaryFunctionContainingAddress(
+                    RangesOrError->front().LowPC)
+              : nullptr;
       if (Function) {
         DebugAddressRangesVector OutputRanges =
             Function->translateInputToOutputRanges(*RangesOrError);
@@ -431,8 +433,8 @@ void DWARFRewriter::updateUnitDebugInfo(uint64_t CUIndex, DWARFUnit &Unit,
         if (Value.isFormClass(DWARFFormValue::FC_Constant) ||
             Value.isFormClass(DWARFFormValue::FC_SectionOffset)) {
           uint64_t Offset = Value.isFormClass(DWARFFormValue::FC_Constant)
-                                      ? Value.getAsUnsignedConstant().getValue()
-                                      : Value.getAsSectionOffset().getValue();
+                                ? Value.getAsUnsignedConstant().getValue()
+                                : Value.getAsSectionOffset().getValue();
           DebugLocationsVector InputLL;
 
           Optional<object::SectionedAddress> SectionAddress =
@@ -676,6 +678,10 @@ void DWARFRewriter::updateLineTableOffsets(const MCAsmLayout &Layout) {
     return *Offset;
   };
 
+  const uint64_t Reloc32Type = BC.isAArch64()
+                                   ? static_cast<uint64_t>(ELF::R_AARCH64_ABS32)
+                                   : static_cast<uint64_t>(ELF::R_X86_64_32);
+
   for (const std::unique_ptr<DWARFUnit> &CU : BC.DwCtx->compile_units()) {
     const unsigned CUID = CU->getOffset();
     MCSymbol *Label = BC.getDwarfLineTable(CUID).getLabel();
@@ -691,7 +697,7 @@ void DWARFRewriter::updateLineTableOffsets(const MCAsmLayout &Layout) {
     const uint64_t LineTableOffset = Layout.getSymbolOffset(*Label);
     DebugLineOffsetMap[GetStatementListValue(CU.get())] = LineTableOffset;
     assert(DbgInfoSection && ".debug_info section must exist");
-    DbgInfoSection->addRelocation(AttributeOffset, nullptr, ELF::R_X86_64_32,
+    DbgInfoSection->addRelocation(AttributeOffset, nullptr, Reloc32Type,
                                   LineTableOffset, 0, /*Pending=*/true);
   }
 
@@ -705,14 +711,14 @@ void DWARFRewriter::updateLineTableOffsets(const MCAsmLayout &Layout) {
     auto Iter = DebugLineOffsetMap.find(GetStatementListValue(Unit));
     assert(Iter != DebugLineOffsetMap.end() &&
            "Type Unit Updated Line Number Entry does not exist.");
-    TypeInfoSection->addRelocation(AttributeOffset, nullptr, ELF::R_X86_64_32,
+    TypeInfoSection->addRelocation(AttributeOffset, nullptr, Reloc32Type,
                                    Iter->second, 0, /*Pending=*/true);
   }
 
   // Set .debug_info as finalized so it won't be skipped over when
   // we process sections while writing out the new binary. This ensures
   // that the pending relocations will be processed and not ignored.
-  if(DbgInfoSection)
+  if (DbgInfoSection)
     DbgInfoSection->setIsFinalized();
 
   if (TypeInfoSection)
@@ -726,15 +732,15 @@ void DWARFRewriter::finalizeDebugSections(
     SmallVector<char, 16> ARangesBuffer;
     raw_svector_ostream OS(ARangesBuffer);
 
-    auto MAB = std::unique_ptr<MCAsmBackend>(BC.TheTarget->createMCAsmBackend(
-        *BC.STI, *BC.MRI, MCTargetOptions()));
+    auto MAB = std::unique_ptr<MCAsmBackend>(
+        BC.TheTarget->createMCAsmBackend(*BC.STI, *BC.MRI, MCTargetOptions()));
 
     ARangesSectionWriter->writeARangesSection(OS);
     const StringRef &ARangesContents = OS.str();
 
     BC.registerOrUpdateNoteSection(".debug_aranges",
-                                    copyByteArray(ARangesContents),
-                                    ARangesContents.size());
+                                   copyByteArray(ARangesContents),
+                                   ARangesContents.size());
   }
 
   if (StrWriter->isInitialized()) {

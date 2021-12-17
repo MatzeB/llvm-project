@@ -14,6 +14,7 @@
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/TensorEncoding.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/BitVector.h"
@@ -633,7 +634,7 @@ bool mlir::detail::isSupportedMemorySpace(Attribute memorySpace) {
     return true;
 
   // Allow custom dialect attributes.
-  if (!::mlir::isa<BuiltinDialect>(memorySpace.getDialect()))
+  if (!isa<BuiltinDialect>(memorySpace.getDialect()))
     return true;
 
   return false;
@@ -1166,4 +1167,41 @@ AffineMap mlir::getStridedLinearLayoutMap(MemRefType t) {
   if (failed(getStridesAndOffset(t, strides, offset)))
     return AffineMap();
   return makeStridedLinearLayoutMap(strides, offset, t.getContext());
+}
+
+/// Return the AffineExpr representation of the offset, assuming `memRefType`
+/// is a strided memref.
+static AffineExpr getOffsetExpr(MemRefType memrefType) {
+  SmallVector<AffineExpr> strides;
+  AffineExpr offset;
+  if (failed(getStridesAndOffset(memrefType, strides, offset)))
+    assert(false && "expected strided memref");
+  return offset;
+}
+
+/// Helper to construct a contiguous MemRefType of `shape`, `elementType` and
+/// `offset` AffineExpr.
+static MemRefType makeContiguousRowMajorMemRefType(MLIRContext *context,
+                                                   ArrayRef<int64_t> shape,
+                                                   Type elementType,
+                                                   AffineExpr offset) {
+  AffineExpr canonical = makeCanonicalStridedLayoutExpr(shape, context);
+  AffineExpr contiguousRowMajor = canonical + offset;
+  AffineMap contiguousRowMajorMap =
+      AffineMap::inferFromExprList({contiguousRowMajor})[0];
+  return MemRefType::get(shape, elementType, contiguousRowMajorMap);
+}
+
+/// Helper determining if a memref is static-shape and contiguous-row-major
+/// layout, while still allowing for an arbitrary offset (any static or
+/// dynamic value).
+bool mlir::isStaticShapeAndContiguousRowMajor(MemRefType memrefType) {
+  if (!memrefType.hasStaticShape())
+    return false;
+  AffineExpr offset = getOffsetExpr(memrefType);
+  MemRefType contiguousRowMajorMemRefType = makeContiguousRowMajorMemRefType(
+      memrefType.getContext(), memrefType.getShape(),
+      memrefType.getElementType(), offset);
+  return canonicalizeStridedLayout(memrefType) ==
+         canonicalizeStridedLayout(contiguousRowMajorMemRefType);
 }

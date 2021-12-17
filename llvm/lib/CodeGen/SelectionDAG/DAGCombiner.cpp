@@ -4436,7 +4436,7 @@ SDValue DAGCombiner::visitREM(SDNode *N) {
   if (DAG.isKnownNeverZero(N1) && !TLI.isIntDivCheap(VT, Attr)) {
     SDValue OptimizedDiv =
         isSigned ? visitSDIVLike(N0, N1, N) : visitUDIVLike(N0, N1, N);
-    if (OptimizedDiv.getNode()) {
+    if (OptimizedDiv.getNode() && OptimizedDiv.getNode() != N) {
       // If the equivalent Div node also exists, update its users.
       unsigned DivOpcode = isSigned ? ISD::SDIV : ISD::UDIV;
       if (SDNode *DivNode = DAG.getNodeIfExists(DivOpcode, N->getVTList(),
@@ -4464,6 +4464,9 @@ SDValue DAGCombiner::visitMULHS(SDNode *N) {
   SDLoc DL(N);
 
   if (VT.isVector()) {
+    if (SDValue FoldedVOp = SimplifyVBinOp(N, DL))
+      return FoldedVOp;
+
     // fold (mulhs x, 0) -> 0
     // do not return N0/N1, because undef node may exist.
     if (ISD::isConstantSplatVectorAllZeros(N0.getNode()) ||
@@ -4521,6 +4524,9 @@ SDValue DAGCombiner::visitMULHU(SDNode *N) {
   SDLoc DL(N);
 
   if (VT.isVector()) {
+    if (SDValue FoldedVOp = SimplifyVBinOp(N, DL))
+      return FoldedVOp;
+
     // fold (mulhu x, 0) -> 0
     // do not return N0/N1, because undef node may exist.
     if (ISD::isConstantSplatVectorAllZeros(N0.getNode()) ||
@@ -4780,12 +4786,14 @@ SDValue DAGCombiner::visitMULO(SDNode *N) {
 }
 
 // Function to calculate whether the Min/Max pair of SDNodes (potentially
-// swapped around) make a signed saturate pattern, clamping to between -2^(BW-1)
-// and 2^(BW-1)-1. Returns the node being clamped and the bitwidth of the clamp
-// in BW. Should work with both SMIN/SMAX nodes and setcc/select combo. The
-// operands are the same as SimplifySelectCC. N0<N1 ? N2 : N3
+// swapped around) make a signed saturate pattern, clamping to between a signed
+// saturate of -2^(BW-1) and 2^(BW-1)-1, or an unsigned saturate of 0 and 2^BW.
+// Returns the node being clamped and the bitwidth of the clamp in BW. Should
+// work with both SMIN/SMAX nodes and setcc/select combo. The operands are the
+// same as SimplifySelectCC. N0<N1 ? N2 : N3.
 static SDValue isSaturatingMinMax(SDValue N0, SDValue N1, SDValue N2,
-                                  SDValue N3, ISD::CondCode CC, unsigned &BW) {
+                                  SDValue N3, ISD::CondCode CC, unsigned &BW,
+                                  bool &Unsigned) {
   auto isSignedMinMax = [&](SDValue N0, SDValue N1, SDValue N2, SDValue N3,
                             ISD::CondCode CC) {
     // The compare and select operand should be the same or the select operands
@@ -4852,17 +4860,27 @@ static SDValue isSaturatingMinMax(SDValue N0, SDValue N1, SDValue N2,
   const APInt &MinC = MinCOp->getAPIntValue();
   const APInt &MaxC = MaxCOp->getAPIntValue();
   APInt MinCPlus1 = MinC + 1;
-  if (-MaxC != MinCPlus1 || !MinCPlus1.isPowerOf2())
-    return SDValue();
-  BW = MinCPlus1.exactLogBase2() + 1;
-  return N02;
+  if (-MaxC == MinCPlus1 && MinCPlus1.isPowerOf2()) {
+    BW = MinCPlus1.exactLogBase2() + 1;
+    Unsigned = false;
+    return N02;
+  }
+
+  if (MaxC == 0 && MinCPlus1.isPowerOf2()) {
+    BW = MinCPlus1.exactLogBase2();
+    Unsigned = true;
+    return N02;
+  }
+
+  return SDValue();
 }
 
 static SDValue PerformMinMaxFpToSatCombine(SDValue N0, SDValue N1, SDValue N2,
                                            SDValue N3, ISD::CondCode CC,
                                            SelectionDAG &DAG) {
   unsigned BW;
-  SDValue Fp = isSaturatingMinMax(N0, N1, N2, N3, CC, BW);
+  bool Unsigned;
+  SDValue Fp = isSaturatingMinMax(N0, N1, N2, N3, CC, BW, Unsigned);
   if (!Fp || Fp.getOpcode() != ISD::FP_TO_SINT)
     return SDValue();
   EVT FPVT = Fp.getOperand(0).getValueType();
@@ -4870,13 +4888,14 @@ static SDValue PerformMinMaxFpToSatCombine(SDValue N0, SDValue N1, SDValue N2,
   if (FPVT.isVector())
     NewVT = EVT::getVectorVT(*DAG.getContext(), NewVT,
                              FPVT.getVectorElementCount());
-  if (!DAG.getTargetLoweringInfo().shouldConvertFpToSat(
-          ISD::FP_TO_SINT_SAT, Fp.getOperand(0).getValueType(), NewVT))
+  unsigned NewOpc = Unsigned ? ISD::FP_TO_UINT_SAT : ISD::FP_TO_SINT_SAT;
+  if (!DAG.getTargetLoweringInfo().shouldConvertFpToSat(NewOpc, FPVT, NewVT))
     return SDValue();
   SDLoc DL(Fp);
-  SDValue Sat = DAG.getNode(ISD::FP_TO_SINT_SAT, DL, NewVT, Fp.getOperand(0),
+  SDValue Sat = DAG.getNode(NewOpc, DL, NewVT, Fp.getOperand(0),
                             DAG.getValueType(NewVT.getScalarType()));
-  return DAG.getSExtOrTrunc(Sat, DL, N2->getValueType(0));
+  return Unsigned ? DAG.getZExtOrTrunc(Sat, DL, N2->getValueType(0))
+                  : DAG.getSExtOrTrunc(Sat, DL, N2->getValueType(0));
 }
 
 SDValue DAGCombiner::visitIMINMAX(SDNode *N) {
@@ -10045,11 +10064,12 @@ SDValue DAGCombiner::visitMSTORE(SDNode *N) {
 
   // If this is a masked load with an all ones mask, we can use a unmasked load.
   // FIXME: Can we do this for indexed, compressing, or truncating stores?
-  if (ISD::isConstantSplatVectorAllOnes(Mask.getNode()) &&
-      MST->isUnindexed() && !MST->isCompressingStore() &&
-      !MST->isTruncatingStore())
+  if (ISD::isConstantSplatVectorAllOnes(Mask.getNode()) && MST->isUnindexed() &&
+      !MST->isCompressingStore() && !MST->isTruncatingStore())
     return DAG.getStore(MST->getChain(), SDLoc(N), MST->getValue(),
-                        MST->getBasePtr(), MST->getMemOperand());
+                        MST->getBasePtr(), MST->getPointerInfo(),
+                        MST->getOriginalAlign(), MachineMemOperand::MOStore,
+                        MST->getAAInfo());
 
   // Try transforming N to an indexed store.
   if (CombineToPreIndexedLoadStore(N) || CombineToPostIndexedLoadStore(N))
@@ -10102,11 +10122,12 @@ SDValue DAGCombiner::visitMLOAD(SDNode *N) {
 
   // If this is a masked load with an all ones mask, we can use a unmasked load.
   // FIXME: Can we do this for indexed, expanding, or extending loads?
-  if (ISD::isConstantSplatVectorAllOnes(Mask.getNode()) &&
-      MLD->isUnindexed() && !MLD->isExpandingLoad() &&
-      MLD->getExtensionType() == ISD::NON_EXTLOAD) {
-    SDValue NewLd = DAG.getLoad(N->getValueType(0), SDLoc(N), MLD->getChain(),
-                                MLD->getBasePtr(), MLD->getMemOperand());
+  if (ISD::isConstantSplatVectorAllOnes(Mask.getNode()) && MLD->isUnindexed() &&
+      !MLD->isExpandingLoad() && MLD->getExtensionType() == ISD::NON_EXTLOAD) {
+    SDValue NewLd = DAG.getLoad(
+        N->getValueType(0), SDLoc(N), MLD->getChain(), MLD->getBasePtr(),
+        MLD->getPointerInfo(), MLD->getOriginalAlign(),
+        MachineMemOperand::MOLoad, MLD->getAAInfo(), MLD->getRanges());
     return CombineTo(N, NewLd, NewLd.getValue(1));
   }
 
@@ -20723,6 +20744,156 @@ static SDValue narrowExtractedVectorLoad(SDNode *Extract, SelectionDAG &DAG) {
   return NewLd;
 }
 
+/// Given  EXTRACT_SUBVECTOR(VECTOR_SHUFFLE(Op0, Op1, Mask)),
+/// try to produce  VECTOR_SHUFFLE(EXTRACT_SUBVECTOR(Op?, ?),
+///                                EXTRACT_SUBVECTOR(Op?, ?),
+///                                Mask'))
+/// iff it is legal and profitable to do so. Notably, the trimmed mask
+/// (containing only the elements that are extracted)
+/// must reference at most two subvectors.
+static SDValue foldExtractSubvectorFromShuffleVector(SDNode *N,
+                                                     SelectionDAG &DAG,
+                                                     const TargetLowering &TLI,
+                                                     bool LegalOperations) {
+  assert(N->getOpcode() == ISD::EXTRACT_SUBVECTOR &&
+         "Must only be called on EXTRACT_SUBVECTOR's");
+
+  SDValue N0 = N->getOperand(0);
+
+  // Only deal with non-scalable vectors.
+  EVT NarrowVT = N->getValueType(0);
+  EVT WideVT = N0.getValueType();
+  if (!NarrowVT.isFixedLengthVector() || !WideVT.isFixedLengthVector())
+    return SDValue();
+
+  // The operand must be a shufflevector.
+  auto *WideShuffleVector = dyn_cast<ShuffleVectorSDNode>(N0);
+  if (!WideShuffleVector)
+    return SDValue();
+
+  // The old shuffleneeds to go away.
+  if (!WideShuffleVector->hasOneUse())
+    return SDValue();
+
+  // And the narrow shufflevector that we'll form must be legal.
+  if (LegalOperations &&
+      !TLI.isOperationLegalOrCustom(ISD::VECTOR_SHUFFLE, NarrowVT))
+    return SDValue();
+
+  uint64_t FirstExtractedEltIdx = N->getConstantOperandVal(1);
+  int NumEltsExtracted = NarrowVT.getVectorNumElements();
+  assert((FirstExtractedEltIdx % NumEltsExtracted) == 0 &&
+         "Extract index is not a multiple of the output vector length.");
+
+  int WideNumElts = WideVT.getVectorNumElements();
+
+  SmallVector<int, 16> NewMask;
+  NewMask.reserve(NumEltsExtracted);
+  SmallSetVector<std::pair<SDValue /*Op*/, int /*SubvectorIndex*/>, 2>
+      DemandedSubvectors;
+
+  // Try to decode the wide mask into narrow mask from at most two subvectors.
+  for (int M : WideShuffleVector->getMask().slice(FirstExtractedEltIdx,
+                                                  NumEltsExtracted)) {
+    assert((M >= -1) && (M < (2 * WideNumElts)) &&
+           "Out-of-bounds shuffle mask?");
+
+    if (M < 0) {
+      // Does not depend on operands, does not require adjustment.
+      NewMask.emplace_back(M);
+      continue;
+    }
+
+    // From which operand of the shuffle does this shuffle mask element pick?
+    int WideShufOpIdx = M / WideNumElts;
+    // Which element of that operand is picked?
+    int OpEltIdx = M % WideNumElts;
+
+    assert((OpEltIdx + WideShufOpIdx * WideNumElts) == M &&
+           "Shuffle mask vector decomposition failure.");
+
+    // And which NumEltsExtracted-sized subvector of that operand is that?
+    int OpSubvecIdx = OpEltIdx / NumEltsExtracted;
+    // And which element within that subvector of that operand is that?
+    int OpEltIdxInSubvec = OpEltIdx % NumEltsExtracted;
+
+    assert((OpEltIdxInSubvec + OpSubvecIdx * NumEltsExtracted) == OpEltIdx &&
+           "Shuffle mask subvector decomposition failure.");
+
+    assert((OpEltIdxInSubvec + OpSubvecIdx * NumEltsExtracted +
+            WideShufOpIdx * WideNumElts) == M &&
+           "Shuffle mask full decomposition failure.");
+
+    SDValue Op = WideShuffleVector->getOperand(WideShufOpIdx);
+
+    if (Op.isUndef()) {
+      // Picking from an undef operand. Let's adjust mask instead.
+      NewMask.emplace_back(-1);
+      continue;
+    }
+
+    // Profitability check: only deal with extractions from the first subvector.
+    if (OpSubvecIdx != 0)
+      return SDValue();
+
+    const std::pair<SDValue, int> DemandedSubvector =
+        std::make_pair(Op, OpSubvecIdx);
+
+    if (DemandedSubvectors.insert(DemandedSubvector)) {
+      if (DemandedSubvectors.size() > 2)
+        return SDValue(); // We can't handle more than two subvectors.
+      // How many elements into the WideVT does this subvector start?
+      int Index = NumEltsExtracted * OpSubvecIdx;
+      // Bail out if the extraction isn't going to be cheap.
+      if (!TLI.isExtractSubvectorCheap(NarrowVT, WideVT, Index))
+        return SDValue();
+    }
+
+    // Ok, but from which operand of the new shuffle will this element pick?
+    int NewOpIdx =
+        getFirstIndexOf(DemandedSubvectors.getArrayRef(), DemandedSubvector);
+    assert((NewOpIdx == 0 || NewOpIdx == 1) && "Unexpected operand index.");
+
+    int AdjM = OpEltIdxInSubvec + NewOpIdx * NumEltsExtracted;
+    NewMask.emplace_back(AdjM);
+  }
+  assert(NewMask.size() == (unsigned)NumEltsExtracted && "Produced bad mask.");
+  assert(DemandedSubvectors.size() <= 2 &&
+         "Should have ended up demanding at most two subvectors.");
+
+  // Did we discover that the shuffle does not actually depend on operands?
+  if (DemandedSubvectors.empty())
+    return DAG.getUNDEF(NarrowVT);
+
+  // We still perform the exact same EXTRACT_SUBVECTOR,  just on different
+  // operand[s]/index[es], so there is no point in checking for it's legality.
+
+  // Do not turn a legal shuffle into an illegal one.
+  if (TLI.isShuffleMaskLegal(WideShuffleVector->getMask(), WideVT) &&
+      !TLI.isShuffleMaskLegal(NewMask, NarrowVT))
+    return SDValue();
+
+  SDLoc DL(N);
+
+  SmallVector<SDValue, 2> NewOps;
+  for (const std::pair<SDValue /*Op*/, int /*SubvectorIndex*/>
+           &DemandedSubvector : DemandedSubvectors) {
+    // How many elements into the WideVT does this subvector start?
+    int Index = NumEltsExtracted * DemandedSubvector.second;
+    SDValue IndexC = DAG.getVectorIdxConstant(Index, DL);
+    NewOps.emplace_back(DAG.getNode(ISD::EXTRACT_SUBVECTOR, DL, NarrowVT,
+                                    DemandedSubvector.first, IndexC));
+  }
+  assert((NewOps.size() == 1 || NewOps.size() == 2) &&
+         "Should end up with either one or two ops");
+
+  // If we ended up with only one operand, pad with an undef.
+  if (NewOps.size() == 1)
+    NewOps.emplace_back(DAG.getUNDEF(NarrowVT));
+
+  return DAG.getVectorShuffle(NarrowVT, DL, NewOps[0], NewOps[1], NewMask);
+}
+
 SDValue DAGCombiner::visitEXTRACT_SUBVECTOR(SDNode *N) {
   EVT NVT = N->getValueType(0);
   SDValue V = N->getOperand(0);
@@ -20835,6 +21006,10 @@ SDValue DAGCombiner::visitEXTRACT_SUBVECTOR(SDNode *N) {
                          V.getOperand(ConcatOpIdx), NewIndexC);
     }
   }
+
+  if (SDValue V =
+          foldExtractSubvectorFromShuffleVector(N, DAG, TLI, LegalOperations))
+    return V;
 
   V = peekThroughBitcasts(V);
 

@@ -120,7 +120,7 @@ BinaryFunction *createNewRetpoline(BinaryContext &BC,
     BB1.addInstruction(Lfence);
   }
 
-  std::vector<MCInst> Seq;
+  InstructionListType Seq;
   MIB.createShortJmp(Seq, BB1.getLabel(), &Ctx);
   BB1.addInstructions(Seq.begin(), Seq.end());
 
@@ -227,10 +227,10 @@ BinaryFunction *RetpolineInsertion::getOrCreateRetpoline(
 }
 
 void createBranchReplacement(BinaryContext &BC,
-                                const IndirectBranchInfo &BrInfo,
-                                bool R11Available,
-                                std::vector<MCInst> &Replacement,
-                                const MCSymbol *RetpolineSymbol) {
+                             const IndirectBranchInfo &BrInfo,
+                             bool R11Available,
+                             InstructionListType &Replacement,
+                             const MCSymbol *RetpolineSymbol) {
   auto &MIB = *BC.MIB;
   // Load the branch address in r11 if available
   if (BrInfo.isMem() && R11Available) {
@@ -293,12 +293,12 @@ void RetpolineInsertion::runOnFunctions(BinaryContext &BC) {
         IndirectBranchInfo BrInfo(Inst, MIB);
         bool R11Available = false;
         BinaryFunction *TargetRetpoline;
-        std::vector<MCInst> Replacement;
+        InstructionListType Replacement;
 
         // Determine if r11 is available before this instruction
         if (BrInfo.isMem()) {
-          if(MIB.hasAnnotation(Inst, "PLTCall"))
-            R11Available= true;
+          if (MIB.hasAnnotation(Inst, "PLTCall"))
+            R11Available = true;
           else if (opts::R11Availability == AvailabilityOptions::ALWAYS)
             R11Available = true;
           else if (opts::R11Availability == AvailabilityOptions::ABI)
@@ -320,7 +320,7 @@ void RetpolineInsertion::runOnFunctions(BinaryContext &BC) {
         TargetRetpoline = getOrCreateRetpoline(BC, BrInfo, R11Available);
 
         createBranchReplacement(BC, BrInfo, R11Available, Replacement,
-                                   TargetRetpoline->getSymbol());
+                                TargetRetpoline->getSymbol());
 
         It = BB.replaceInstruction(It, Replacement.begin(), Replacement.end());
         RetpolinedBranches++;
@@ -329,8 +329,8 @@ void RetpolineInsertion::runOnFunctions(BinaryContext &BC) {
   }
   outs() << "BOLT-INFO: The number of created retpoline functions is : "
          << CreatedRetpolines.size()
-         << "\nBOLT-INFO: The number of retpolined branches is : " << RetpolinedBranches
-         << "\n";
+         << "\nBOLT-INFO: The number of retpolined branches is : "
+         << RetpolinedBranches << "\n";
 }
 
 } // namespace bolt

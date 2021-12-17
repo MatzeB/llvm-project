@@ -699,10 +699,12 @@ bool IsAssumedRank(const ActualArgument &arg) {
 }
 
 bool IsCoarray(const ActualArgument &arg) {
-  if (const auto *expr{arg.UnwrapExpr()}) {
-    return IsCoarray(*expr);
-  }
-  return false;
+  const auto *expr{arg.UnwrapExpr()};
+  return expr && IsCoarray(*expr);
+}
+
+bool IsCoarray(const Symbol &symbol) {
+  return GetAssociationRoot(symbol).Corank() > 0;
 }
 
 bool IsProcedure(const Expr<SomeType> &expr) {
@@ -1193,10 +1195,6 @@ bool IsAutomatic(const Symbol &original) {
   return false;
 }
 
-bool IsCoarray(const Symbol &symbol) {
-  return GetAssociationRoot(symbol).Corank() > 0;
-}
-
 bool IsSaved(const Symbol &original) {
   const Symbol &symbol{GetAssociationRoot(original)};
   const Scope &scope{symbol.owner()};
@@ -1212,7 +1210,7 @@ bool IsSaved(const Symbol &original) {
     return false;
   } else if (scopeKind == Scope::Kind::Module ||
       (scopeKind == Scope::Kind::MainProgram &&
-          (symbol.attrs().test(Attr::TARGET) || IsCoarray(symbol)))) {
+          (symbol.attrs().test(Attr::TARGET) || evaluate::IsCoarray(symbol)))) {
     // 8.5.16p4
     // In main programs, implied SAVE matters only for pointer
     // initialization targets and coarrays.
@@ -1252,6 +1250,20 @@ bool IsDummy(const Symbol &symbol) {
           [](const SubprogramDetails &x) { return x.isDummy(); },
           [](const auto &) { return false; }},
       ResolveAssociations(symbol).details());
+}
+
+bool IsAssumedShape(const Symbol &symbol) {
+  const Symbol &ultimate{ResolveAssociations(symbol)};
+  const auto *object{ultimate.detailsIf<ObjectEntityDetails>()};
+  return object && object->CanBeAssumedShape() &&
+      !evaluate::IsAllocatableOrPointer(ultimate);
+}
+
+bool IsDeferredShape(const Symbol &symbol) {
+  const Symbol &ultimate{ResolveAssociations(symbol)};
+  const auto *object{ultimate.detailsIf<ObjectEntityDetails>()};
+  return object && object->CanBeDeferredShape() &&
+      evaluate::IsAllocatableOrPointer(ultimate);
 }
 
 bool IsFunctionResult(const Symbol &original) {

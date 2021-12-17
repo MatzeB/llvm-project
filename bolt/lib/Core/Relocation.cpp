@@ -176,9 +176,7 @@ bool skipRelocationProcessAArch64(uint64_t Type, uint64_t Contents) {
     return false;
   };
 
-  auto IsNop = [](uint64_t Contents) -> bool {
-    return Contents == 0xd503201f;
-  };
+  auto IsNop = [](uint64_t Contents) -> bool { return Contents == 0xd503201f; };
 
   // The linker might eliminate the instruction and replace it with NOP, ignore
   if (IsNop(Contents))
@@ -222,6 +220,32 @@ bool skipRelocationProcessAArch64(uint64_t Type, uint64_t Contents) {
   }
 
   return false;
+}
+
+uint64_t adjustValueX86(uint64_t Type, uint64_t Value, uint64_t PC) {
+  switch (Type) {
+  default:
+    llvm_unreachable("not supported relocation");
+  case ELF::R_X86_64_32:
+    break;
+  case ELF::R_X86_64_PC32:
+    Value -= PC;
+    break;
+  }
+  return Value;
+}
+
+uint64_t adjustValueAArch64(uint64_t Type, uint64_t Value, uint64_t PC) {
+  switch (Type) {
+  default:
+    llvm_unreachable("not supported relocation");
+  case ELF::R_AARCH64_ABS32:
+    break;
+  case ELF::R_AARCH64_PREL32:
+    Value -= PC;
+    break;
+  }
+  return Value;
 }
 
 uint64_t extractValueX86(uint64_t Type, uint64_t Contents, uint64_t PC) {
@@ -485,6 +509,13 @@ bool Relocation::skipRelocationProcess(uint64_t Type, uint64_t Contents) {
   return skipRelocationProcessX86(Type, Contents);
 }
 
+uint64_t Relocation::adjustValue(uint64_t Type, uint64_t Value,
+                                 uint64_t PC) {
+  if (Arch == Triple::aarch64)
+    return adjustValueAArch64(Type, Value, PC);
+  return adjustValueX86(Type, Value, PC);
+}
+
 uint64_t Relocation::extractValue(uint64_t Type, uint64_t Contents,
                                   uint64_t PC) {
   if (Arch == Triple::aarch64)
@@ -550,25 +581,23 @@ size_t Relocation::emit(MCStreamer *Streamer) const {
     if (Symbol) {
       Value = MCSymbolRefExpr::create(Symbol, Ctx);
       if (Addend) {
-        Value = MCBinaryExpr::createAdd(Value,
-                                        MCConstantExpr::create(Addend, Ctx),
-                                        Ctx);
+        Value = MCBinaryExpr::createAdd(
+            Value, MCConstantExpr::create(Addend, Ctx), Ctx);
       }
     } else {
       Value = MCConstantExpr::create(Addend, Ctx);
     }
-    Value = MCBinaryExpr::createSub(Value,
-                                    MCSymbolRefExpr::create(TempLabel, Ctx),
-                                    Ctx);
+    Value = MCBinaryExpr::createSub(
+        Value, MCSymbolRefExpr::create(TempLabel, Ctx), Ctx);
     Streamer->emitValue(Value, Size);
 
     return Size;
   }
 
   if (Symbol && Addend) {
-    auto Value = MCBinaryExpr::createAdd(MCSymbolRefExpr::create(Symbol, Ctx),
-                                         MCConstantExpr::create(Addend, Ctx),
-                                         Ctx);
+    auto Value =
+        MCBinaryExpr::createAdd(MCSymbolRefExpr::create(Symbol, Ctx),
+                                MCConstantExpr::create(Addend, Ctx), Ctx);
     Streamer->emitValue(Value, Size);
   } else if (Symbol) {
     Streamer->emitSymbolValue(Symbol, Size);

@@ -20,10 +20,8 @@ class raw_ostream;
 
 namespace ELF {
 /// Relocation type mask that was accidentally output by bfd 2.30 linker.
-enum {
-  R_X86_64_converted_reloc_bit = 0x80
-};
-}
+enum { R_X86_64_converted_reloc_bit = 0x80 };
+} // namespace ELF
 
 namespace bolt {
 
@@ -56,6 +54,10 @@ struct Relocation {
 
   /// Handle special cases when relocation should not be processed by bolt
   static bool skipRelocationProcess(uint64_t Type, uint64_t Contents);
+
+  // Adjust value depending on relocation type (make it PC relative or not)
+  static uint64_t adjustValue(uint64_t Type, uint64_t Value,
+                              uint64_t PC);
 
   /// Extract current relocated value from binary contents. This is used for
   /// RISC architectures where values are encoded in specific bits depending
@@ -91,9 +93,7 @@ struct Relocation {
   static uint64_t getPC64();
 
   /// Return true if this relocation is PC-relative. Return false otherwise.
-  bool isPCRelative() const {
-    return isPCRelative(Type);
-  }
+  bool isPCRelative() const { return isPCRelative(Type); }
 
   /// Emit relocation at a current \p Streamer' position. The caller is
   /// responsible for setting the position correctly.

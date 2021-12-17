@@ -32,30 +32,26 @@ class AArch64MCPlusBuilder : public MCPlusBuilder {
 public:
   AArch64MCPlusBuilder(const MCInstrAnalysis *Analysis, const MCInstrInfo *Info,
                        const MCRegisterInfo *RegInfo)
-    : MCPlusBuilder(Analysis, Info, RegInfo) {}
+      : MCPlusBuilder(Analysis, Info, RegInfo) {}
 
   bool equals(const MCTargetExpr &A, const MCTargetExpr &B,
               CompFuncTy Comp) const override {
     const auto &AArch64ExprA = cast<AArch64MCExpr>(A);
     const auto &AArch64ExprB = cast<AArch64MCExpr>(B);
-    if (AArch64ExprA.getKind() !=  AArch64ExprB.getKind())
+    if (AArch64ExprA.getKind() != AArch64ExprB.getKind())
       return false;
 
     return MCPlusBuilder::equals(*AArch64ExprA.getSubExpr(),
                                  *AArch64ExprB.getSubExpr(), Comp);
   }
 
-  bool hasEVEXEncoding(const MCInst &) const override {
-    return false;
-  }
+  bool hasEVEXEncoding(const MCInst &) const override { return false; }
 
   bool isMacroOpFusionPair(ArrayRef<MCInst> Insts) const override {
     return false;
   }
 
-  bool shortenInstruction(MCInst &) const override {
-    return false;
-  }
+  bool shortenInstruction(MCInst &) const override { return false; }
 
   bool isADRP(const MCInst &Inst) const override {
     return Inst.getOpcode() == AArch64::ADRP;
@@ -184,8 +180,8 @@ public:
       if (!Operand.isReg())
         continue;
       unsigned Reg = Operand.getReg();
-      if (Reg == AArch64::SP || Reg == AArch64::WSP ||
-          Reg == AArch64::FP || Reg == AArch64::W29)
+      if (Reg == AArch64::SP || Reg == AArch64::WSP || Reg == AArch64::FP ||
+          Reg == AArch64::W29)
         return true;
     }
     return false;
@@ -208,9 +204,7 @@ public:
     return Inst.getOpcode() == AArch64::BLR;
   }
 
-  MCPhysReg getNoRegister() const override {
-    return AArch64::NoRegister;
-  }
+  MCPhysReg getNoRegister() const override { return AArch64::NoRegister; }
 
   bool hasPCRelOperand(const MCInst &Inst) const override {
     // ADRP is blacklisted and is an exception. Even though it has a
@@ -237,8 +231,8 @@ public:
 
     const MCOperand &Label = Inst.getOperand(1);
     if (!Label.isImm()) {
-      assert (Label.isExpr() && "Unexpected ADR operand");
-      assert (DispExpr && "DispExpr must be set");
+      assert(Label.isExpr() && "Unexpected ADR operand");
+      assert(DispExpr && "DispExpr must be set");
       *DispExpr = Label.getExpr();
       return false;
     }
@@ -251,10 +245,8 @@ public:
     return true;
   }
 
-  bool evaluateAArch64MemoryOperand(const MCInst &Inst,
-                                    int64_t &DispImm,
-                                    const MCExpr **DispExpr = nullptr)
-                                                                const {
+  bool evaluateAArch64MemoryOperand(const MCInst &Inst, int64_t &DispImm,
+                                    const MCExpr **DispExpr = nullptr) const {
     if (isADR(Inst) || isADRP(Inst))
       return evaluateADR(Inst, DispImm, DispExpr);
 
@@ -280,7 +272,7 @@ public:
   bool evaluateMemOperandTarget(const MCInst &Inst, uint64_t &Target,
                                 uint64_t Address,
                                 uint64_t Size) const override {
-    int64_t       DispValue;
+    int64_t DispValue;
     const MCExpr *DispExpr = nullptr;
     if (!evaluateAArch64MemoryOperand(Inst, DispValue, &DispExpr))
       return false;
@@ -333,7 +325,7 @@ public:
       // RewriteInstance::readRelocations().
       return AArch64MCExpr::create(Expr, AArch64MCExpr::VK_ABS_PAGE, Ctx);
     } else {
-      switch(RelType) {
+      switch (RelType) {
       case ELF::R_AARCH64_ADD_ABS_LO12_NC:
       case ELF::R_AARCH64_LD64_GOT_LO12_NC:
       case ELF::R_AARCH64_LDST8_ABS_LO12_NC:
@@ -622,8 +614,7 @@ public:
   }
 
   DenseMap<const MCInst *, SmallVector<MCInst *, 4>>
-  computeLocalUDChain(const MCInst *CurInstr,
-                      InstructionIterator Begin,
+  computeLocalUDChain(const MCInst *CurInstr, InstructionIterator Begin,
                       InstructionIterator End) const {
     DenseMap<int, MCInst *> RegAliasTable;
     DenseMap<const MCInst *, SmallVector<MCInst *, 4>> Uses;
@@ -635,7 +626,7 @@ public:
         if (!Instr.getOperand(OpNum).isReg())
           continue;
         unsigned Reg = Instr.getOperand(OpNum).getReg();
-        MCInst* AliasInst = RegAliasTable[Reg];
+        MCInst *AliasInst = RegAliasTable[Reg];
         Uses[&Instr].push_back(AliasInst);
         LLVM_DEBUG({
           dbgs() << "Adding reg operand " << Reg << " refs ";
@@ -798,13 +789,9 @@ public:
     }
   }
 
-  int getShortJmpEncodingSize() const override {
-    return 33;
-  }
+  int getShortJmpEncodingSize() const override { return 33; }
 
-  int getUncondBranchEncodingSize() const override {
-    return 28;
-  }
+  int getUncondBranchEncodingSize() const override { return 28; }
 
   bool createTailCall(MCInst &Inst, const MCSymbol *Target,
                       MCContext *Ctx) override {
@@ -816,7 +803,7 @@ public:
     return true;
   }
 
-  void createLongTailCall(std::vector<MCInst> &Seq, const MCSymbol *Target,
+  void createLongTailCall(InstructionListType &Seq, const MCSymbol *Target,
                           MCContext *Ctx) override {
     createShortJmp(Seq, Target, Ctx, /*IsTailCall*/ true);
   }
@@ -853,14 +840,10 @@ public:
     return true;
   }
 
-  bool isStore(const MCInst &Inst) const override {
-    return false;
-  }
+  bool isStore(const MCInst &Inst) const override { return false; }
 
-  bool analyzeBranch(InstructionIterator Begin,
-                     InstructionIterator End,
-                     const MCSymbol *&TBB,
-                     const MCSymbol *&FBB,
+  bool analyzeBranch(InstructionIterator Begin, InstructionIterator End,
+                     const MCSymbol *&TBB, const MCSymbol *&FBB,
                      MCInst *&CondBranch,
                      MCInst *&UncondBranch) const override {
     auto I = End;
@@ -911,7 +894,7 @@ public:
     return true;
   }
 
-  void createLongJmp(std::vector<MCInst> &Seq, const MCSymbol *Target,
+  void createLongJmp(InstructionListType &Seq, const MCSymbol *Target,
                      MCContext *Ctx, bool IsTailCall) override {
     // ip0 (r16) is reserved to the linker (refer to 5.3.1.1 of "Procedure Call
     //   Standard for the ARM 64-bit Architecture (AArch64)".
@@ -968,7 +951,7 @@ public:
     Seq.emplace_back(Inst);
   }
 
-  void createShortJmp(std::vector<MCInst> &Seq, const MCSymbol *Target,
+  void createShortJmp(InstructionListType &Seq, const MCSymbol *Target,
                       MCContext *Ctx, bool IsTailCall) override {
     // ip0 (r16) is reserved to the linker (refer to 5.3.1.1 of "Procedure Call
     //   Standard for the ARM 64-bit Architecture (AArch64)".
@@ -977,7 +960,7 @@ public:
     //  add ip0, ip0, imm
     //  br ip0
     MCPhysReg Reg = AArch64::X16;
-    std::vector<MCInst> Insts = materializeAddress(Target, Ctx, Reg);
+    InstructionListType Insts = materializeAddress(Target, Ctx, Reg);
     Insts.emplace_back();
     MCInst &Inst = Insts.back();
     Inst.clear();
@@ -1066,29 +1049,17 @@ public:
     return true;
   }
 
-  bool isMoveMem2Reg(const MCInst &Inst) const override {
-    return false;
-  }
+  bool isMoveMem2Reg(const MCInst &Inst) const override { return false; }
 
-  bool isADD64rr(const MCInst &Inst) const override {
-    return false;
-  }
+  bool isADD64rr(const MCInst &Inst) const override { return false; }
 
-  bool isLeave(const MCInst &Inst) const override {
-    return false;
-  }
+  bool isLeave(const MCInst &Inst) const override { return false; }
 
-  bool isPop(const MCInst &Inst) const override {
-    return false;
-  }
+  bool isPop(const MCInst &Inst) const override { return false; }
 
-  bool isPrefix(const MCInst &Inst) const override {
-    return false;
-  }
+  bool isPrefix(const MCInst &Inst) const override { return false; }
 
-  bool deleteREPPrefix(MCInst &Inst) const override {
-    return false;
-  }
+  bool deleteREPPrefix(MCInst &Inst) const override { return false; }
 
   bool createReturn(MCInst &Inst) const override {
     Inst.setOpcode(AArch64::RET);
@@ -1097,11 +1068,11 @@ public:
     return true;
   }
 
-  std::vector<MCInst> materializeAddress(const MCSymbol *Target, MCContext *Ctx,
+  InstructionListType materializeAddress(const MCSymbol *Target, MCContext *Ctx,
                                          MCPhysReg RegName,
                                          int64_t Addend = 0) const override {
     // Get page-aligned address and add page offset
-    std::vector<MCInst> Insts(2);
+    InstructionListType Insts(2);
     Insts[0].setOpcode(AArch64::ADRP);
     Insts[0].clear();
     Insts[0].addOperand(MCOperand::createReg(RegName));
@@ -1122,7 +1093,6 @@ public:
 
 } // end anonymous namespace
 
-
 namespace llvm {
 namespace bolt {
 
@@ -1132,5 +1102,5 @@ MCPlusBuilder *createAArch64MCPlusBuilder(const MCInstrAnalysis *Analysis,
   return new AArch64MCPlusBuilder(Analysis, Info, RegInfo);
 }
 
-}
-}
+} // namespace bolt
+} // namespace llvm

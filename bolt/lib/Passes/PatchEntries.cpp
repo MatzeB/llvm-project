@@ -50,14 +50,13 @@ void PatchEntries::runOnFunctions(BinaryContext &BC) {
       return;
   }
 
-  if (opts::Verbosity >= 1) {
+  if (opts::Verbosity >= 1)
     outs() << "BOLT-INFO: patching entries in original code\n";
-  }
 
   // Calculate the size of the patch.
   static size_t PatchSize = 0;
   if (!PatchSize) {
-    std::vector<MCInst> Seq;
+    InstructionListType Seq;
     BC.MIB->createLongTailCall(Seq, BC.Ctx->createTempSymbol(), BC.Ctx.get());
     PatchSize = BC.computeCodeSize(Seq.begin(), Seq.end());
   }
@@ -71,9 +70,8 @@ void PatchEntries::runOnFunctions(BinaryContext &BC) {
 
     // Check if we can skip patching the function.
     if (!opts::ForcePatch && !Function.hasEHRanges() &&
-        Function.getSize() < PatchThreshold) {
+        Function.getSize() < PatchThreshold)
       continue;
-    }
 
     // List of patches for function entries. We either successfully patch
     // all entries or, if we cannot patch one or more, do no patch any and
@@ -84,10 +82,9 @@ void PatchEntries::runOnFunctions(BinaryContext &BC) {
     bool Success = Function.forEachEntryPoint([&](uint64_t Offset,
                                                   const MCSymbol *Symbol) {
       if (Offset < NextValidByte) {
-        if (opts::Verbosity >= 1) {
+        if (opts::Verbosity >= 1)
           outs() << "BOLT-INFO: unable to patch entry point in " << Function
                  << " at offset 0x" << Twine::utohexstr(Offset) << '\n';
-        }
         return false;
       }
 
@@ -96,10 +93,9 @@ void PatchEntries::runOnFunctions(BinaryContext &BC) {
                                         Function.getOriginSection()});
       NextValidByte = Offset + PatchSize;
       if (NextValidByte > Function.getMaxSize()) {
-        if (opts::Verbosity >= 1) {
-          outs() << "BOLT-INFO: function " << Function << " too small to patch "
-                    "its entry point\n";
-        }
+        if (opts::Verbosity >= 1)
+          outs() << "BOLT-INFO: function " << Function
+                 << " too small to patch its entry point\n";
         return false;
       }
 
@@ -116,15 +112,14 @@ void PatchEntries::runOnFunctions(BinaryContext &BC) {
     }
 
     for (Patch &Patch : PendingPatches) {
-      BinaryFunction *PatchFunction =
-          BC.createInjectedBinaryFunction(
-              NameResolver::append(Patch.Symbol->getName(), ".org.0"));
+      BinaryFunction *PatchFunction = BC.createInjectedBinaryFunction(
+          NameResolver::append(Patch.Symbol->getName(), ".org.0"));
       // Force the function to be emitted at the given address.
       PatchFunction->setOutputAddress(Patch.Address);
       PatchFunction->setFileOffset(Patch.FileOffset);
       PatchFunction->setOriginSection(Patch.Section);
 
-      std::vector<MCInst> Seq;
+      InstructionListType Seq;
       BC.MIB->createLongTailCall(Seq, Patch.Symbol, BC.Ctx.get());
       PatchFunction->addBasicBlock(0)->addInstructions(Seq);
 

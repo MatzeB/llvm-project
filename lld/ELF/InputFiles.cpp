@@ -555,13 +555,12 @@ void ObjFile<ELFT>::initializeSections(bool ignoreComdats) {
       continue;
     const Elf_Shdr &sec = objSections[i];
 
-    if (sec.sh_type == ELF::SHT_LLVM_CALL_GRAPH_PROFILE)
-      cgProfileSectionIndex = i;
-
     // SHF_EXCLUDE'ed sections are discarded by the linker. However,
     // if -r is given, we'll let the final link discard such sections.
     // This is compatible with GNU.
     if ((sec.sh_flags & SHF_EXCLUDE) && !config->relocatable) {
+      if (sec.sh_type == SHT_LLVM_CALL_GRAPH_PROFILE)
+        cgProfileSectionIndex = i;
       if (sec.sh_type == SHT_LLVM_ADDRSIG) {
         // We ignore the address-significance table if we know that the object
         // file was created by objcopy or ld -r. This is because these tools
@@ -1025,12 +1024,11 @@ InputSectionBase *ObjFile<ELFT>::createInputSection(uint32_t idx,
       name == ".gnu.linkonce.t.__i686.get_pc_thunk.bx")
     return &InputSection::discarded;
 
-  // If we are creating a new .build-id section, strip existing .build-id
-  // sections so that the output won't have more than one .build-id.
-  // This is not usually a problem because input object files normally don't
-  // have .build-id sections, but you can create such files by
-  // "ld.{bfd,gold,lld} -r --build-id", and we want to guard against it.
-  if (name == ".note.gnu.build-id" && config->buildId != BuildIdKind::None)
+  // Strip existing .note.gnu.build-id sections so that the output won't have
+  // more than one build-id. This is not usually a problem because input object
+  // files normally don't have .build-id sections, but you can create such files
+  // by "ld.{bfd,gold,lld} -r --build-id", and we want to guard against it.
+  if (name == ".note.gnu.build-id")
     return &InputSection::discarded;
 
   // The linker merges EH (exception handling) frames and creates a
@@ -1145,9 +1143,12 @@ template <class ELFT> void ObjFile<ELFT>::initializeSymbols() {
       if ((sym->symbolKind == Symbol::LazyArchiveKind &&
            !cast<ArchiveFile>(sym->file)->parsed) ||
           (sym->symbolKind == Symbol::LazyObjectKind &&
-           cast<LazyObjFile>(sym->file)->extracted))
+           cast<LazyObjFile>(sym->file)->extracted)) {
         sym->replace(und);
-      else
+        // Prevent LTO from internalizing the symbol in case there is a
+        // reference to this symbol from this file.
+        sym->isUsedInRegularObj = true;
+      } else
         sym->resolve(und);
       continue;
     }
@@ -1534,7 +1535,7 @@ template <class ELFT> void SharedFile::parse() {
       Symbol *s = symtab->addSymbol(
           Undefined{this, name, sym.getBinding(), sym.st_other, sym.getType()});
       s->exportDynamic = true;
-      if (s->isUndefined() && !s->isWeak() &&
+      if (s->isUndefined() && sym.getBinding() != STB_WEAK &&
           config->unresolvedSymbolsInShlib != UnresolvedPolicy::Ignore)
         requiredSymbols.push_back(s);
       continue;

@@ -37,9 +37,7 @@ cl::opt<std::string> InstrumentationBinpath(
 cl::opt<bool> InstrumentationFileAppendPID(
     "instrumentation-file-append-pid",
     cl::desc("append PID to saved profile file name (default: false)"),
-    cl::init(false),
-    cl::Optional,
-    cl::cat(BoltInstrCategory));
+    cl::init(false), cl::Optional, cl::cat(BoltInstrCategory));
 
 cl::opt<bool> ConservativeInstrumentation(
     "conservative-instrumentation",
@@ -79,7 +77,7 @@ cl::opt<bool> InstrumentCalls("instrument-calls",
                                        "control flow activity (default: true)"),
                               cl::init(true), cl::Optional,
                               cl::cat(BoltInstrCategory));
-}
+} // namespace opts
 
 namespace llvm {
 namespace bolt {
@@ -136,12 +134,12 @@ void Instrumentation::createIndCallTargetDescription(
   Summary->IndCallTargetDescriptions.emplace_back(ICD);
 }
 
-bool Instrumentation::createEdgeDescription(
-    FunctionDescription &FuncDesc,
-    const BinaryFunction &FromFunction, uint32_t From,
-    uint32_t FromNodeID,
-    const BinaryFunction &ToFunction, uint32_t To,
-    uint32_t ToNodeID, bool Instrumented) {
+bool Instrumentation::createEdgeDescription(FunctionDescription &FuncDesc,
+                                            const BinaryFunction &FromFunction,
+                                            uint32_t From, uint32_t FromNodeID,
+                                            const BinaryFunction &ToFunction,
+                                            uint32_t To, uint32_t ToNodeID,
+                                            bool Instrumented) {
   EdgeDescription ED;
   auto Result = FuncDesc.EdgesSet.insert(std::make_pair(FromNodeID, ToNodeID));
   // Avoid creating duplicated edge descriptions. This happens in CFGs where a
@@ -170,13 +168,13 @@ void Instrumentation::createLeafNodeDescription(FunctionDescription &FuncDesc,
   FuncDesc.LeafNodes.emplace_back(IN);
 }
 
-std::vector<MCInst>
+InstructionListType
 Instrumentation::createInstrumentationSnippet(BinaryContext &BC, bool IsLeaf) {
   auto L = BC.scopeLock();
   MCSymbol *Label;
   Label = BC.Ctx->createNamedTempSymbol("InstrEntry");
   Summary->Counters.emplace_back(Label);
-  std::vector<MCInst> CounterInstrs;
+  InstructionListType CounterInstrs;
   BC.MIB->createInstrIncMemory(CounterInstrs, Label, &*BC.Ctx, IsLeaf);
   return CounterInstrs;
 }
@@ -184,18 +182,16 @@ Instrumentation::createInstrumentationSnippet(BinaryContext &BC, bool IsLeaf) {
 namespace {
 
 // Helper instruction sequence insertion function
-BinaryBasicBlock::iterator
-insertInstructions(std::vector<MCInst>& Instrs,
-                   BinaryBasicBlock &BB,
-                   BinaryBasicBlock::iterator Iter) {
+BinaryBasicBlock::iterator insertInstructions(InstructionListType &Instrs,
+                                              BinaryBasicBlock &BB,
+                                              BinaryBasicBlock::iterator Iter) {
   for (MCInst &NewInst : Instrs) {
     Iter = BB.insertInstruction(Iter, NewInst);
     ++Iter;
   }
   return Iter;
 }
-
-}
+} // namespace
 
 void Instrumentation::instrumentLeafNode(BinaryBasicBlock &BB,
                                          BinaryBasicBlock::iterator Iter,
@@ -203,7 +199,7 @@ void Instrumentation::instrumentLeafNode(BinaryBasicBlock &BB,
                                          FunctionDescription &FuncDesc,
                                          uint32_t Node) {
   createLeafNodeDescription(FuncDesc, Node);
-  std::vector<MCInst> CounterInstrs = createInstrumentationSnippet(
+  InstructionListType CounterInstrs = createInstrumentationSnippet(
       BB.getFunction()->getBinaryContext(), IsLeaf);
   insertInstructions(CounterInstrs, BB, Iter);
 }
@@ -218,7 +214,7 @@ void Instrumentation::instrumentIndirectTarget(BinaryBasicBlock &BB,
 
   BinaryContext &BC = FromFunction.getBinaryContext();
   bool IsTailCall = BC.MIB->isTailCall(*Iter);
-  std::vector<MCInst> CounterInstrs = BC.MIB->createInstrumentedIndirectCall(
+  InstructionListType CounterInstrs = BC.MIB->createInstrumentedIndirectCall(
       *Iter, IsTailCall,
       IsTailCall ? IndTailCallHandlerExitBBFunction->getSymbol()
                  : IndCallHandlerExitBBFunction->getSymbol(),
@@ -249,8 +245,8 @@ bool Instrumentation::instrumentOneTarget(
       return false;
   }
 
-  std::vector<MCInst> CounterInstrs =
-    createInstrumentationSnippet(FromFunction.getBinaryContext(), IsLeaf);
+  InstructionListType CounterInstrs =
+      createInstrumentationSnippet(FromFunction.getBinaryContext(), IsLeaf);
 
   BinaryContext &BC = FromFunction.getBinaryContext();
   const MCInst &Inst = *Iter;
@@ -521,10 +517,9 @@ void Instrumentation::runOnFunctions(BinaryContext &BC) {
   BC.registerOrUpdateSection(".bolt.instr.counters", ELF::SHT_PROGBITS, Flags,
                              nullptr, 0, 1);
 
-  BC.registerOrUpdateNoteSection(".bolt.instr.tables", nullptr,
-                                  0,
-                                  /*Alignment=*/1,
-                                  /*IsReadOnly=*/true, ELF::SHT_NOTE);
+  BC.registerOrUpdateNoteSection(".bolt.instr.tables", nullptr, 0,
+                                 /*Alignment=*/1,
+                                 /*IsReadOnly=*/true, ELF::SHT_NOTE);
 
   Summary->IndCallCounterFuncPtr =
       BC.Ctx->getOrCreateSymbol("__bolt_ind_call_counter_func_pointer");
@@ -582,8 +577,9 @@ void Instrumentation::runOnFunctions(BinaryContext &BC) {
       MCSymbol *Target = BC.registerNameAtAddress(
           "__bolt_instr_fini", FiniSection->getAddress(), 0, 0);
       auto IsLEA = [&BC](const MCInst &Inst) { return BC.MIB->isLEA64r(Inst); };
-      const auto LEA = std::find_if(std::next(std::find_if(
-          BB.rbegin(), BB.rend(), IsLEA)), BB.rend(), IsLEA);
+      const auto LEA =
+          std::find_if(std::next(std::find_if(BB.rbegin(), BB.rend(), IsLEA)),
+                       BB.rend(), IsLEA);
       LEA->getOperand(4).setExpr(
           MCSymbolRefExpr::create(Target, MCSymbolRefExpr::VK_None, *BC.Ctx));
     } else {
@@ -596,7 +592,7 @@ void Instrumentation::runOnFunctions(BinaryContext &BC) {
 
 void Instrumentation::createAuxiliaryFunctions(BinaryContext &BC) {
   auto createSimpleFunction =
-      [&](StringRef Title, std::vector<MCInst> Instrs) -> BinaryFunction * {
+      [&](StringRef Title, InstructionListType Instrs) -> BinaryFunction * {
     BinaryFunction *Func = BC.createInjectedBinaryFunction(std::string(Title));
 
     std::vector<std::unique_ptr<BinaryBasicBlock>> BBs;
@@ -710,5 +706,5 @@ void Instrumentation::setupRuntimeLibrary(BinaryContext &BC) {
   assert(RtLibrary && "instrumentation runtime library object must be set");
   RtLibrary->setSummary(std::move(Summary));
 }
-}
-}
+} // namespace bolt
+} // namespace llvm
