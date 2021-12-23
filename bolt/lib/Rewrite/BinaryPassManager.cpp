@@ -147,7 +147,7 @@ PrintICP("print-icp",
   cl::Hidden,
   cl::cat(BoltOptCategory));
 
-static cl::opt<bool>
+cl::opt<bool>
 PrintNormalized("print-normalized",
   cl::desc("print functions after CFG is normalized"),
   cl::ZeroOrMore,
@@ -407,6 +407,10 @@ void BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
     Manager.registerPass(std::make_unique<PrintProfileStats>(NeverPrint));
 
   Manager.registerPass(std::make_unique<ValidateInternalCalls>(NeverPrint));
+
+  Manager.registerPass(std::make_unique<ShortenInstructions>(NeverPrint));
+
+  Manager.registerPass(std::make_unique<RemoveNops>(NeverPrint));
 
   Manager.registerPass(std::make_unique<NormalizeCFG>(PrintNormalized));
 

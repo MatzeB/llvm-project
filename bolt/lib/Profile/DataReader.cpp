@@ -82,21 +82,6 @@ raw_ostream &operator<<(raw_ostream &OS, const Location &Loc) {
   return OS;
 }
 
-iterator_range<FuncBranchData::ContainerTy::const_iterator>
-FuncBranchData::getBranchRange(uint64_t From) const {
-  assert(std::is_sorted(Data.begin(), Data.end()));
-  struct Compare {
-    bool operator()(const BranchInfo &BI, const uint64_t Val) const {
-      return BI.From.Offset < Val;
-    }
-    bool operator()(const uint64_t Val, const BranchInfo &BI) const {
-      return Val < BI.From.Offset;
-    }
-  };
-  auto Range = std::equal_range(Data.begin(), Data.end(), From, Compare());
-  return iterator_range<ContainerTy::const_iterator>(Range.first, Range.second);
-}
-
 void FuncBranchData::appendFrom(const FuncBranchData &FBD, uint64_t Offset) {
   Data.insert(Data.end(), FBD.Data.begin(), FBD.Data.end());
   for (auto I = Data.begin(), E = Data.end(); I != E; ++I) {
@@ -720,10 +705,9 @@ bool DataReader::recordBranch(BinaryFunction &BF, uint64_t From, uint64_t To,
     return true;
   }
 
-  if (FromBB->succ_size() == 0) {
-    // Return from a tail call.
+  // Return from a tail call.
+  if (FromBB->succ_size() == 0)
     return true;
-  }
 
   // Very rarely we will see ignored branches. Do a linear check.
   for (std::pair<uint32_t, uint32_t> &Branch : BF.IgnoredBranches) {
@@ -732,7 +716,22 @@ bool DataReader::recordBranch(BinaryFunction &BF, uint64_t From, uint64_t To,
       return true;
   }
 
-  if (To != ToBB->getOffset()) {
+  bool OffsetMatches = !!(To == ToBB->getOffset());
+  if (!OffsetMatches) {
+    // Skip the nops to support old .fdata
+    uint64_t Offset = ToBB->getOffset();
+    for (MCInst &Instr : *ToBB) {
+      if (!BC.MIB->isNoop(Instr))
+        break;
+
+      Offset += BC.MIB->getAnnotationWithDefault<uint32_t>(Instr, "Size");
+    }
+
+    if (To == Offset)
+      OffsetMatches = true;
+  }
+
+  if (!OffsetMatches) {
     // "To" could be referring to nop instructions in between 2 basic blocks.
     // While building the CFG we make sure these nops are attributed to the
     // previous basic block, thus we check if the destination belongs to the
@@ -802,10 +801,21 @@ bool DataReader::recordBranch(BinaryFunction &BF, uint64_t From, uint64_t To,
     if (collectedInBoltedBinary() && FromBB == ToBB)
       return true;
 
-    LLVM_DEBUG(dbgs() << "invalid branch in " << BF << '\n'
-                      << Twine::utohexstr(From) << " -> "
-                      << Twine::utohexstr(To) << '\n');
-    return false;
+    BinaryBasicBlock *FTSuccessor = FromBB->getConditionalSuccessor(false);
+    if (FTSuccessor && FTSuccessor->succ_size() == 1 &&
+        FTSuccessor->getSuccessor(ToBB->getLabel())) {
+      BinaryBasicBlock::BinaryBranchInfo &FTBI =
+          FTSuccessor->getBranchInfo(*ToBB);
+      FTBI.Count += Count;
+      if (Count)
+        FTBI.MispredictedCount += Mispreds;
+      ToBB = FTSuccessor;
+    } else {
+      LLVM_DEBUG(dbgs() << "invalid branch in " << BF << '\n'
+                        << Twine::utohexstr(From) << " -> "
+                        << Twine::utohexstr(To) << '\n');
+      return false;
+    }
   }
 
   BinaryBasicBlock::BinaryBranchInfo &BI = FromBB->getBranchInfo(*ToBB);
