@@ -1,11 +1,8 @@
-//===- YAMLProfileWriter.cpp - serialize profiling data in YAML -*- C++ -*-===//
+//===- bolt/Profile/YAMLProfileWriter.cpp - YAML profile serializer -------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
 //
 //===----------------------------------------------------------------------===//
 
@@ -71,9 +68,8 @@ void convert(const BinaryFunction &BF,
           CSI.EntryDiscriminator = 0;
           if (CSP.Symbol) {
             const BinaryFunction *Callee = BC.getFunctionForSymbol(CSP.Symbol);
-            if (Callee) {
+            if (Callee)
               CSI.DestId = Callee->getFunctionNumber();
-            }
           }
           CSI.Count = CSP.Count;
           CSI.Mispreds = CSP.Mispreds;
@@ -118,9 +114,8 @@ void convert(const BinaryFunction &BF,
         !(BB->isLandingPad() && BB->getKnownExecutionCount() != 0)) {
       uint64_t SuccessorExecCount = 0;
       for (const BinaryBasicBlock::BinaryBranchInfo &BranchInfo :
-           BB->branch_info()) {
+           BB->branch_info())
         SuccessorExecCount += BranchInfo.Count;
-      }
       if (!SuccessorExecCount)
         continue;
     }
@@ -178,9 +173,9 @@ std::error_code YAMLProfileWriter::writeProfile(const RewriteInstance &RI) {
     const BinaryFunction &BF = BFI.second;
     if (BF.hasProfile() && !BF.empty()) {
       assert(BF.getProfileFlags() != BinaryFunction::PF_NONE);
-      if (ProfileFlags == BinaryFunction::PF_NONE) {
+      if (ProfileFlags == BinaryFunction::PF_NONE)
         ProfileFlags = BF.getProfileFlags();
-      }
+
       assert(BF.getProfileFlags() == ProfileFlags &&
              "expected consistent profile flags across all functions");
     }

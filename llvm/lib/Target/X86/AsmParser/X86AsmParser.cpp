@@ -1760,7 +1760,8 @@ bool X86AsmParser::CreateMemForMSInlineAsm(
   // registers in a mmory expression, and though unaccessible via rip/eip.
   if (IsGlobalLV && (BaseReg || IndexReg)) {
     Operands.push_back(X86Operand::CreateMem(getPointerWidth(), Disp, Start,
-                                             End, Size, Identifier, Decl));
+                                             End, Size, Identifier, Decl,
+                                             FrontendSize));
     return false;
   }
   // Otherwise, we set the base register to a non-zero value

@@ -1111,7 +1111,8 @@ void SystemZXPLINKFrameLowering::emitPrologue(MachineFunction &MF,
           .addReg(SystemZ::R0D, RegState::Define)
           .addReg(SystemZ::R4D);
       // Insert ST r0,xxx(,r4) after STMG instruction.
-      BuildMI(MBB, MBBI, DL, ZII->get(SystemZ::STG), SystemZ::R0D)
+      BuildMI(MBB, MBBI, DL, ZII->get(SystemZ::STG))
+          .addReg(SystemZ::R0D, RegState::Kill)
           .addReg(SystemZ::R4D)
           .addImm(Offset)
           .addReg(0);

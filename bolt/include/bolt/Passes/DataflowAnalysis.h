@@ -1,10 +1,8 @@
-//===--- Passes/DataflowAnalysis.h ----------------------------------------===//
+//===- bolt/Passes/DataflowAnalysis.h ---------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
 //
 //===----------------------------------------------------------------------===//
 
@@ -395,13 +393,12 @@ public:
           BinaryBasicBlock *LBB = Func.getLandingPadBBFor(BB, Inst);
           if (LBB) {
             auto First = LBB->begin();
-            if (First != LBB->end()) {
+            if (First != LBB->end())
               derived().doConfluenceWithLP(CurState,
                                            getOrCreateStateAt(&*First), Inst);
-            } else {
+            else
               derived().doConfluenceWithLP(CurState, getOrCreateStateAt(LBB),
                                            Inst);
-            }
           }
         }
 
@@ -414,31 +411,24 @@ public:
         PrevState = &St;
       };
 
-      if (!Backward) {
-        for (MCInst &Inst : *BB) {
+      if (!Backward)
+        for (MCInst &Inst : *BB)
           doNext(Inst, *BB);
-        }
-      } else {
-        for (auto I = BB->rbegin(), E = BB->rend(); I != E; ++I) {
+      else
+        for (auto I = BB->rbegin(), E = BB->rend(); I != E; ++I)
           doNext(*I, *BB);
-        }
-      }
 
       if (Changed) {
         if (!Backward) {
-          for (BinaryBasicBlock *Succ : BB->successors()) {
+          for (BinaryBasicBlock *Succ : BB->successors())
             Worklist.push(Succ);
-          }
-          for (BinaryBasicBlock *LandingPad : BB->landing_pads()) {
+          for (BinaryBasicBlock *LandingPad : BB->landing_pads())
             Worklist.push(LandingPad);
-          }
         } else {
-          for (BinaryBasicBlock *Pred : BB->predecessors()) {
+          for (BinaryBasicBlock *Pred : BB->predecessors())
             Worklist.push(Pred);
-          }
-          for (BinaryBasicBlock *Thrower : BB->throwers()) {
+          for (BinaryBasicBlock *Thrower : BB->throwers())
             Worklist.push(Thrower);
-          }
         }
       }
     } // end while (!Worklist.empty())

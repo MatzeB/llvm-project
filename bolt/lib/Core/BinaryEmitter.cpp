@@ -1,10 +1,13 @@
-//===--- BinaryEmitter.cpp - collection of functions to emit code and data ===//
+//===- bolt/Core/BinaryEmitter.cpp - Emit code and data -------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the collection of functions and classes used for
+// emission of code and data into object/binary file.
 //
 //===----------------------------------------------------------------------===//
 
@@ -104,9 +107,8 @@ size_t padFunction(const BinaryFunction &Function) {
   for (auto &FPI : FunctionPadding) {
     std::string Name = FPI.first;
     size_t Padding = FPI.second;
-    if (Function.hasNameRegex(Name)) {
+    if (Function.hasNameRegex(Name))
       return Padding;
-    }
   }
 
   return 0;
@@ -203,9 +205,8 @@ void BinaryEmitter::emitAll(StringRef OrgSecPrefix) {
     ELFDwarfLineSection->setFlags(ELF::SHF_ALLOC);
   }
 
-  if (RuntimeLibrary *RtLibrary = BC.getRuntimeLibrary()) {
+  if (RuntimeLibrary *RtLibrary = BC.getRuntimeLibrary())
     RtLibrary->emitBinary(BC, Streamer);
-  }
 
   BC.getTextSection()->setAlignment(Align(opts::AlignText));
 
@@ -226,9 +227,8 @@ void BinaryEmitter::emitFunctions() {
     const bool HasProfile = BC.NumProfiledFuncs > 0;
     const bool OriginalAllowAutoPadding = Streamer.getAllowAutoPadding();
     for (BinaryFunction *Function : Functions) {
-      if (!BC.shouldEmit(*Function)) {
+      if (!BC.shouldEmit(*Function))
         continue;
-      }
 
       LLVM_DEBUG(dbgs() << "BOLT: generating code for function \"" << *Function
                         << "\" : " << Function->getFunctionNumber() << '\n');
@@ -327,11 +327,10 @@ bool BinaryEmitter::emitFunction(BinaryFunction &Function, bool EmitColdPart) {
     }
     MCSymbol *LSDASymbol =
         EmitColdPart ? Function.getColdLSDASymbol() : Function.getLSDASymbol();
-    if (LSDASymbol) {
+    if (LSDASymbol)
       Streamer.emitCFILsda(LSDASymbol, BC.LSDAEncoding);
-    } else {
+    else
       Streamer.emitCFILsda(0, dwarf::DW_EH_PE_omit);
-    }
     // Emit CFI instructions relative to the CIE
     for (const MCCFIInstruction &CFIInstr : Function.cie()) {
       // Only write CIE CFI insns that LLVM will not already emit
@@ -366,9 +365,8 @@ bool BinaryEmitter::emitFunction(BinaryFunction &Function, bool EmitColdPart) {
     Streamer.emitFill(Padding, MAI->getTextAlignFillValue());
   }
 
-  if (opts::MarkFuncs) {
+  if (opts::MarkFuncs)
     Streamer.emitIntValue(BC.MIB->getTrapFillValue(), 1);
-  }
 
   // Emit CFI end
   if (Function.hasCFI())
@@ -415,9 +413,8 @@ void BinaryEmitter::emitFunctionBody(BinaryFunction &BF, bool EmitColdPart,
     }
     Streamer.emitLabel(BB->getLabel());
     if (!EmitCodeOnly) {
-      if (MCSymbol *EntrySymbol = BF.getSecondaryEntryPointSymbol(*BB)) {
+      if (MCSymbol *EntrySymbol = BF.getSecondaryEntryPointSymbol(*BB))
         Streamer.emitLabel(EntrySymbol);
-      }
     }
 
     // Check if special alignment for macro-fusion is needed.
@@ -628,9 +625,8 @@ void BinaryEmitter::emitConstantIslands(BinaryFunction &BF, bool EmitColdPart,
     return;
   // Now emit constant islands from other functions that we may have used in
   // this function.
-  for (BinaryFunction *ExternalFunc : Islands.Dependency) {
+  for (BinaryFunction *ExternalFunc : Islands.Dependency)
     emitConstantIslands(*ExternalFunc, EmitColdPart, &BF);
-  }
 }
 
 SMLoc BinaryEmitter::emitLineInfo(const BinaryFunction &BF, SMLoc NewLoc,
@@ -716,9 +712,8 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
   if (!BF.hasJumpTables())
     return;
 
-  if (opts::PrintJumpTables) {
+  if (opts::PrintJumpTables)
     outs() << "BOLT-INFO: jump tables for function " << BF << ":\n";
-  }
 
   for (auto &JTI : BF.jumpTables()) {
     JumpTable &JT = *JTI.second;
@@ -791,11 +786,10 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
       if (!LabelCounts.empty()) {
         LLVM_DEBUG(dbgs() << "BOLT-DEBUG: jump table count: "
                           << LabelCounts[LI->second] << '\n');
-        if (LabelCounts[LI->second] > 0) {
+        if (LabelCounts[LI->second] > 0)
           Streamer.SwitchSection(HotSection);
-        } else {
+        else
           Streamer.SwitchSection(ColdSection);
-        }
         Streamer.emitValueToAlignment(JT.EntrySize);
       }
       Streamer.emitLabel(LI->second);
@@ -997,9 +991,8 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, bool EmitColdPart) {
   //
   // For type table we (re-)encode the table using TTypeEncoding matching
   // the current assembler mode.
-  for (uint8_t const &Byte : BF.getLSDAActionTable()) {
+  for (uint8_t const &Byte : BF.getLSDAActionTable())
     Streamer.emitIntValue(Byte, 1);
-  }
 
   const BinaryFunction::LSDATypeTableTy &TypeTable =
       (TTypeEncoding & dwarf::DW_EH_PE_indirect) ? BF.getLSDATypeAddressTable()
@@ -1032,9 +1025,8 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, bool EmitColdPart) {
     }
     }
   }
-  for (uint8_t const &Byte : BF.getLSDATypeIndexTable()) {
+  for (uint8_t const &Byte : BF.getLSDATypeIndexTable())
     Streamer.emitIntValue(Byte, 1);
-  }
 }
 
 void BinaryEmitter::emitDebugLineInfoForOriginalFunctions() {

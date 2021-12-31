@@ -1,4 +1,4 @@
-//===--- RewriteInstance.h - Instance of a rewriting process. -------------===//
+//===- bolt/Rewrite/RewriteInstance.h - ELF rewriter ------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -478,10 +478,10 @@ private:
       PLTSI = AArch64_PLTSections;
       break;
     }
-    for (; PLTSI && PLTSI->Name; ++PLTSI) {
+    for (; PLTSI && PLTSI->Name; ++PLTSI)
       if (SectionName == PLTSI->Name)
         return PLTSI;
-    }
+
     return nullptr;
   }
 

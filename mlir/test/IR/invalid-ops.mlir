@@ -1,13 +1,5 @@
 // RUN: mlir-opt -allow-unregistered-dialect %s -split-input-file -verify-diagnostics
 
-func @rank(f32) {
-^bb(%0: f32):
-  "std.rank"(%0): (f32)->index // expected-error {{'std.rank' op operand #0 must be any memref or tensor type}}
-
-  return
-}
-
-// -----
 func @affine_apply_no_map() {
 ^bb0:
   %i = arith.constant 0 : index
@@ -133,30 +125,6 @@ func @invalid_splat(%v : vector<8xf32>) {
 func @invalid_splat(%v : f32) { // expected-note {{prior use here}}
   splat %v : vector<8xf64>
   // expected-error@-1 {{expects different type than prior uses}}
-  return
-}
-
-// -----
-
-func @atomic_rmw_idxs_rank_mismatch(%I: memref<16x10xf32>, %i : index, %val : f32) {
-  // expected-error@+1 {{expects the number of subscripts to be equal to memref rank}}
-  %x = atomic_rmw addf %val, %I[%i] : (f32, memref<16x10xf32>) -> f32
-  return
-}
-
-// -----
-
-func @atomic_rmw_expects_float(%I: memref<16x10xi32>, %i : index, %val : i32) {
-  // expected-error@+1 {{expects a floating-point type}}
-  %x = atomic_rmw addf %val, %I[%i, %i] : (i32, memref<16x10xi32>) -> i32
-  return
-}
-
-// -----
-
-func @atomic_rmw_expects_int(%I: memref<16x10xf32>, %i : index, %val : f32) {
-  // expected-error@+1 {{expects an integer type}}
-  %x = atomic_rmw addi %val, %I[%i, %i] : (f32, memref<16x10xf32>) -> f32
   return
 }
 

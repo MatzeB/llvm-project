@@ -1,10 +1,12 @@
-//===--- JumpTable.h - Representation of a jump table ---------------------===//
+//===- bolt/Core/JumpTable.cpp - Jump table at low-level IR ---------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the JumpTable class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -105,9 +107,8 @@ void bolt::JumpTable::print(raw_ostream &OS) const {
   OS << "Jump table " << getName() << " for function " << *Parent << " at 0x"
      << Twine::utohexstr(getAddress()) << " with a total count of " << Count
      << ":\n";
-  for (const uint64_t EntryOffset : OffsetEntries) {
+  for (const uint64_t EntryOffset : OffsetEntries)
     OS << "  0x" << Twine::utohexstr(EntryOffset) << '\n';
-  }
   for (const MCSymbol *Entry : Entries) {
     auto LI = Labels.find(Offset);
     if (Offset && LI != Labels.end()) {

@@ -1,4 +1,4 @@
-//===--- BinaryContext.h  - Interface for machine-level context -----------===//
+//===- bolt/Core/BinaryContext.h - Low-level context ------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Context for processing binary executables in files and/or memory.
+// Context for processing binary executable/library files.
 //
 //===----------------------------------------------------------------------===//
 
@@ -281,9 +281,8 @@ public:
   void setFilename(StringRef Name) { Filename = std::string(Name); }
 
   Optional<StringRef> getFileBuildID() const {
-    if (FileBuildID) {
+    if (FileBuildID)
       return StringRef(*FileBuildID);
-    }
 
     return NoneType();
   }
@@ -666,9 +665,8 @@ public:
   iterator_range<FilteredBinaryDataConstIterator>
   getBinaryDataForSection(const BinarySection &Section) const {
     auto Begin = BinaryDataMap.lower_bound(Section.getAddress());
-    if (Begin != BinaryDataMap.begin()) {
+    if (Begin != BinaryDataMap.begin())
       --Begin;
-    }
     auto End = BinaryDataMap.upper_bound(Section.getEndAddress());
     auto pred = [&Section](const binary_data_const_iterator &Itr) -> bool {
       return Itr->second->getSection() == Section;
@@ -681,9 +679,8 @@ public:
   iterator_range<FilteredBinaryDataIterator>
   getBinaryDataForSection(BinarySection &Section) {
     auto Begin = BinaryDataMap.lower_bound(Section.getAddress());
-    if (Begin != BinaryDataMap.begin()) {
+    if (Begin != BinaryDataMap.begin())
       --Begin;
-    }
     auto End = BinaryDataMap.upper_bound(Section.getEndAddress());
     auto pred = [&Section](const binary_data_iterator &Itr) -> bool {
       return Itr->second->getSection() == Section;
@@ -698,9 +695,8 @@ public:
   /// Clear the global symbol address -> name(s) map.
   void clearBinaryData() {
     GlobalSymbols.clear();
-    for (auto &Entry : BinaryDataMap) {
+    for (auto &Entry : BinaryDataMap)
       delete Entry.second;
-    }
     BinaryDataMap.clear();
   }
 

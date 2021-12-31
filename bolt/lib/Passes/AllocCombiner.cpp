@@ -1,10 +1,12 @@
-//===--- Passes/AllocCombiner.cpp -----------------------------------------===//
+//===- bolt/Passes/AllocCombiner.cpp --------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the AllocCombinerPass class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -44,9 +46,8 @@ bool isIndifferentToSP(const MCInst &Inst, const BinaryContext &BC) {
 
   for (int I = 0, E = MCPlus::getNumPrimeOperands(Inst); I != E; ++I) {
     const MCOperand &Operand = Inst.getOperand(I);
-    if (Operand.isReg() && Operand.getReg() == BC.MIB->getStackPointer()) {
+    if (Operand.isReg() && Operand.getReg() == BC.MIB->getStackPointer())
       return false;
-    }
   }
   return true;
 }

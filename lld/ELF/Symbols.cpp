@@ -78,7 +78,6 @@ static uint64_t getSymVA(const Symbol &sym, int64_t addend) {
       return d.value;
 
     assert(isec != &InputSection::discarded);
-    isec = isec->repl;
 
     uint64_t offset = d.value;
 
@@ -120,7 +119,7 @@ static uint64_t getSymVA(const Symbol &sym, int64_t addend) {
     // field etc) do the same trick as compiler uses to mark microMIPS
     // for CPU - set the less-significant bit.
     if (config->emachine == EM_MIPS && isMicroMips() &&
-        ((sym.stOther & STO_MIPS_MICROMIPS) || sym.needsPltAddr))
+        ((sym.stOther & STO_MIPS_MICROMIPS) || sym.needsCopy))
       va |= 1;
 
     if (d.isTls() && !config->relocatable) {
@@ -200,7 +199,7 @@ uint64_t Symbol::getSize() const {
 OutputSection *Symbol::getOutputSection() const {
   if (auto *s = dyn_cast<Defined>(this)) {
     if (auto *sec = s->section)
-      return sec->repl->getOutputSection();
+      return sec->getOutputSection();
     return nullptr;
   }
   return nullptr;
@@ -214,14 +213,15 @@ void Symbol::parseSymbolVersion() {
     return;
   StringRef s = getName();
   size_t pos = s.find('@');
-  if (pos == 0 || pos == StringRef::npos)
+  if (pos == StringRef::npos)
     return;
   StringRef verstr = s.substr(pos + 1);
-  if (verstr.empty())
-    return;
 
   // Truncate the symbol name so that it doesn't include the version string.
   nameSize = pos;
+
+  if (verstr.empty())
+    return;
 
   // If this is not in this DSO, it is not a definition.
   if (!isDefined())
@@ -256,10 +256,12 @@ void Symbol::parseSymbolVersion() {
 }
 
 void Symbol::extract() const {
-  if (auto *sym = dyn_cast<LazyArchive>(this))
+  if (auto *sym = dyn_cast<LazyArchive>(this)) {
     cast<ArchiveFile>(sym->file)->extract(sym->sym);
-  else
-    cast<LazyObjFile>(this->file)->extract();
+  } else if (file->lazy) {
+    file->lazy = false;
+    parseFile(file);
+  }
 }
 
 MemoryBufferRef LazyArchive::getMemberBuffer() {
@@ -346,14 +348,14 @@ void elf::maybeWarnUnorderableSymbol(const Symbol *sym) {
     report(": unable to order absolute symbol: ");
   else if (d && isa<OutputSection>(d->section))
     report(": unable to order synthetic symbol: ");
-  else if (d && !d->section->repl->isLive())
+  else if (d && !d->section->isLive())
     report(": unable to order discarded symbol: ");
 }
 
 // Returns true if a symbol can be replaced at load-time by a symbol
 // with the same name defined in other ELF executable or DSO.
 bool elf::computeIsPreemptible(const Symbol &sym) {
-  assert(!sym.isLocal());
+  assert(!sym.isLocal() || sym.isPlaceholder());
 
   // Only symbols with default visibility that appear in dynsym can be
   // preempted. Symbols with protected visibility cannot be preempted.
@@ -549,7 +551,7 @@ void Symbol::resolveUndefined(const Undefined &other) {
   }
 
   // Undefined symbols in a SharedFile do not change the binding.
-  if (dyn_cast_or_null<SharedFile>(other.file))
+  if (isa_and_nonnull<SharedFile>(other.file))
     return;
 
   if (isUndefined() || isShared()) {
@@ -561,22 +563,6 @@ void Symbol::resolveUndefined(const Undefined &other) {
   }
 }
 
-// Using .symver foo,foo@@VER unfortunately creates two symbols: foo and
-// foo@@VER. We want to effectively ignore foo, so give precedence to
-// foo@@VER.
-// FIXME: If users can transition to using
-// .symver foo,foo@@@VER
-// we can delete this hack.
-static int compareVersion(StringRef a, StringRef b) {
-  bool x = a.contains("@@");
-  bool y = b.contains("@@");
-  if (!x && y)
-    return 1;
-  if (x && !y)
-    return -1;
-  return 0;
-}
-
 // Compare two symbols. Return 1 if the new symbol should win, -1 if
 // the new symbol should lose, or 0 if there is a conflict.
 int Symbol::compare(const Symbol *other) const {
@@ -585,8 +571,16 @@ int Symbol::compare(const Symbol *other) const {
   if (!isDefined() && !isCommon())
     return 1;
 
-  if (int cmp = compareVersion(getName(), other->getName()))
-    return cmp;
+  // .symver foo,foo@@VER unfortunately creates two defined symbols: foo and
+  // foo@@VER. In GNU ld, if foo and foo@@VER are in the same file, foo is
+  // ignored. In our implementation, when this is foo, this->getName() may still
+  // contain @@, return 1 in this case as well.
+  if (file == other->file) {
+    if (other->getName().contains("@@"))
+      return 1;
+    if (getName().contains("@@"))
+      return -1;
+  }
 
   if (other->isWeak())
     return -1;
@@ -615,7 +609,7 @@ int Symbol::compare(const Symbol *other) const {
   auto *oldSym = cast<Defined>(this);
   auto *newSym = cast<Defined>(other);
 
-  if (dyn_cast_or_null<BitcodeFile>(other->file))
+  if (isa_and_nonnull<BitcodeFile>(other->file))
     return 0;
 
   if (!oldSym->section && !newSym->section && oldSym->value == newSym->value &&
@@ -719,8 +713,7 @@ template <class LazyT> void Symbol::resolveLazy(const LazyT &other) {
         return;
       }
     } else if (auto *loSym = dyn_cast<LazyObject>(&other)) {
-      LazyObjFile *obj = cast<LazyObjFile>(loSym->file);
-      if (obj->shouldExtractForCommon(loSym->getName())) {
+      if (loSym->file->shouldExtractForCommon(loSym->getName())) {
         replaceCommon(*this, other);
         return;
       }

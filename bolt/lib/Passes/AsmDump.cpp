@@ -1,10 +1,12 @@
-//===--- AsmDump.cpp - Dumping of a BinaryFunction into assembly --------===//
+//===- bolt/Passes/AsmDump.cpp - Dump BinaryFunction into assembly --------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the AsmDumpPass class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -40,11 +42,11 @@ void dumpCFI(const BinaryFunction &BF, const MCInst &Instr, AsmPrinter &MAP) {
   // Skip unsupported CFI instructions.
   case MCCFIInstruction::OpRememberState:
   case MCCFIInstruction::OpRestoreState:
-    if (opts::Verbosity >= 2) {
+    if (opts::Verbosity >= 2)
       errs()
           << "BOLT-WARNING: AsmDump: skipping unsupported CFI instruction in "
           << BF << ".\n";
-    }
+
     return;
 
   default:

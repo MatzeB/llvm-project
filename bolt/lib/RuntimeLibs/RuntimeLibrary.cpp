@@ -1,10 +1,12 @@
-//===--- RuntimeLibrary.cpp - The Runtime Library -------------------------===//
+//===- bolt/RuntimeLibs/RuntimeLibrary.cpp - Runtime Library --------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the RuntimeLibrary class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -43,7 +45,7 @@ std::string RuntimeLibrary::getLibPath(StringRef ToolPath,
 
 void RuntimeLibrary::loadLibrary(StringRef LibPath, RuntimeDyld &RTDyld) {
   ErrorOr<std::unique_ptr<MemoryBuffer>> MaybeBuf =
-      MemoryBuffer::getFile(LibPath, -1, false);
+      MemoryBuffer::getFile(LibPath, false, false);
   check_error(MaybeBuf.getError(), LibPath);
   std::unique_ptr<MemoryBuffer> B = std::move(MaybeBuf.get());
   file_magic Magic = identify_magic(B->getBuffer());
@@ -53,9 +55,8 @@ void RuntimeLibrary::loadLibrary(StringRef LibPath, RuntimeDyld &RTDyld) {
     object::Archive Archive(B.get()->getMemBufferRef(), Err);
     for (const object::Archive::Child &C : Archive.children(Err)) {
       std::unique_ptr<object::Binary> Bin = cantFail(C.getAsBinary());
-      if (object::ObjectFile *Obj = dyn_cast<object::ObjectFile>(&*Bin)) {
+      if (object::ObjectFile *Obj = dyn_cast<object::ObjectFile>(&*Bin))
         RTDyld.loadObject(*Obj);
-      }
     }
     check_error(std::move(Err), B->getBufferIdentifier());
   } else if (Magic == file_magic::elf_relocatable ||

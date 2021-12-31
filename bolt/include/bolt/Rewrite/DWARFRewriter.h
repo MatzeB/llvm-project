@@ -1,10 +1,8 @@
-//===--- DWARFRewriter.h --------------------------------------------------===//
+//===- bolt/Rewrite/DWARFRewriter.h -----------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
 //
 //===----------------------------------------------------------------------===//
 
@@ -72,7 +70,7 @@ class DWARFRewriter {
 
   /// Update debug info for all DIEs in \p Unit.
   void updateUnitDebugInfo(uint64_t CUIndex, DWARFUnit &Unit,
-                           SimpleBinaryPatcher &DebugInfoPatcher,
+                           DebugInfoBinaryPatcher &DebugInfoPatcher,
                            DebugAbbrevWriter &AbbrevWriter,
                            Optional<uint64_t> RangesBase = None);
 
@@ -95,7 +93,7 @@ class DWARFRewriter {
   makeFinalLocListsSection(SimpleBinaryPatcher &DebugInfoPatcher);
 
   /// Finalize debug sections in the main binary.
-  void finalizeDebugSections(SimpleBinaryPatcher &DebugInfoPatcher);
+  void finalizeDebugSections(DebugInfoBinaryPatcher &DebugInfoPatcher);
 
   /// Patches the binary for DWARF address ranges (e.g. in functions and lexical
   /// blocks) to be updated.
@@ -205,7 +203,8 @@ public:
   /// Returns a DWO Debug Info Patcher for DWO ID.
   /// Creates a new instance if it does not already exist.
   SimpleBinaryPatcher *getBinaryDWODebugInfoPatcher(uint64_t DwoId) {
-    return getBinaryDWOPatcherHelper<DebugInfoDWOPatchers, SimpleBinaryPatcher>(
+    return getBinaryDWOPatcherHelper<DebugInfoDWOPatchers,
+                                     DebugInfoBinaryPatcher>(
         BinaryDWODebugInfoPatchers, DwoId);
   }
 

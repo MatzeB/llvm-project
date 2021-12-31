@@ -1016,18 +1016,25 @@ public:
       std::swap(OpsVec[OpIdx1][Lane], OpsVec[OpIdx2][Lane]);
     }
 
-    // The hard-coded scores listed here are not very important. When computing
-    // the scores of matching one sub-tree with another, we are basically
-    // counting the number of values that are matching. So even if all scores
-    // are set to 1, we would still get a decent matching result.
+    // The hard-coded scores listed here are not very important, though it shall
+    // be higher for better matches to improve the resulting cost. When
+    // computing the scores of matching one sub-tree with another, we are
+    // basically counting the number of values that are matching. So even if all
+    // scores are set to 1, we would still get a decent matching result.
     // However, sometimes we have to break ties. For example we may have to
     // choose between matching loads vs matching opcodes. This is what these
-    // scores are helping us with: they provide the order of preference.
+    // scores are helping us with: they provide the order of preference. Also,
+    // this is important if the scalar is externally used or used in another
+    // tree entry node in the different lane.
 
     /// Loads from consecutive memory addresses, e.g. load(A[i]), load(A[i+1]).
-    static const int ScoreConsecutiveLoads = 3;
+    static const int ScoreConsecutiveLoads = 4;
+    /// Loads from reversed memory addresses, e.g. load(A[i+1]), load(A[i]).
+    static const int ScoreReversedLoads = 3;
     /// ExtractElementInst from same vector and consecutive indexes.
-    static const int ScoreConsecutiveExtracts = 3;
+    static const int ScoreConsecutiveExtracts = 4;
+    /// ExtractElementInst from same vector and reversed indices.
+    static const int ScoreReversedExtracts = 3;
     /// Constants.
     static const int ScoreConstants = 2;
     /// Instructions with the same opcode.
@@ -1047,7 +1054,10 @@ public:
 
     /// \returns the score of placing \p V1 and \p V2 in consecutive lanes.
     static int getShallowScore(Value *V1, Value *V2, const DataLayout &DL,
-                               ScalarEvolution &SE) {
+                               ScalarEvolution &SE, int NumLanes) {
+      if (V1 == V2)
+        return VLOperands::ScoreSplat;
+
       auto *LI1 = dyn_cast<LoadInst>(V1);
       auto *LI2 = dyn_cast<LoadInst>(V2);
       if (LI1 && LI2) {
@@ -1057,8 +1067,17 @@ public:
         Optional<int> Dist = getPointersDiff(
             LI1->getType(), LI1->getPointerOperand(), LI2->getType(),
             LI2->getPointerOperand(), DL, SE, /*StrictCheck=*/true);
-        return (Dist && *Dist == 1) ? VLOperands::ScoreConsecutiveLoads
-                                    : VLOperands::ScoreFail;
+        if (!Dist)
+          return VLOperands::ScoreFail;
+        // The distance is too large - still may be profitable to use masked
+        // loads/gathers.
+        if (std::abs(*Dist) > NumLanes / 2)
+          return VLOperands::ScoreAltOpcodes;
+        // This still will detect consecutive loads, but we might have "holes"
+        // in some cases. It is ok for non-power-2 vectorization and may produce
+        // better results. It should not affect current vectorization.
+        return (*Dist > 0) ? VLOperands::ScoreConsecutiveLoads
+                           : VLOperands::ScoreReversedLoads;
       }
 
       auto *C1 = dyn_cast<Constant>(V1);
@@ -1068,18 +1087,41 @@ public:
 
       // Extracts from consecutive indexes of the same vector better score as
       // the extracts could be optimized away.
-      Value *EV;
-      ConstantInt *Ex1Idx, *Ex2Idx;
-      if (match(V1, m_ExtractElt(m_Value(EV), m_ConstantInt(Ex1Idx))) &&
-          match(V2, m_ExtractElt(m_Deferred(EV), m_ConstantInt(Ex2Idx))) &&
-          Ex1Idx->getZExtValue() + 1 == Ex2Idx->getZExtValue())
-        return VLOperands::ScoreConsecutiveExtracts;
+      Value *EV1;
+      ConstantInt *Ex1Idx;
+      if (match(V1, m_ExtractElt(m_Value(EV1), m_ConstantInt(Ex1Idx)))) {
+        // Undefs are always profitable for extractelements.
+        if (isa<UndefValue>(V2))
+          return VLOperands::ScoreConsecutiveExtracts;
+        Value *EV2 = nullptr;
+        ConstantInt *Ex2Idx = nullptr;
+        if (match(V2,
+                  m_ExtractElt(m_Value(EV2), m_CombineOr(m_ConstantInt(Ex2Idx),
+                                                         m_Undef())))) {
+          // Undefs are always profitable for extractelements.
+          if (!Ex2Idx)
+            return VLOperands::ScoreConsecutiveExtracts;
+          if (isUndefVector(EV2) && EV2->getType() == EV1->getType())
+            return VLOperands::ScoreConsecutiveExtracts;
+          if (EV2 == EV1) {
+            int Idx1 = Ex1Idx->getZExtValue();
+            int Idx2 = Ex2Idx->getZExtValue();
+            int Dist = Idx2 - Idx1;
+            // The distance is too large - still may be profitable to use
+            // shuffles.
+            if (std::abs(Dist) > NumLanes / 2)
+              return VLOperands::ScoreAltOpcodes;
+            return (Dist > 0) ? VLOperands::ScoreConsecutiveExtracts
+                              : VLOperands::ScoreReversedExtracts;
+          }
+        }
+      }
 
       auto *I1 = dyn_cast<Instruction>(V1);
       auto *I2 = dyn_cast<Instruction>(V2);
       if (I1 && I2) {
-        if (I1 == I2)
-          return VLOperands::ScoreSplat;
+        if (I1->getParent() != I2->getParent())
+          return VLOperands::ScoreFail;
         InstructionsState S = getSameOpcode({I1, I2});
         // Note: Only consider instructions with <= 2 operands to avoid
         // complexity explosion.
@@ -1094,11 +1136,13 @@ public:
       return VLOperands::ScoreFail;
     }
 
-    /// Holds the values and their lane that are taking part in the look-ahead
+    /// Holds the values and their lanes that are taking part in the look-ahead
     /// score calculation. This is used in the external uses cost calculation.
-    SmallDenseMap<Value *, int> InLookAheadValues;
+    /// Need to hold all the lanes in case of splat/broadcast at least to
+    /// correctly check for the use in the different lane.
+    SmallDenseMap<Value *, SmallSet<int, 4>> InLookAheadValues;
 
-    /// \Returns the additinal cost due to uses of \p LHS and \p RHS that are
+    /// \returns the additional cost due to uses of \p LHS and \p RHS that are
     /// either external to the vectorized code, or require shuffling.
     int getExternalUsesCost(const std::pair<Value *, int> &LHS,
                             const std::pair<Value *, int> &RHS) {
@@ -1122,22 +1166,30 @@ public:
         for (User *U : V->users()) {
           if (const TreeEntry *UserTE = R.getTreeEntry(U)) {
             // The user is in the VectorizableTree. Check if we need to insert.
-            auto It = llvm::find(UserTE->Scalars, U);
-            assert(It != UserTE->Scalars.end() && "U is in UserTE");
-            int UserLn = std::distance(UserTE->Scalars.begin(), It);
+            int UserLn = UserTE->findLaneForValue(U);
             assert(UserLn >= 0 && "Bad lane");
-            if (UserLn != Ln)
+            // If the values are different, check just the line of the current
+            // value. If the values are the same, need to add UserInDiffLaneCost
+            // only if UserLn does not match both line numbers.
+            if ((LHS.first != RHS.first && UserLn != Ln) ||
+                (LHS.first == RHS.first && UserLn != LHS.second &&
+                 UserLn != RHS.second)) {
               Cost += UserInDiffLaneCost;
+              break;
+            }
           } else {
             // Check if the user is in the look-ahead code.
             auto It2 = InLookAheadValues.find(U);
             if (It2 != InLookAheadValues.end()) {
               // The user is in the look-ahead code. Check the lane.
-              if (It2->second != Ln)
+              if (!It2->getSecond().contains(Ln)) {
                 Cost += UserInDiffLaneCost;
+                break;
+              }
             } else {
               // The user is neither in SLP tree nor in the look-ahead code.
               Cost += ExternalUseCost;
+              break;
             }
           }
           // Limit the number of visited uses to cap compilation time.
@@ -1176,32 +1228,36 @@ public:
       Value *V1 = LHS.first;
       Value *V2 = RHS.first;
       // Get the shallow score of V1 and V2.
-      int ShallowScoreAtThisLevel =
-          std::max((int)ScoreFail, getShallowScore(V1, V2, DL, SE) -
-                                       getExternalUsesCost(LHS, RHS));
+      int ShallowScoreAtThisLevel = std::max(
+          (int)ScoreFail, getShallowScore(V1, V2, DL, SE, getNumLanes()) -
+                              getExternalUsesCost(LHS, RHS));
       int Lane1 = LHS.second;
       int Lane2 = RHS.second;
 
       // If reached MaxLevel,
       //  or if V1 and V2 are not instructions,
       //  or if they are SPLAT,
-      //  or if they are not consecutive, early return the current cost.
+      //  or if they are not consecutive,
+      //  or if profitable to vectorize loads or extractelements, early return
+      //  the current cost.
       auto *I1 = dyn_cast<Instruction>(V1);
       auto *I2 = dyn_cast<Instruction>(V2);
       if (CurrLevel == MaxLevel || !(I1 && I2) || I1 == I2 ||
           ShallowScoreAtThisLevel == VLOperands::ScoreFail ||
-          (isa<LoadInst>(I1) && isa<LoadInst>(I2) && ShallowScoreAtThisLevel))
+          (((isa<LoadInst>(I1) && isa<LoadInst>(I2)) ||
+            (isa<ExtractElementInst>(I1) && isa<ExtractElementInst>(I2))) &&
+           ShallowScoreAtThisLevel))
         return ShallowScoreAtThisLevel;
       assert(I1 && I2 && "Should have early exited.");
 
       // Keep track of in-tree values for determining the external-use cost.
-      InLookAheadValues[V1] = Lane1;
-      InLookAheadValues[V2] = Lane2;
+      InLookAheadValues[V1].insert(Lane1);
+      InLookAheadValues[V2].insert(Lane2);
 
       // Contains the I2 operand indexes that got matched with I1 operands.
       SmallSet<unsigned, 4> Op2Used;
 
-      // Recursion towards the operands of I1 and I2. We are trying all possbile
+      // Recursion towards the operands of I1 and I2. We are trying all possible
       // operand pairs, and keeping track of the best score.
       for (unsigned OpIdx1 = 0, NumOperands1 = I1->getNumOperands();
            OpIdx1 != NumOperands1; ++OpIdx1) {
@@ -1325,27 +1381,79 @@ public:
       return None;
     }
 
-    /// Helper for reorderOperandVecs. \Returns the lane that we should start
-    /// reordering from. This is the one which has the least number of operands
-    /// that can freely move about.
+    /// Helper for reorderOperandVecs.
+    /// \returns the lane that we should start reordering from. This is the one
+    /// which has the least number of operands that can freely move about or
+    /// less profitable because it already has the most optimal set of operands.
     unsigned getBestLaneToStartReordering() const {
-      unsigned BestLane = 0;
       unsigned Min = UINT_MAX;
-      for (unsigned Lane = 0, NumLanes = getNumLanes(); Lane != NumLanes;
-           ++Lane) {
-        unsigned NumFreeOps = getMaxNumOperandsThatCanBeReordered(Lane);
-        if (NumFreeOps < Min) {
-          Min = NumFreeOps;
-          BestLane = Lane;
+      unsigned SameOpNumber = 0;
+      // std::pair<unsigned, unsigned> is used to implement a simple voting
+      // algorithm and choose the lane with the least number of operands that
+      // can freely move about or less profitable because it already has the
+      // most optimal set of operands. The first unsigned is a counter for
+      // voting, the second unsigned is the counter of lanes with instructions
+      // with same/alternate opcodes and same parent basic block.
+      MapVector<unsigned, std::pair<unsigned, unsigned>> HashMap;
+      // Try to be closer to the original results, if we have multiple lanes
+      // with same cost. If 2 lanes have the same cost, use the one with the
+      // lowest index.
+      for (int I = getNumLanes(); I > 0; --I) {
+        unsigned Lane = I - 1;
+        OperandsOrderData NumFreeOpsHash =
+            getMaxNumOperandsThatCanBeReordered(Lane);
+        // Compare the number of operands that can move and choose the one with
+        // the least number.
+        if (NumFreeOpsHash.NumOfAPOs < Min) {
+          Min = NumFreeOpsHash.NumOfAPOs;
+          SameOpNumber = NumFreeOpsHash.NumOpsWithSameOpcodeParent;
+          HashMap.clear();
+          HashMap[NumFreeOpsHash.Hash] = std::make_pair(1, Lane);
+        } else if (NumFreeOpsHash.NumOfAPOs == Min &&
+                   NumFreeOpsHash.NumOpsWithSameOpcodeParent < SameOpNumber) {
+          // Select the most optimal lane in terms of number of operands that
+          // should be moved around.
+          SameOpNumber = NumFreeOpsHash.NumOpsWithSameOpcodeParent;
+          HashMap[NumFreeOpsHash.Hash] = std::make_pair(1, Lane);
+        } else if (NumFreeOpsHash.NumOfAPOs == Min &&
+                   NumFreeOpsHash.NumOpsWithSameOpcodeParent == SameOpNumber) {
+          ++HashMap[NumFreeOpsHash.Hash].first;
+        }
+      }
+      // Select the lane with the minimum counter.
+      unsigned BestLane = 0;
+      unsigned CntMin = UINT_MAX;
+      for (const auto &Data : reverse(HashMap)) {
+        if (Data.second.first < CntMin) {
+          CntMin = Data.second.first;
+          BestLane = Data.second.second;
         }
       }
       return BestLane;
     }
 
-    /// \Returns the maximum number of operands that are allowed to be reordered
-    /// for \p Lane. This is used as a heuristic for selecting the first lane to
-    /// start operand reordering.
-    unsigned getMaxNumOperandsThatCanBeReordered(unsigned Lane) const {
+    /// Data structure that helps to reorder operands.
+    struct OperandsOrderData {
+      /// The best number of operands with the same APOs, which can be
+      /// reordered.
+      unsigned NumOfAPOs = UINT_MAX;
+      /// Number of operands with the same/alternate instruction opcode and
+      /// parent.
+      unsigned NumOpsWithSameOpcodeParent = 0;
+      /// Hash for the actual operands ordering.
+      /// Used to count operands, actually their position id and opcode
+      /// value. It is used in the voting mechanism to find the lane with the
+      /// least number of operands that can freely move about or less profitable
+      /// because it already has the most optimal set of operands. Can be
+      /// replaced with SmallVector<unsigned> instead but hash code is faster
+      /// and requires less memory.
+      unsigned Hash = 0;
+    };
+    /// \returns the maximum number of operands that are allowed to be reordered
+    /// for \p Lane and the number of compatible instructions(with the same
+    /// parent/opcode). This is used as a heuristic for selecting the first lane
+    /// to start operand reordering.
+    OperandsOrderData getMaxNumOperandsThatCanBeReordered(unsigned Lane) const {
       unsigned CntTrue = 0;
       unsigned NumOperands = getNumOperands();
       // Operands with the same APO can be reordered. We therefore need to count
@@ -1354,11 +1462,45 @@ public:
       // a map. Instead we can simply count the number of operands that
       // correspond to one of them (in this case the 'true' APO), and calculate
       // the other by subtracting it from the total number of operands.
-      for (unsigned OpIdx = 0; OpIdx != NumOperands; ++OpIdx)
-        if (getData(OpIdx, Lane).APO)
+      // Operands with the same instruction opcode and parent are more
+      // profitable since we don't need to move them in many cases, with a high
+      // probability such lane already can be vectorized effectively.
+      bool AllUndefs = true;
+      unsigned NumOpsWithSameOpcodeParent = 0;
+      Instruction *OpcodeI = nullptr;
+      BasicBlock *Parent = nullptr;
+      unsigned Hash = 0;
+      for (unsigned OpIdx = 0; OpIdx != NumOperands; ++OpIdx) {
+        const OperandData &OpData = getData(OpIdx, Lane);
+        if (OpData.APO)
           ++CntTrue;
-      unsigned CntFalse = NumOperands - CntTrue;
-      return std::max(CntTrue, CntFalse);
+        // Use Boyer-Moore majority voting for finding the majority opcode and
+        // the number of times it occurs.
+        if (auto *I = dyn_cast<Instruction>(OpData.V)) {
+          if (!OpcodeI || !getSameOpcode({OpcodeI, I}).getOpcode() ||
+              I->getParent() != Parent) {
+            if (NumOpsWithSameOpcodeParent == 0) {
+              NumOpsWithSameOpcodeParent = 1;
+              OpcodeI = I;
+              Parent = I->getParent();
+            } else {
+              --NumOpsWithSameOpcodeParent;
+            }
+          } else {
+            ++NumOpsWithSameOpcodeParent;
+          }
+        }
+        Hash = hash_combine(
+            Hash, hash_value((OpIdx + 1) * (OpData.V->getValueID() + 1)));
+        AllUndefs = AllUndefs && isa<UndefValue>(OpData.V);
+      }
+      if (AllUndefs)
+        return {};
+      OperandsOrderData Data;
+      Data.NumOfAPOs = std::max(CntTrue, NumOperands - CntTrue);
+      Data.NumOpsWithSameOpcodeParent = NumOpsWithSameOpcodeParent;
+      Data.Hash = Hash;
+      return Data;
     }
 
     /// Go through the instructions in VL and append their operands.
@@ -1506,11 +1648,37 @@ public:
           ReorderingModes[OpIdx] = ReorderingMode::Failed;
       }
 
+      // Check that we don't have same operands. No need to reorder if operands
+      // are just perfect diamond or shuffled diamond match. Do not do it only
+      // for possible broadcasts or non-power of 2 number of scalars (just for
+      // now).
+      auto &&SkipReordering = [this]() {
+        SmallPtrSet<Value *, 4> UniqueValues;
+        ArrayRef<OperandData> Op0 = OpsVec.front();
+        for (const OperandData &Data : Op0)
+          UniqueValues.insert(Data.V);
+        for (ArrayRef<OperandData> Op : drop_begin(OpsVec, 1)) {
+          if (any_of(Op, [&UniqueValues](const OperandData &Data) {
+                return !UniqueValues.contains(Data.V);
+              }))
+            return false;
+        }
+        // TODO: Check if we can remove a check for non-power-2 number of
+        // scalars after full support of non-power-2 vectorization.
+        return UniqueValues.size() != 2 && isPowerOf2_32(UniqueValues.size());
+      };
+
       // If the initial strategy fails for any of the operand indexes, then we
       // perform reordering again in a second pass. This helps avoid assigning
       // high priority to the failed strategy, and should improve reordering for
       // the non-failed operand indexes.
       for (int Pass = 0; Pass != 2; ++Pass) {
+        // Check if no need to reorder operands since they're are perfect or
+        // shuffled diamond match.
+        // Need to to do it to avoid extra external use cost counting for
+        // shuffled matches, which may cause regressions.
+        if (SkipReordering())
+          break;
         // Skip the second pass if the first pass did not fail.
         bool StrategyFailed = false;
         // Mark all operand data as free to use.
@@ -1798,9 +1966,10 @@ private:
       if (Operands.size() < OpIdx + 1)
         Operands.resize(OpIdx + 1);
       assert(Operands[OpIdx].empty() && "Already resized?");
-      Operands[OpIdx].resize(Scalars.size());
-      for (unsigned Lane = 0, E = Scalars.size(); Lane != E; ++Lane)
-        Operands[OpIdx][Lane] = OpVL[Lane];
+      assert(OpVL.size() <= Scalars.size() &&
+             "Number of operands is greater than the number of scalars.");
+      Operands[OpIdx].resize(OpVL.size());
+      copy(OpVL, Operands[OpIdx].begin());
     }
 
     /// Set the operands of this bundle in their original order.
@@ -1950,7 +2119,7 @@ private:
       if (ReuseShuffleIndices.empty())
         dbgs() << "Empty";
       else
-        for (unsigned ReuseIdx : ReuseShuffleIndices)
+        for (int ReuseIdx : ReuseShuffleIndices)
           dbgs() << ReuseIdx << ", ";
       dbgs() << "\n";
       dbgs() << "ReorderIndices: ";
@@ -2871,12 +3040,13 @@ Optional<BoUpSLP::OrdersType> BoUpSLP::getReorderingData(const TreeEntry &TE,
 
 void BoUpSLP::reorderTopToBottom() {
   // Maps VF to the graph nodes.
-  DenseMap<unsigned, SmallPtrSet<TreeEntry *, 4>> VFToOrderedEntries;
+  DenseMap<unsigned, SetVector<TreeEntry *>> VFToOrderedEntries;
   // ExtractElement gather nodes which can be vectorized and need to handle
   // their ordering.
   DenseMap<const TreeEntry *, OrdersType> GathersToOrders;
   // Find all reorderable nodes with the given VF.
-  // Currently the are vectorized loads,extracts + some gathering of extracts.
+  // Currently the are vectorized stores,loads,extracts + some gathering of
+  // extracts.
   for_each(VectorizableTree, [this, &VFToOrderedEntries, &GathersToOrders](
                                  const std::unique_ptr<TreeEntry> &TE) {
     if (Optional<OrdersType> CurrentOrder =
@@ -2896,7 +3066,7 @@ void BoUpSLP::reorderTopToBottom() {
     // Try to find the most profitable order. We just are looking for the most
     // used order and reorder scalar elements in the nodes according to this
     // mostly used order.
-    const SmallPtrSetImpl<TreeEntry *> &OrderedEntries = It->getSecond();
+    ArrayRef<TreeEntry *> OrderedEntries = It->second.getArrayRef();
     // All operands are reordered and used only in this node - propagate the
     // most used order to the user node.
     MapVector<OrdersType, unsigned,
@@ -3381,9 +3551,14 @@ void BoUpSLP::buildTree_rec(ArrayRef<Value *> VL, unsigned Depth,
     // Check that every instruction appears once in this bundle.
     DenseMap<Value *, unsigned> UniquePositions;
     for (Value *V : VL) {
+      if (isConstant(V)) {
+        ReuseShuffleIndicies.emplace_back(
+            isa<UndefValue>(V) ? UndefMaskElem : UniqueValues.size());
+        UniqueValues.emplace_back(V);
+        continue;
+      }
       auto Res = UniquePositions.try_emplace(V, UniqueValues.size());
-      ReuseShuffleIndicies.emplace_back(isa<UndefValue>(V) ? -1
-                                                           : Res.first->second);
+      ReuseShuffleIndicies.emplace_back(Res.first->second);
       if (Res.second)
         UniqueValues.emplace_back(V);
     }
@@ -3393,6 +3568,11 @@ void BoUpSLP::buildTree_rec(ArrayRef<Value *> VL, unsigned Depth,
     } else {
       LLVM_DEBUG(dbgs() << "SLP: Shuffle for reused scalars.\n");
       if (NumUniqueScalarValues <= 1 ||
+          (UniquePositions.size() == 1 && all_of(UniqueValues,
+                                                 [](Value *V) {
+                                                   return isa<UndefValue>(V) ||
+                                                          !isConstant(V);
+                                                 })) ||
           !llvm::isPowerOf2_32(NumUniqueScalarValues)) {
         LLVM_DEBUG(dbgs() << "SLP: Scalar used twice in bundle.\n");
         newTreeEntry(VL, None /*not vectorized*/, S, UserTreeIdx);
@@ -3497,11 +3677,9 @@ void BoUpSLP::buildTree_rec(ArrayRef<Value *> VL, unsigned Depth,
     }
   }
 
-  // If any of the scalars is marked as a value that needs to stay scalar, then
-  // we need to gather the scalars.
   // The reduction nodes (stored in UserIgnoreList) also should stay scalar.
   for (Value *V : VL) {
-    if (MustGather.count(V) || is_contained(UserIgnoreList, V)) {
+    if (is_contained(UserIgnoreList, V)) {
       LLVM_DEBUG(dbgs() << "SLP: Gathering due to gathered scalar.\n");
       if (TryToFindDuplicates(S))
         newTreeEntry(VL, None /*not vectorized*/, S, UserTreeIdx,
@@ -4281,6 +4459,8 @@ bool BoUpSLP::canReuseExtract(ArrayRef<Value *> VL, Value *OpValue,
     CurrentOrder.clear();
     return false;
   }
+  if (ShouldKeepOrder)
+    CurrentOrder.clear();
 
   return ShouldKeepOrder;
 }
@@ -4588,6 +4768,8 @@ InstructionCost BoUpSLP::getEntryCost(const TreeEntry *E,
     if (isSplat(VL)) {
       // Found the broadcasting of the single scalar, calculate the cost as the
       // broadcast.
+      assert(VecTy == FinalVecTy &&
+             "No reused scalars expected for broadcast.");
       return TTI->getShuffleCost(TargetTransformInfo::SK_Broadcast, VecTy);
     }
     InstructionCost ReuseShuffleCost = 0;
@@ -9635,10 +9817,15 @@ bool SLPVectorizerPass::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
       return true;
     if (Opcodes1.size() > Opcodes2.size())
       return false;
+    Optional<bool> ConstOrder;
     for (int I = 0, E = Opcodes1.size(); I < E; ++I) {
       // Undefs are compatible with any other value.
-      if (isa<UndefValue>(Opcodes1[I]) || isa<UndefValue>(Opcodes2[I]))
+      if (isa<UndefValue>(Opcodes1[I]) || isa<UndefValue>(Opcodes2[I])) {
+        if (!ConstOrder)
+          ConstOrder =
+              !isa<UndefValue>(Opcodes1[I]) && isa<UndefValue>(Opcodes2[I]);
         continue;
+      }
       if (auto *I1 = dyn_cast<Instruction>(Opcodes1[I]))
         if (auto *I2 = dyn_cast<Instruction>(Opcodes2[I])) {
           DomTreeNodeBase<BasicBlock> *NodeI1 = DT->getNode(I1->getParent());
@@ -9657,14 +9844,17 @@ bool SLPVectorizerPass::vectorizeChainsInBlock(BasicBlock *BB, BoUpSLP &R) {
             continue;
           return I1->getOpcode() < I2->getOpcode();
         }
-      if (isa<Constant>(Opcodes1[I]) && isa<Constant>(Opcodes2[I]))
+      if (isa<Constant>(Opcodes1[I]) && isa<Constant>(Opcodes2[I])) {
+        if (!ConstOrder)
+          ConstOrder = Opcodes1[I]->getValueID() < Opcodes2[I]->getValueID();
         continue;
+      }
       if (Opcodes1[I]->getValueID() < Opcodes2[I]->getValueID())
         return true;
       if (Opcodes1[I]->getValueID() > Opcodes2[I]->getValueID())
         return false;
     }
-    return false;
+    return ConstOrder && *ConstOrder;
   };
   auto AreCompatiblePHIs = [&PHIToOpcodes](Value *V1, Value *V2) {
     if (V1 == V2)

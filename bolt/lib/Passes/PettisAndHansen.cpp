@@ -1,10 +1,12 @@
-//===--- Passes/PettisAndHansen.cpp ---------------------------------------===//
+//===- bolt/Passes/PettisAndHansen.cpp ------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// The file implements Pettis and Hansen code-layout algorithm.
 //
 //===----------------------------------------------------------------------===//
 
@@ -62,18 +64,17 @@ void orderFuncs(const CallGraph &Cg, Cluster *C1, Cluster *C2) {
 
   for (const Arc &Arc : Cg.arcs()) {
     if ((Arc.src() == C1head && Arc.dst() == C2head) ||
-        (Arc.dst() == C1head && Arc.src() == C2head)) {
+        (Arc.dst() == C1head && Arc.src() == C2head))
       C1headC2head += Arc.weight();
-    } else if ((Arc.src() == C1head && Arc.dst() == C2tail) ||
-               (Arc.dst() == C1head && Arc.src() == C2tail)) {
+    else if ((Arc.src() == C1head && Arc.dst() == C2tail) ||
+             (Arc.dst() == C1head && Arc.src() == C2tail))
       C1headC2tail += Arc.weight();
-    } else if ((Arc.src() == C1tail && Arc.dst() == C2head) ||
-               (Arc.dst() == C1tail && Arc.src() == C2head)) {
+    else if ((Arc.src() == C1tail && Arc.dst() == C2head) ||
+             (Arc.dst() == C1tail && Arc.src() == C2head))
       C1tailC2head += Arc.weight();
-    } else if ((Arc.src() == C1tail && Arc.dst() == C2tail) ||
-               (Arc.dst() == C1tail && Arc.src() == C2tail)) {
+    else if ((Arc.src() == C1tail && Arc.dst() == C2tail) ||
+             (Arc.dst() == C1tail && Arc.src() == C2tail))
       C1tailC2tail += Arc.weight();
-    }
   }
 
   const double Max = std::max(std::max(C1headC2head, C1headC2tail),
@@ -113,9 +114,8 @@ std::vector<Cluster> pettisAndHansen(const CallGraph &Cg) {
 
   auto insertOrInc = [&](Cluster *C1, Cluster *C2, double Weight) {
     auto Res = Carcs.emplace(C1, C2, Weight);
-    if (!Res.second) {
+    if (!Res.second)
       Res.first->Weight += Weight;
-    }
   };
 
   // Create a std::vector of cluster arcs
@@ -189,9 +189,9 @@ std::vector<Cluster> pettisAndHansen(const CallGraph &Cg) {
 
     // update FuncCluster
 
-    for (NodeId F : C2->targets()) {
+    for (NodeId F : C2->targets())
       FuncCluster[F] = C1;
-    }
+
     C1->merge(*C2, Max.Weight);
     C2->clear();
   }
@@ -202,12 +202,10 @@ std::vector<Cluster> pettisAndHansen(const CallGraph &Cg) {
   std::set<Cluster *> LiveClusters;
   std::vector<Cluster> OutClusters;
 
-  for (NodeId Fid : Funcs) {
+  for (NodeId Fid : Funcs)
     LiveClusters.insert(FuncCluster[Fid]);
-  }
-  for (Cluster *C : LiveClusters) {
+  for (Cluster *C : LiveClusters)
     OutClusters.push_back(std::move(*C));
-  }
 
   std::sort(OutClusters.begin(), OutClusters.end(), compareClustersDensity);
 

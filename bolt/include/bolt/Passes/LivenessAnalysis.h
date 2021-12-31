@@ -1,10 +1,8 @@
-//===--- Passes/LivenessAnalysis.h ----------------------------------------===//
+//===- bolt/Passes/LivenessAnalysis.h ---------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
 //
 //===----------------------------------------------------------------------===//
 
@@ -145,9 +143,8 @@ protected:
       }
       for (auto I = InstInfo.getImplicitUses(),
                 E = InstInfo.getImplicitUses() + InstInfo.getNumImplicitUses();
-           I != E; ++I) {
+           I != E; ++I)
         Used |= BC.MIB->getAliases(*I, false);
-      }
       if (IsCall &&
           (!BC.MIB->isTailCall(Point) || !BC.MIB->isConditionalBranch(Point))) {
         // Never gen FLAGS from a non-conditional call... this is overly

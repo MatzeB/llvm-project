@@ -15,7 +15,7 @@
 ; CHECK64: aghi  4, 192
 ; CHECK64: b 2(7)
 define void @func0() {
-  call i64 (i64) @fun(i64 10)
+  call i64 (i64) @fun(i64 10) 
   ret void
 }
 
@@ -80,7 +80,7 @@ define void @func1(i64 *%ptr) {
 ; Spill all FPRs and VRs
 ; CHECK-LABEL: func2
 ; CHECK64: stmg	6, 7, 1744(4)
-; CHECK64: aghi  4, -320
+; CHECK64: aghi  4, -320 
 ; CHECK64: std	15, {{[0-9]+}}(4)                      * 8-byte Folded Spill
 ; CHECK64: std	14, {{[0-9]+}}(4)                      * 8-byte Folded Spill
 ; CHECK64: std	13, {{[0-9]+}}(4)                      * 8-byte Folded Spill

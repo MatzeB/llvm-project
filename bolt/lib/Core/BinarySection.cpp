@@ -1,10 +1,12 @@
-//===--- BinarySection.cpp  - Interface for object file section -----------===//
+//===- bolt/Core/BinarySection.cpp - Section in a binary file -------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the BinarySection class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -50,9 +52,8 @@ BinarySection::hash(const BinaryData &BD,
     const Relocation &Rel = *Begin++;
     Hash = hash_combine(
         Hash, hash_value(Contents.substr(Offset, Begin->Offset - Offset)));
-    if (BinaryData *RelBD = BC.getBinaryDataByName(Rel.Symbol->getName())) {
+    if (BinaryData *RelBD = BC.getBinaryDataByName(Rel.Symbol->getName()))
       Hash = hash_combine(Hash, hash(*RelBD, Cache));
-    }
     Offset = Rel.Offset + Rel.getSize();
   }
 
@@ -104,9 +105,8 @@ void BinarySection::emitAsData(MCStreamer &Streamer, StringRef NewName) const {
       SectionOffset += RelocationSize;
     }
     assert(SectionOffset <= SectionContents.size() && "overflow error");
-    if (SectionOffset < SectionContents.size()) {
+    if (SectionOffset < SectionContents.size())
       Streamer.emitBytes(SectionContents.substr(SectionOffset));
-    }
   }
 
   if (BC.HasRelocations && opts::HotData && isReordered())
@@ -132,10 +132,9 @@ void BinarySection::flushPendingRelocations(raw_pwrite_stream &OS,
              << "  address: 0x" << Twine::utohexstr(SectionAddress) << '\n'
              << "  offset: 0x" << Twine::utohexstr(SectionFileOffset) << '\n');
 
-  for (BinaryPatch &Patch : Patches) {
+  for (BinaryPatch &Patch : Patches)
     OS.pwrite(Patch.Bytes.data(), Patch.Bytes.size(),
               SectionFileOffset + Patch.Offset);
-  }
 
   for (Relocation &Reloc : PendingRelocations) {
     uint64_t Value = Reloc.Addend;
@@ -192,10 +191,9 @@ void BinarySection::print(raw_ostream &OS) const {
   if (isTLS())
     OS << " (tls)";
 
-  if (opts::PrintRelocations) {
+  if (opts::PrintRelocations)
     for (const Relocation &R : relocations())
       OS << "\n  " << R;
-  }
 }
 
 BinarySection::RelocationSetType
@@ -241,9 +239,8 @@ void BinarySection::reorderContents(const std::vector<BinaryData *> &Order,
     const uint64_t SrcOffset = BD->getAddress() - getAddress();
     assert(SrcOffset < Contents.size());
     assert(SrcOffset == BD->getOffset());
-    while (OS.tell() < BD->getOutputOffset()) {
+    while (OS.tell() < BD->getOutputOffset())
       OS.write((unsigned char)0);
-    }
     LLVM_DEBUG(dbgs() << "BOLT-DEBUG: " << BD->getName() << " @ " << OS.tell()
                       << "\n");
     OS.write(&Src[SrcOffset], BD->getOutputSize());
@@ -273,12 +270,10 @@ std::string BinarySection::encodeELFNote(StringRef NameStr, StringRef DescStr,
   OS.write(reinterpret_cast<const char *>(&(DescSz)), 4);
   OS.write(reinterpret_cast<const char *>(&(Type)), 4);
   OS << NameStr << '\0';
-  for (uint64_t I = NameSz; I < alignTo(NameSz, 4); ++I) {
+  for (uint64_t I = NameSz; I < alignTo(NameSz, 4); ++I)
     OS << '\0';
-  }
   OS << DescStr;
-  for (uint64_t I = DescStr.size(); I < alignTo(DescStr.size(), 4); ++I) {
+  for (uint64_t I = DescStr.size(); I < alignTo(DescStr.size(), 4); ++I)
     OS << '\0';
-  }
   return OS.str();
 }

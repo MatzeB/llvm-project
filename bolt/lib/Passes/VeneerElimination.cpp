@@ -1,4 +1,4 @@
-//===--- Passes/VeneerElimination.cpp--------------------------------------===//
+//===- bolt/Passes/VeneerElimination.cpp ----------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -10,6 +10,7 @@
 // code and redirects veneer callers to call to veneers destinations
 //
 //===----------------------------------------------------------------------===//
+
 #include "bolt/Passes/VeneerElimination.h"
 #define DEBUG_TYPE "veneer-elim"
 
@@ -89,9 +90,8 @@ void VeneerElimination::runOnFunctions(BinaryContext &BC) {
 
         VeneerCallers++;
         if (!BC.MIB->replaceBranchTarget(
-                Instr, VeneerDestinations[TargetSymbol], BC.Ctx.get())) {
+                Instr, VeneerDestinations[TargetSymbol], BC.Ctx.get()))
           assert(false && "updating veneer call destination failed");
-        }
       }
     }
   }

@@ -1,10 +1,12 @@
-//===--- Passes/StokeInfo.cpp ---------------------------------------------===//
+//===- bolt/Passes/StokeInfo.cpp ------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the StokeInfo class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -36,9 +38,8 @@ void getRegNameFromBitVec(const BinaryContext &BC, const BitVector &RegV,
   int RegIdx = RegV.find_first();
   while (RegIdx != -1) {
     LLVM_DEBUG(dbgs() << BC.MRI->getName(RegIdx) << " ");
-    if (NameVec) {
+    if (NameVec)
       NameVec->insert(std::string(BC.MRI->getName(RegIdx)));
-    }
     RegIdx = RegV.find_next(RegIdx);
   }
   LLVM_DEBUG(dbgs() << "\n");
@@ -48,9 +49,9 @@ void StokeInfo::checkInstr(const BinaryFunction &BF, StokeFuncInfo &FuncInfo) {
   MCPlusBuilder *MIB = BF.getBinaryContext().MIB.get();
   BitVector RegV(NumRegs, false);
   for (BinaryBasicBlock *BB : BF.layout()) {
-    if (BB->empty()) {
+    if (BB->empty())
       continue;
-    }
+
     for (MCInst &It : *BB) {
       if (MIB->isPseudo(It))
         continue;
@@ -73,16 +74,14 @@ void StokeInfo::checkInstr(const BinaryFunction &BF, StokeFuncInfo &FuncInfo) {
       // TODO: more accurate analysis
       bool IsPush = MIB->isPush(It);
       bool IsRipAddr = MIB->hasPCRelOperand(It);
-      if (IsPush) {
+      if (IsPush)
         FuncInfo.StackOut = true;
-      }
-      if (MIB->isStore(It) && !IsPush && !IsRipAddr) {
-        FuncInfo.HeapOut = true;
-      }
-      if (IsRipAddr) {
-        FuncInfo.HasRipAddr = true;
-      }
 
+      if (MIB->isStore(It) && !IsPush && !IsRipAddr)
+        FuncInfo.HeapOut = true;
+
+      if (IsRipAddr)
+        FuncInfo.HasRipAddr = true;
     } // end of for (auto &It : ...)
   } // end of for (auto *BB : ...)
 }
@@ -92,9 +91,8 @@ bool StokeInfo::checkFunction(BinaryFunction &BF, DataflowInfoManager &DInfo,
 
   std::string Name = BF.getSymbol()->getName().str();
 
-  if (!BF.isSimple() || BF.isMultiEntry() || BF.empty()) {
+  if (!BF.isSimple() || BF.isMultiEntry() || BF.empty())
     return false;
-  }
   outs() << " STOKE-INFO: analyzing function " << Name << "\n";
 
   FuncInfo.FuncName = Name;
@@ -103,9 +101,8 @@ bool StokeInfo::checkFunction(BinaryFunction &BF, DataflowInfoManager &DInfo,
   FuncInfo.NumInstrs = BF.getNumNonPseudos();
   FuncInfo.NumBlocks = BF.size();
   // early stop for large functions
-  if (FuncInfo.NumInstrs > 500) {
+  if (FuncInfo.NumInstrs > 500)
     return false;
-  }
 
   FuncInfo.IsLoopFree = BF.isLoopFree();
   if (!FuncInfo.IsLoopFree) {
@@ -125,9 +122,8 @@ bool StokeInfo::checkFunction(BinaryFunction &BF, DataflowInfoManager &DInfo,
   assert(EntryBB.isEntryPoint() && "Weird, this should be the entry block!");
 
   MCInst *FirstNonPseudo = EntryBB.getFirstNonPseudoInstr();
-  if (!FirstNonPseudo) {
+  if (!FirstNonPseudo)
     return false;
-  }
 
   LLVM_DEBUG(dbgs() << "\t [DefIn]\n\t ");
   BitVector LiveInBV =
@@ -181,9 +177,8 @@ void StokeInfo::runOnFunctions(BinaryContext &BC) {
   for (auto &BF : BC.getBinaryFunctions()) {
     DataflowInfoManager DInfo(BF.second, &RA, nullptr);
     FuncInfo.reset();
-    if (checkFunction(BF.second, DInfo, RA, FuncInfo)) {
+    if (checkFunction(BF.second, DInfo, RA, FuncInfo))
       FuncInfo.printData(Outfile);
-    }
   }
 
   outs() << "STOKE-INFO: end of stoke pass\n";

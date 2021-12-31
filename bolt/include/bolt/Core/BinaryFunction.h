@@ -1,4 +1,4 @@
-//===--- BinaryFunction.h - Interface for machine-level function ----------===//
+//===- bolt/Core/BinaryFunction.h - Low-level function ----------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,8 +6,19 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Interface to function in binary (machine) form. This is assembly-level
-// code representation with the control flow.
+// This file contains the declaration of the BinaryFunction class. It represents
+// a function at the lowest IR level. Typically, a BinaryFunction represents a
+// function object in a compiled and linked binary file. However, a
+// BinaryFunction can also be constructed manually, e.g. for injecting into a
+// binary file.
+//
+// A BinaryFunction could be in one of the several states described in
+// BinaryFunction::State. While in the disassembled state, it will contain a
+// list of instructions with their offsets. In the CFG state, it will contain a
+// list of BinaryBasicBlocks that form a control-flow graph. This state is best
+// suited for binary analysis and optimizations. However, sometimes it's
+// impossible to build the precise CFG due to the ambiguity of indirect
+// branches.
 //
 //===----------------------------------------------------------------------===//
 
@@ -697,12 +708,10 @@ private:
   /// Release memory allocated for CFG and instructions.
   /// We still keep basic blocks for address translation/mapping purposes.
   void releaseCFG() {
-    for (BinaryBasicBlock *BB : BasicBlocks) {
+    for (BinaryBasicBlock *BB : BasicBlocks)
       BB->releaseCFG();
-    }
-    for (BinaryBasicBlock *BB : DeletedBasicBlocks) {
+    for (BinaryBasicBlock *BB : DeletedBasicBlocks)
       BB->releaseCFG();
-    }
 
     clearList(CallSites);
     clearList(ColdCallSites);
@@ -867,9 +876,8 @@ public:
   const BinaryLoopInfo &getLoopInfo() { return *BLI.get(); }
 
   bool isLoopFree() {
-    if (!hasLoopInfo()) {
+    if (!hasLoopInfo())
       calculateLoopInfo();
-    }
     return BLI->empty();
   }
 
@@ -1099,9 +1107,8 @@ public:
   /// Return the number of emitted instructions for this function.
   uint32_t getNumNonPseudos() const {
     uint32_t N = 0;
-    for (BinaryBasicBlock *const &BB : layout()) {
+    for (BinaryBasicBlock *const &BB : layout())
       N += BB->getNumNonPseudos();
-    }
     return N;
   }
 
@@ -1597,9 +1604,8 @@ public:
   /// Make sure basic blocks' indices match the current layout.
   void updateLayoutIndices() const {
     unsigned Index = 0;
-    for (BinaryBasicBlock *BB : layout()) {
+    for (BinaryBasicBlock *BB : layout())
       BB->setLayoutIndex(Index++);
-    }
   }
 
   /// Recompute the CFI state for NumNewBlocks following Start after inserting
@@ -2067,10 +2073,9 @@ public:
       Size += NextMarker - *DataIter;
     }
 
-    if (!OnBehalfOf) {
+    if (!OnBehalfOf)
       for (BinaryFunction *ExternalFunc : Islands->Dependency)
         Size += ExternalFunc->estimateConstantIslandSize(this);
-    }
     return Size;
   }
 
@@ -2300,17 +2305,13 @@ public:
   size_t estimateHotSize(const bool UseSplitSize = true) const {
     size_t Estimate = 0;
     if (UseSplitSize && isSplit()) {
-      for (const BinaryBasicBlock *BB : BasicBlocksLayout) {
-        if (!BB->isCold()) {
+      for (const BinaryBasicBlock *BB : BasicBlocksLayout)
+        if (!BB->isCold())
           Estimate += BC.computeCodeSize(BB->begin(), BB->end());
-        }
-      }
     } else {
-      for (const BinaryBasicBlock *BB : BasicBlocksLayout) {
-        if (BB->getKnownExecutionCount() != 0) {
+      for (const BinaryBasicBlock *BB : BasicBlocksLayout)
+        if (BB->getKnownExecutionCount() != 0)
           Estimate += BC.computeCodeSize(BB->begin(), BB->end());
-        }
-      }
     }
     return Estimate;
   }
@@ -2319,19 +2320,16 @@ public:
     if (!isSplit())
       return estimateSize();
     size_t Estimate = 0;
-    for (const BinaryBasicBlock *BB : BasicBlocksLayout) {
-      if (BB->isCold()) {
+    for (const BinaryBasicBlock *BB : BasicBlocksLayout)
+      if (BB->isCold())
         Estimate += BC.computeCodeSize(BB->begin(), BB->end());
-      }
-    }
     return Estimate;
   }
 
   size_t estimateSize() const {
     size_t Estimate = 0;
-    for (const BinaryBasicBlock *BB : BasicBlocksLayout) {
+    for (const BinaryBasicBlock *BB : BasicBlocksLayout)
       Estimate += BC.computeCodeSize(BB->begin(), BB->end());
-    }
     return Estimate;
   }
 

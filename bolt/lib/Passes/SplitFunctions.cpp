@@ -1,10 +1,12 @@
-//===--- SplitFunctions.cpp - pass for splitting function code ------------===//
+//===- bolt/Passes/SplitFunctions.cpp - Pass for splitting function code --===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the SplitFunctions pass.
 //
 //===----------------------------------------------------------------------===//
 
@@ -106,12 +108,11 @@ void SplitFunctions::runOnFunctions(BinaryContext &BC) {
       BC, ParallelUtilities::SchedulingPolicy::SP_BB_LINEAR, WorkFun, SkipFunc,
       "SplitFunctions");
 
-  if (SplitBytesHot + SplitBytesCold > 0) {
+  if (SplitBytesHot + SplitBytesCold > 0)
     outs() << "BOLT-INFO: splitting separates " << SplitBytesHot
            << " hot bytes from " << SplitBytesCold << " cold bytes "
            << format("(%.2lf%% of split functions is hot).\n",
                      100.0 * SplitBytesHot / (SplitBytesHot + SplitBytesCold));
-  }
 }
 
 void SplitFunctions::splitFunction(BinaryFunction &BF) {
@@ -233,9 +234,8 @@ void SplitFunctions::splitFunction(BinaryFunction &BF) {
                         << Twine::utohexstr(OriginalHotSize) << '\n');
 
       BF.updateBasicBlockLayout(PreSplitLayout);
-      for (BinaryBasicBlock &BB : BF) {
+      for (BinaryBasicBlock &BB : BF)
         BB.setIsCold(false);
-      }
     } else {
       SplitBytesHot += HotSize;
       SplitBytesCold += ColdSize;

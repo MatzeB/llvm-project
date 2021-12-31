@@ -1,10 +1,8 @@
-//===--- BinaryPassManager.cpp - Binary-level analysis/optimization passes ===//
+//===- bolt/Rewrite/BinaryPassManager.cpp - Binary-level pass manager -----===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
 //
 //===----------------------------------------------------------------------===//
 
@@ -340,9 +338,8 @@ void BinaryFunctionPassManager::runPasses() {
     std::string PassIdName =
         formatv("{0:2}_{1}", PassIdx, Pass->getName()).str();
 
-    if (opts::Verbosity > 0) {
+    if (opts::Verbosity > 0)
       outs() << "BOLT-INFO: Starting pass: " << Pass->getName() << "\n";
-    }
 
     NamedRegionTimer T(Pass->getName(), Pass->getName(), TimerGroupName,
                        TimerGroupDesc, TimeOpts);
@@ -362,9 +359,8 @@ void BinaryFunctionPassManager::runPasses() {
       exit(1);
     }
 
-    if (opts::Verbosity > 0) {
+    if (opts::Verbosity > 0)
       outs() << "BOLT-INFO: Finished pass: " << Pass->getName() << "\n";
-    }
 
     if (!opts::PrintAll && !opts::DumpDotAll && !Pass->printPass())
       continue;
@@ -372,7 +368,7 @@ void BinaryFunctionPassManager::runPasses() {
     const std::string Message = std::string("after ") + Pass->getName();
 
     for (auto &It : BFs) {
-      auto &Function = It.second;
+      BinaryFunction &Function = It.second;
 
       if (!Pass->shouldPrint(Function))
         continue;
@@ -393,9 +389,8 @@ void BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
   Manager.registerPass(std::make_unique<AsmDumpPass>(),
                        opts::AsmDump.getNumOccurrences());
 
-  if (opts::Instrument) {
+  if (opts::Instrument)
     Manager.registerPass(std::make_unique<Instrumentation>(NeverPrint));
-  }
 
   // Here we manage dependencies/order manually, since passes are run in the
   // order they're registered.

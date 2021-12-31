@@ -1,10 +1,8 @@
-//===--- Passes/StackPointerTracking.h ------------------------------------===//
+//===- bolt/Passes/StackPointerTracking.h -----------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
 //
 //===----------------------------------------------------------------------===//
 
@@ -101,8 +99,7 @@ protected:
 
       if (MIB->isLeave(Point))
         return FPVal + 8;
-      else
-        return FPVal;
+      return FPVal;
     }
 
     if (this->BC.MII->get(Point.getOpcode())
@@ -159,11 +156,8 @@ protected:
         return SUPERPOSITION;
       }
 
-      if (!HasFramePointer) {
-        if (MIB->escapesVariable(Point, false)) {
-          HasFramePointer = true;
-        }
-      }
+      if (!HasFramePointer && MIB->escapesVariable(Point, false))
+        HasFramePointer = true;
       return static_cast<int>(Output);
     }
 

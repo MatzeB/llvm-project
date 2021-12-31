@@ -1,10 +1,12 @@
-//===--- ReorderSection.cpp - Profile based reordering of section data =======//
+//===- bolt/Passes/ReorderSection.cpp - Reordering of section data --------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements ReorderData class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -206,9 +208,8 @@ void ReorderData::assignMemData(BinaryContext &BC) {
           if (BinaryData *BD = AccessInfo.MemoryObject) {
             BinaryDataCounts[BD->getAtomicRoot()] += AccessInfo.Count;
             Counts[BD->getSectionName()] += AccessInfo.Count;
-            if (BD->getAtomicRoot()->isJumpTable()) {
+            if (BD->getAtomicRoot()->isJumpTable())
               JumpTableCounts[BD->getSectionName()] += AccessInfo.Count;
-            }
           } else {
             Counts["Heap/stack"] += AccessInfo.Count;
           }
@@ -351,9 +352,8 @@ void ReorderData::setSectionOrder(BinaryContext &BC,
 
   // Get the total count just for stats
   uint64_t TotalCount = 0;
-  for (auto Itr = Begin; Itr != End; ++Itr) {
+  for (auto Itr = Begin; Itr != End; ++Itr)
     TotalCount += Itr->second;
-  }
 
   LLVM_DEBUG(dbgs() << "BOLT-DEBUG: setSectionOrder for "
                     << OutputSection.getName() << "\n");
@@ -367,10 +367,9 @@ void ReorderData::setSectionOrder(BinaryContext &BC,
 
     ++NumReordered;
     if (NumReordered > opts::ReorderDataMaxSymbols) {
-      if (!NewOrder.empty()) {
+      if (!NewOrder.empty())
         LLVM_DEBUG(dbgs() << "BOLT-DEBUG: processing ending on symbol "
                           << *NewOrder.back() << "\n");
-      }
       break;
     }
 
@@ -378,10 +377,9 @@ void ReorderData::setSectionOrder(BinaryContext &BC,
     Offset = alignTo(Offset, Alignment);
 
     if ((Offset + BD->getSize()) > opts::ReorderDataMaxBytes) {
-      if (!NewOrder.empty()) {
+      if (!NewOrder.empty())
         LLVM_DEBUG(dbgs() << "BOLT-DEBUG: processing ending on symbol "
                           << *NewOrder.back() << "\n");
-      }
       break;
     }
 
@@ -468,11 +466,10 @@ void ReorderData::runOnFunctions(BinaryContext &BC) {
 
   for (const std::string &SectionName : opts::ReorderData) {
     if (SectionName == "default") {
-      for (unsigned I = 0; DefaultSections[I]; ++I) {
+      for (unsigned I = 0; DefaultSections[I]; ++I)
         if (ErrorOr<BinarySection &> Section =
                 BC.getUniqueSectionByName(DefaultSections[I]))
           Sections.push_back(&*Section);
-      }
       continue;
     }
 
@@ -507,16 +504,14 @@ void ReorderData::runOnFunctions(BinaryContext &BC) {
     }
     auto SplitPoint = Order.begin() + SplitPointIdx;
 
-    if (opts::PrintReorderedData) {
+    if (opts::PrintReorderedData)
       printOrder(*Section, Order.begin(), SplitPoint);
-    }
 
     if (!opts::ReorderInplace || FoundUnmoveable) {
-      if (opts::ReorderInplace && FoundUnmoveable) {
+      if (opts::ReorderInplace && FoundUnmoveable)
         outs() << "BOLT-INFO: Found unmoveable symbols in "
                << Section->getName() << " falling back to splitting "
                << "instead of in-place reordering.\n";
-      }
 
       // Copy original section to <section name>.cold.
       BinarySection &Cold = BC.registerSection(

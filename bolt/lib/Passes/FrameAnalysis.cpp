@@ -1,4 +1,4 @@
-//===--- Passes/FrameAnalysis.cpp -----------------------------------------===//
+//===- bolt/Passes/FrameAnalysis.cpp --------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
+// This file implements the FrameAnalysis class.
+//
 //===----------------------------------------------------------------------===//
+
 #include "bolt/Passes/FrameAnalysis.h"
 #include "bolt/Core/ParallelUtilities.h"
 #include "bolt/Passes/CallGraphWalker.h"
@@ -46,9 +49,8 @@ bool shouldFrameOptimize(const llvm::bolt::BinaryFunction &Function) {
     assert(!FrameOptFunctionNamesFile.empty() && "unexpected empty file name");
     std::ifstream FuncsFile(FrameOptFunctionNamesFile, std::ios::in);
     std::string FuncName;
-    while (std::getline(FuncsFile, FuncName)) {
+    while (std::getline(FuncsFile, FuncName))
       FrameOptFunctionNames.push_back(FuncName);
-    }
     FrameOptFunctionNamesFile = "";
   }
 
@@ -196,9 +198,8 @@ public:
         CFIStack.push(std::make_pair(CfaOffset, CfaReg));
         break;
       case MCCFIInstruction::OpRestoreState: {
-        if (CFIStack.empty()) {
+        if (CFIStack.empty())
           dbgs() << "Assertion is about to fail: " << BF.getPrintName() << "\n";
-        }
         assert(!CFIStack.empty() && "Corrupt CFI stack");
         std::pair<int64_t, uint16_t> &Elem = CFIStack.top();
         CFIStack.pop();
@@ -304,13 +305,11 @@ void FrameAnalysis::traverseCG(BinaryFunctionCallGraph &CG) {
       const BinaryFunction *Func = MapEntry.first;
       const auto &Set = MapEntry.second;
       dbgs() << "Args accessed for " << Func->getPrintName() << ": ";
-      if (!Set.empty() && Set.count(std::make_pair(-1, 0))) {
+      if (!Set.empty() && Set.count(std::make_pair(-1, 0)))
         dbgs() << "assume everything";
-      } else {
-        for (const std::pair<int64_t, uint8_t> &Entry : Set) {
+      else
+        for (const std::pair<int64_t, uint8_t> &Entry : Set)
           dbgs() << "[" << Entry.first << ", " << (int)Entry.second << "] ";
-        }
-      }
       dbgs() << "\n";
     }
   });
@@ -564,10 +563,9 @@ FrameAnalysis::FrameAnalysis(BinaryContext &BC, BinaryFunctionCallGraph &CG)
     clearSPTMap();
 
     // Clean up memory allocated for annotation values
-    if (!opts::NoThreads) {
+    if (!opts::NoThreads)
       for (MCPlusBuilder::AllocatorIdTy Id : SPTAllocatorsId)
         BC.MIB->freeValuesAllocator(Id);
-    }
   }
 }
 

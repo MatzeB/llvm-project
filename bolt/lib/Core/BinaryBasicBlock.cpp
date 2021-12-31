@@ -1,4 +1,4 @@
-//===--- BinaryBasicBlock.cpp - Interface for assembly-level basic block --===//
+//===- bolt/Core/BinaryBasicBlock.cpp - Low-level basic block -------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,11 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 //
+// This file implements the BinaryBasicBlock class.
+//
 //===----------------------------------------------------------------------===//
 
 #include "bolt/Core/BinaryBasicBlock.h"
 #include "bolt/Core/BinaryContext.h"
 #include "bolt/Core/BinaryFunction.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/Errc.h"
@@ -155,10 +158,9 @@ BinaryBasicBlock *BinaryBasicBlock::getSuccessor(const MCSymbol *Label) const {
   if (!Label && succ_size() == 1)
     return *succ_begin();
 
-  for (BinaryBasicBlock *BB : successors()) {
+  for (BinaryBasicBlock *BB : successors())
     if (BB->getLabel() == Label)
       return BB;
-  }
 
   return nullptr;
 }
@@ -178,10 +180,9 @@ BinaryBasicBlock *BinaryBasicBlock::getSuccessor(const MCSymbol *Label,
 }
 
 BinaryBasicBlock *BinaryBasicBlock::getLandingPad(const MCSymbol *Label) const {
-  for (BinaryBasicBlock *BB : landing_pads()) {
+  for (BinaryBasicBlock *BB : landing_pads())
     if (BB->getLabel() == Label)
       return BB;
-  }
 
   return nullptr;
 }
@@ -238,11 +239,10 @@ int32_t BinaryBasicBlock::getCFIStateAtInstr(const MCInst *Instr) const {
     assert(State >= 0 && "first CFI cannot be RestoreState");
     while (Depth && State >= 0) {
       const MCCFIInstruction &CFIInstr = FDEProgram[State];
-      if (CFIInstr.getOperation() == MCCFIInstruction::OpRestoreState) {
+      if (CFIInstr.getOperation() == MCCFIInstruction::OpRestoreState)
         ++Depth;
-      } else if (CFIInstr.getOperation() == MCCFIInstruction::OpRememberState) {
+      else if (CFIInstr.getOperation() == MCCFIInstruction::OpRememberState)
         --Depth;
-      }
       --State;
     }
     assert(Depth == 0 && "unbalanced RememberState/RestoreState stack");
@@ -286,9 +286,9 @@ void BinaryBasicBlock::replaceSuccessor(BinaryBasicBlock *Succ,
 }
 
 void BinaryBasicBlock::removeAllSuccessors() {
-  for (BinaryBasicBlock *SuccessorBB : successors()) {
+  SmallPtrSet<BinaryBasicBlock *, 2> UniqSuccessors(succ_begin(), succ_end());
+  for (BinaryBasicBlock *SuccessorBB : UniqSuccessors)
     SuccessorBB->removePredecessor(this);
-  }
   Successors.clear();
   BranchInfo.clear();
 }
@@ -486,10 +486,10 @@ uint32_t BinaryBasicBlock::getNumPseudos() const {
 #ifndef NDEBUG
   BinaryContext &BC = Function->getBinaryContext();
   uint32_t N = 0;
-  for (const MCInst &Instr : Instructions) {
+  for (const MCInst &Instr : Instructions)
     if (BC.MIB->isPseudo(Instr))
       ++N;
-  }
+
   if (N != NumPseudos) {
     errs() << "BOLT-ERROR: instructions for basic block " << getName()
            << " in function " << *Function << ": calculated pseudos " << N

@@ -1,10 +1,12 @@
-//===--- BinaryData.cpp - Representation of section data objects ----------===//
+//===- bolt/Core/BinaryData.cpp - Objects in a binary file ----------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the BinaryData class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -49,27 +51,24 @@ void BinaryData::merge(const BinaryData *Other) {
 }
 
 bool BinaryData::hasName(StringRef Name) const {
-  for (const MCSymbol *Symbol : Symbols) {
+  for (const MCSymbol *Symbol : Symbols)
     if (Name == Symbol->getName())
       return true;
-  }
   return false;
 }
 
 bool BinaryData::hasNameRegex(StringRef NameRegex) const {
   Regex MatchName(NameRegex);
-  for (const MCSymbol *Symbol : Symbols) {
+  for (const MCSymbol *Symbol : Symbols)
     if (MatchName.match(Symbol->getName()))
       return true;
-  }
   return false;
 }
 
 bool BinaryData::nameStartsWith(StringRef Prefix) const {
-  for (const MCSymbol *Symbol : Symbols) {
+  for (const MCSymbol *Symbol : Symbols)
     if (Symbol->getName().startswith(Prefix))
       return true;
-  }
   return false;
 }
 

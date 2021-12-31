@@ -1,10 +1,12 @@
-//===--- Passes/FrameOptimizer.cpp ----------------------------------------===//
+//===- bolt/Passes/FrameOptimizer.cpp -------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the FrameOptimizerPass class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -149,14 +151,13 @@ void FrameOptimizerPass::removeUnnecessaryLoads(const RegAnalysis &RA,
       Prev = &Inst;
     }
   }
-  if (Changed) {
+  if (Changed)
     LLVM_DEBUG(dbgs() << "FOP modified \"" << BF.getPrintName() << "\"\n");
-  }
+
   // TODO: Implement an interface of eraseInstruction that works out the
   // complete list of elements to remove.
-  for (std::pair<BinaryBasicBlock *, MCInst *> I : ToErase) {
+  for (std::pair<BinaryBasicBlock *, MCInst *> I : ToErase)
     I.first->eraseInstruction(I.first->findInstruction(I.second));
-  }
 }
 
 void FrameOptimizerPass::removeUnusedStores(const FrameAnalysis &FA,
@@ -213,12 +214,11 @@ void FrameOptimizerPass::removeUnusedStores(const FrameAnalysis &FA,
     }
   }
 
-  for (std::pair<BinaryBasicBlock *, MCInst *> I : ToErase) {
+  for (std::pair<BinaryBasicBlock *, MCInst *> I : ToErase)
     I.first->eraseInstruction(I.first->findInstruction(I.second));
-  }
-  if (Changed) {
+
+  if (Changed)
     LLVM_DEBUG(dbgs() << "FOP modified \"" << BF.getPrintName() << "\"\n");
-  }
 }
 
 void FrameOptimizerPass::runOnFunctions(BinaryContext &BC) {

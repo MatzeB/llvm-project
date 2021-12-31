@@ -1,10 +1,8 @@
-//===--- Passes/DominatorAnalysis.h ---------------------------------------===//
+//===- bolt/Passes/DominatorAnalysis.h --------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
 //
 //===----------------------------------------------------------------------===//
 
@@ -97,9 +95,8 @@ public:
 
   void doForAllDominators(const MCInst &Inst,
                           std::function<void(const MCInst &)> Task) {
-    for (auto I = this->expr_begin(Inst), E = this->expr_end(); I != E; ++I) {
+    for (auto I = this->expr_begin(Inst), E = this->expr_end(); I != E; ++I)
       Task(**I);
-    }
   }
 
   void run() {
@@ -139,9 +136,8 @@ private:
   BitVector computeNext(const MCInst &Point, const BitVector &Cur) {
     BitVector Next = Cur;
     // Gen
-    if (!this->BC.MIB->isCFI(Point)) {
+    if (!this->BC.MIB->isCFI(Point))
       Next.set(this->ExprToIdx[&Point]);
-    }
     return Next;
   }
 

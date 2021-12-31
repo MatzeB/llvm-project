@@ -1,4 +1,4 @@
-//===--- MCPlusBuilder.h - main interface for MCPlus-level instructions ---===//
+//===- bolt/Core/MCPlusBuilder.h - Interface for MCPlus ---------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Create/analyze/modify instructions at MC+ level.
+// This file contains the declaration of MCPlusBuilder class, which provides
+// means to create/analyze/modify instructions at MCPlus level.
 //
 //===----------------------------------------------------------------------===//
 
@@ -1111,9 +1112,8 @@ public:
     } else if (auto *BinExpr = dyn_cast<MCBinaryExpr>(Expr)) {
       const auto *SymExpr = dyn_cast<MCSymbolRefExpr>(BinExpr->getLHS());
       const auto *ConstExpr = dyn_cast<MCConstantExpr>(BinExpr->getRHS());
-      if (BinExpr->getOpcode() == MCBinaryExpr::Add && SymExpr && ConstExpr) {
+      if (BinExpr->getOpcode() == MCBinaryExpr::Add && SymExpr && ConstExpr)
         return std::make_pair(&SymExpr->getSymbol(), ConstExpr->getValue());
-      }
     }
     return std::make_pair(nullptr, 0);
   }
@@ -1632,9 +1632,8 @@ public:
     auto *A = new (Allocator.ValueAllocator)
         MCPlus::MCSimpleAnnotation<ValueType>(Val);
 
-    if (!std::is_trivial<ValueType>::value) {
+    if (!std::is_trivial<ValueType>::value)
       Allocator.AnnotationPool.insert(A);
-    }
     setAnnotationOpValue(Inst, Index, reinterpret_cast<int64_t>(A),
                          AllocatorId);
     return A->getValue();

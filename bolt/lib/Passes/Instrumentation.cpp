@@ -1,10 +1,12 @@
-//===--- Passes/Instrumentation.cpp ---------------------------------------===//
+//===- bolt/Passes/Instrumentation.cpp ------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the Instrumentation class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -360,9 +362,8 @@ void Instrumentation::instrumentFunction(BinaryFunction &Function,
   for (auto BBI = Function.begin(), BBE = Function.end(); BBI != BBE; ++BBI) {
     for (auto I = BBI->begin(), E = BBI->end(); I != E; ++I) {
       if (BC.MIB->isCall(*I)) {
-        if (BC.MIB->isInvoke(*I)) {
+        if (BC.MIB->isInvoke(*I))
           InvokeBlocks.insert(&*BBI);
-        }
         IsLeafFunction = false;
       }
     }

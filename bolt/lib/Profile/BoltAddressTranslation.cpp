@@ -1,12 +1,11 @@
-//===--- BoltAddressTranslation.cpp ---------------------------------------===//
+//===- bolt/Profile/BoltAddressTranslation.cpp ----------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-//===----------------------------------------------------------------------===//
+
 #include "bolt/Profile/BoltAddressTranslation.h"
 #include "bolt/Core/BinaryFunction.h"
 #include "llvm/Support/DataExtractor.h"
@@ -231,9 +230,8 @@ BoltAddressTranslation::getFallthroughsInTrace(const BinaryFunction &Func,
   To -= Func.getAddress();
 
   auto Iter = Maps.find(Func.getAddress());
-  if (Iter == Maps.end()) {
+  if (Iter == Maps.end())
     return NoneType();
-  }
 
   const MapTy &Map = Iter->second;
   auto FromIter = Map.upper_bound(From);
@@ -262,9 +260,8 @@ BoltAddressTranslation::getFallthroughsInTrace(const BinaryFunction &Func,
     }
 
     ++Iter;
-    while (Iter->second & BRANCHENTRY && Iter != ToIter) {
+    while (Iter->second & BRANCHENTRY && Iter != ToIter)
       ++Iter;
-    }
     if (Iter->second & BRANCHENTRY)
       break;
     Res.emplace_back(Src, Iter->first);

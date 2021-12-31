@@ -1,12 +1,11 @@
-//===--- Passes/ValidateInternalCalls.h -----------------------------------===//
+//===- bolt/Passes/ValidateInternalCalls.h ----------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-//===----------------------------------------------------------------------===//
+
 #ifndef BOLT_PASSES_VALIDATEINTERNALCALLS_H
 #define BOLT_PASSES_VALIDATEINTERNALCALLS_H
 
@@ -85,11 +84,9 @@ private:
 
   void clearAnnotations(BinaryFunction &Function) const {
     const BinaryContext &BC = Function.getBinaryContext();
-    for (BinaryBasicBlock &BB : Function) {
-      for (MCInst &Inst : BB) {
+    for (BinaryBasicBlock &BB : Function)
+      for (MCInst &Inst : BB)
         BC.MIB->removeAnnotation(Inst, getProcessedICTag());
-      }
-    }
   }
 };
 

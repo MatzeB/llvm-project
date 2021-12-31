@@ -39,6 +39,9 @@ def LinalgComprehensiveModuleBufferize :
     Option<"testAnalysisOnly", "test-analysis-only", "bool",
             /*default=*/"false",
            "Only runs inplaceability analysis (for testing purposes only)">,
+    Option<"printConflicts", "print-conflicts", "bool",
+            /*default=*/"false",
+           "Annotates IR with RaW conflicts. Requires test-analysis-only.">,
     Option<"allowReturnMemref", "allow-return-memref", "bool",
             /*default=*/"false",
            "Allows the return of memrefs (for testing purposes only)">,
@@ -95,6 +98,12 @@ def LinalgFoldReshapeOpsByLinearization :
            "dimension collapsing">
   ];
   let dependentDialects = ["AffineDialect", "memref::MemRefDialect"];
+}
+
+def LinalgNamedOpConversion: Pass<"linalg-named-op-conversion"> {
+  let summary = "Convert from one named linalg op to another.";
+  let constructor = "mlir::createLinalgNamedOpConversionPass()";
+  let dependentDialects = ["linalg::LinalgDialect", "tensor::TensorDialect"];
 }
 
 def LinalgLowerTiledLoopsToSCF

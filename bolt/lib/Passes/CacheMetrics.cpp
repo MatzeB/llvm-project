@@ -1,4 +1,4 @@
-//===------ CacheMetrics.cpp - Calculate metrics for instruction cache ----===//
+//===- bolt/Passes/CacheMetrics.cpp - Metrics for instruction cache -------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Functions to show metrics of cache lines
+// This file implements the CacheMetrics class and functions for showing metrics
+// of cache lines.
 //
 //===----------------------------------------------------------------------===//
 
@@ -94,10 +95,9 @@ double calcExtTSPScore(
     for (BinaryBasicBlock *SrcBB : BF->layout()) {
       auto BI = SrcBB->branch_info_begin();
       for (BinaryBasicBlock *DstBB : SrcBB->successors()) {
-        if (DstBB != SrcBB) {
+        if (DstBB != SrcBB)
           Score += CacheMetrics::extTSPScore(BBAddr.at(SrcBB), BBSize.at(SrcBB),
                                              BBAddr.at(DstBB), BI->Count);
-        }
         ++BI;
       }
     }
@@ -168,9 +168,8 @@ double expectedCacheHitRatio(
   std::unordered_map<BinaryFunction *, double> FunctionSamples;
   for (BinaryFunction *BF : BinaryFunctions) {
     double Samples = 0;
-    for (std::pair<BinaryFunction *, uint64_t> Pair : Calls[BF]) {
+    for (std::pair<BinaryFunction *, uint64_t> Pair : Calls[BF])
       Samples += Pair.second;
-    }
     Samples = std::max(Samples, (double)BF->getKnownExecutionCount());
     FunctionSamples[BF] = Samples;
     TotalSamples += Samples;

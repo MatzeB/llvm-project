@@ -1,4 +1,4 @@
-//===--- Utils.cpp - Common helper functions ------------------------------===//
+//===- bolt/Utils/Utils.cpp - Common helper functions ---------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -51,20 +51,18 @@ void check_error(Error E, Twine Message) {
 
 std::string getEscapedName(const StringRef &Name) {
   std::string Output = Name.str();
-  for (size_t I = 0; I < Output.size(); ++I) {
+  for (size_t I = 0; I < Output.size(); ++I)
     if (Output[I] == ' ' || Output[I] == '\\')
       Output.insert(I++, 1, '\\');
-  }
 
   return Output;
 }
 
 std::string getUnescapedName(const StringRef &Name) {
   std::string Output = Name.str();
-  for (size_t I = 0; I < Output.size(); ++I) {
+  for (size_t I = 0; I < Output.size(); ++I)
     if (Output[I] == '\\')
       Output.erase(I++, 1);
-  }
 
   return Output;
 }

@@ -1,4 +1,4 @@
-//===--------- Passes/TailDuplication.cpp -------------------------------===//
+//===- bolt/Passes/TailDuplication.cpp ------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,10 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 //
+// This file implements the TailDuplication class.
+//
 //===----------------------------------------------------------------------===//
 
 #include "bolt/Passes/TailDuplication.h"
-
 #include <numeric>
 
 #define DEBUG_TYPE "taildup"
@@ -173,13 +174,12 @@ void TailDuplication::constantAndCopyPropagate(
           if (RegsActive) {
             // Set Replaced and so ReplacedEverwhere to false if it cannot be
             // replaced (no replacing that opcode, Register is src and dest)
-            if (ConstantProp) {
+            if (ConstantProp)
               Replaced = BC.MIB->replaceRegWithImm(
                   PropagateInst, Reg, OriginalInst.getOperand(1).getImm());
-            } else {
+            else
               Replaced = BC.MIB->replaceRegWithReg(
                   PropagateInst, Reg, OriginalInst.getOperand(1).getReg());
-            }
           }
           ReplacedEverywhere = ReplacedEverywhere && Replaced;
         }
@@ -187,14 +187,14 @@ void TailDuplication::constantAndCopyPropagate(
         // register to replace with is overwritten
         if (!ConstantProp &&
             regIsPossiblyOverwritten(PropagateInst,
-                                     OriginalInst.getOperand(1).getReg(), BC)) {
+                                     OriginalInst.getOperand(1).getReg(), BC))
           RegsActive = false;
-        }
+
         // Make sure no propagation happens after the register to replace is
         // overwritten
-        if (regIsPossiblyOverwritten(PropagateInst, Reg, BC)) {
+        if (regIsPossiblyOverwritten(PropagateInst, Reg, BC))
           RegsActive = false;
-        }
+
         // Record if the register to replace is overwritten
         if (regIsDefinitelyOverwritten(PropagateInst, Reg, BC)) {
           Overwritten = true;

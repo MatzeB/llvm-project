@@ -1,10 +1,12 @@
-//===--- Aligner.cpp ------------------------------------------------------===//
+//===- bolt/Passes/Aligner.cpp - Pass for optimal code alignment ----------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file implements the AlignerPass class.
 //
 //===----------------------------------------------------------------------===//
 
@@ -93,12 +95,11 @@ void alignCompact(BinaryFunction &Function, const MCCodeEmitter *Emitter) {
   size_t HotSize = 0;
   size_t ColdSize = 0;
 
-  for (const BinaryBasicBlock *BB : Function.layout()) {
+  for (const BinaryBasicBlock *BB : Function.layout())
     if (BB->isCold())
       ColdSize += BC.computeCodeSize(BB->begin(), BB->end(), Emitter);
     else
       HotSize += BC.computeCodeSize(BB->begin(), BB->end(), Emitter);
-  }
 
   Function.setAlignment(opts::AlignFunctions);
   if (HotSize > 0)
@@ -133,9 +134,9 @@ void AlignerPass::alignBlocks(BinaryFunction &Function,
     }
 
     uint64_t FTCount = 0;
-    if (PrevBB && PrevBB->getFallthrough() == BB) {
+    if (PrevBB && PrevBB->getFallthrough() == BB)
       FTCount = PrevBB->getBranchInfo(*BB).Count;
-    }
+
     PrevBB = BB;
 
     if (Count < FTCount * 2)
@@ -187,9 +188,9 @@ void AlignerPass::runOnFunctions(BinaryContext &BC) {
 
   LLVM_DEBUG(
     dbgs() << "BOLT-DEBUG: max bytes per basic block alignment distribution:\n";
-    for (unsigned I = 1; I < AlignHistogram.size(); ++I) {
+    for (unsigned I = 1; I < AlignHistogram.size(); ++I)
       dbgs() << "  " << I << " : " << AlignHistogram[I] << '\n';
-    }
+
     dbgs() << "BOLT-DEBUG: total execution count of aligned blocks: "
            << AlignedBlocksCount << '\n';
   );

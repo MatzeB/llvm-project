@@ -266,13 +266,14 @@ bool LLVMPointerType::areCompatible(DataLayoutEntryListRef oldLayout,
     unsigned size = kDefaultPointerSizeBits;
     unsigned abi = kDefaultPointerAlignment;
     auto newType = newEntry.getKey().get<Type>().cast<LLVMPointerType>();
-    auto it = llvm::find_if(oldLayout, [&](DataLayoutEntryInterface entry) {
-      if (auto type = entry.getKey().dyn_cast<Type>()) {
-        return type.cast<LLVMPointerType>().getAddressSpace() ==
-               newType.getAddressSpace();
-      }
-      return false;
-    });
+    const auto *it =
+        llvm::find_if(oldLayout, [&](DataLayoutEntryInterface entry) {
+          if (auto type = entry.getKey().dyn_cast<Type>()) {
+            return type.cast<LLVMPointerType>().getAddressSpace() ==
+                   newType.getAddressSpace();
+          }
+          return false;
+        });
     if (it == oldLayout.end()) {
       llvm::find_if(oldLayout, [&](DataLayoutEntryInterface entry) {
         if (auto type = entry.getKey().dyn_cast<Type>()) {
@@ -440,14 +441,15 @@ LLVMStructType::getTypeSizeInBits(const DataLayout &dataLayout,
 
 namespace {
 enum class StructDLEntryPos { Abi = 0, Preferred = 1 };
-}
+} // namespace
 
 static Optional<unsigned>
 getStructDataLayoutEntry(DataLayoutEntryListRef params, LLVMStructType type,
                          StructDLEntryPos pos) {
-  auto currentEntry = llvm::find_if(params, [](DataLayoutEntryInterface entry) {
-    return entry.isTypeEntry();
-  });
+  const auto *currentEntry =
+      llvm::find_if(params, [](DataLayoutEntryInterface entry) {
+        return entry.isTypeEntry();
+      });
   if (currentEntry == params.end())
     return llvm::None;
 
@@ -509,7 +511,7 @@ bool LLVMStructType::areCompatible(DataLayoutEntryListRef oldLayout,
     if (!newEntry.isTypeEntry())
       continue;
 
-    auto previousEntry =
+    const auto *previousEntry =
         llvm::find_if(oldLayout, [](DataLayoutEntryInterface entry) {
           return entry.isTypeEntry();
         });
@@ -775,7 +777,12 @@ Type mlir::LLVM::getVectorElementType(Type type) {
 
 llvm::ElementCount mlir::LLVM::getVectorNumElements(Type type) {
   return llvm::TypeSwitch<Type, llvm::ElementCount>(type)
-      .Case<LLVMFixedVectorType, VectorType>([](auto ty) {
+      .Case([](VectorType ty) {
+        if (ty.isScalable())
+          return llvm::ElementCount::getScalable(ty.getNumElements());
+        return llvm::ElementCount::getFixed(ty.getNumElements());
+      })
+      .Case([](LLVMFixedVectorType ty) {
         return llvm::ElementCount::getFixed(ty.getNumElements());
       })
       .Case([](LLVMScalableVectorType ty) {
@@ -784,6 +791,31 @@ llvm::ElementCount mlir::LLVM::getVectorNumElements(Type type) {
       .Default([](Type) -> llvm::ElementCount {
         llvm_unreachable("incompatible with LLVM vector type");
       });
+}
+
+bool mlir::LLVM::isScalableVectorType(Type vectorType) {
+  assert(
+      (vectorType
+           .isa<LLVMFixedVectorType, LLVMScalableVectorType, VectorType>()) &&
+      "expected LLVM-compatible vector type");
+  return !vectorType.isa<LLVMFixedVectorType>() &&
+         (vectorType.isa<LLVMScalableVectorType>() ||
+          vectorType.cast<VectorType>().isScalable());
+}
+
+Type mlir::LLVM::getVectorType(Type elementType, unsigned numElements,
+                               bool isScalable) {
+  bool useLLVM = LLVMFixedVectorType::isValidElementType(elementType);
+  bool useBuiltIn = VectorType::isValidElementType(elementType);
+  (void)useBuiltIn;
+  assert((useLLVM ^ useBuiltIn) && "expected LLVM-compatible fixed-vector type "
+                                   "to be either builtin or LLVM dialect type");
+  if (useLLVM) {
+    if (isScalable)
+      return LLVMScalableVectorType::get(elementType, numElements);
+    return LLVMFixedVectorType::get(elementType, numElements);
+  }
+  return VectorType::get(numElements, elementType, (unsigned)isScalable);
 }
 
 Type mlir::LLVM::getFixedVectorType(Type elementType, unsigned numElements) {
@@ -795,6 +827,18 @@ Type mlir::LLVM::getFixedVectorType(Type elementType, unsigned numElements) {
   if (useLLVM)
     return LLVMFixedVectorType::get(elementType, numElements);
   return VectorType::get(numElements, elementType);
+}
+
+Type mlir::LLVM::getScalableVectorType(Type elementType, unsigned numElements) {
+  bool useLLVM = LLVMScalableVectorType::isValidElementType(elementType);
+  bool useBuiltIn = VectorType::isValidElementType(elementType);
+  (void)useBuiltIn;
+  assert((useLLVM ^ useBuiltIn) && "expected LLVM-compatible scalable-vector "
+                                   "type to be either builtin or LLVM dialect "
+                                   "type");
+  if (useLLVM)
+    return LLVMScalableVectorType::get(elementType, numElements);
+  return VectorType::get(numElements, elementType, /*numScalableDims=*/1);
 }
 
 llvm::TypeSize mlir::LLVM::getPrimitiveTypeSizeInBits(Type type) {

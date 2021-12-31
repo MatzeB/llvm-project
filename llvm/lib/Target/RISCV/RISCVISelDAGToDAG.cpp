@@ -1515,6 +1515,7 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
     ReplaceNode(Node, Extract.getNode());
     return;
   }
+  case ISD::SPLAT_VECTOR:
   case RISCVISD::VMV_V_X_VL:
   case RISCVISD::VFMV_V_F_VL: {
     // Try to match splat of a scalar load to a strided load with stride of x0.
@@ -1531,7 +1532,10 @@ void RISCVDAGToDAGISel::Select(SDNode *Node) {
       break;
 
     SDValue VL;
-    selectVLOp(Node->getOperand(1), VL);
+    if (Node->getOpcode() == ISD::SPLAT_VECTOR)
+      VL = CurDAG->getTargetConstant(RISCV::VLMaxSentinel, DL, XLenVT);
+    else
+      selectVLOp(Node->getOperand(1), VL);
 
     unsigned Log2SEW = Log2_32(VT.getScalarSizeInBits());
     SDValue SEW = CurDAG->getTargetConstant(Log2SEW, DL, XLenVT);
@@ -1721,6 +1725,20 @@ bool RISCVDAGToDAGISel::hasAllNBitUsers(SDNode *Node, unsigned Bits) const {
     case RISCV::SLLI:
       // SLLI only uses the lower (XLen - ShAmt) bits.
       if (Bits < Subtarget->getXLen() - User->getConstantOperandVal(1))
+        return false;
+      break;
+    case RISCV::ANDI:
+      if (Bits < (64 - countLeadingZeros(User->getConstantOperandVal(1))))
+        return false;
+      break;
+    case RISCV::SEXTB:
+      if (Bits < 8)
+        return false;
+      break;
+    case RISCV::SEXTH:
+    case RISCV::ZEXTH_RV32:
+    case RISCV::ZEXTH_RV64:
+      if (Bits < 16)
         return false;
       break;
     case RISCV::ADDUW:

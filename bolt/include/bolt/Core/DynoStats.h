@@ -1,10 +1,13 @@
-//===--- DynoStats.h ------------------------------------------------------===//
+//===- bolt/Core/DynoStats.h - Dynamic execution stats ----------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// Keep track of statistics about the trace of execution captured in BOLT
+// profile.
 //
 //===----------------------------------------------------------------------===//
 
@@ -148,9 +151,8 @@ inline DynoStats getDynoStats(const FuncsType &Funcs) {
   DynoStats dynoStats(IsAArch64);
   for (auto &BFI : Funcs) {
     auto &BF = BFI.second;
-    if (BF.isSimple()) {
+    if (BF.isSimple())
       dynoStats += getDynoStats(BF);
-    }
   }
   return dynoStats;
 }
@@ -161,9 +163,8 @@ inline void callWithDynoStats(FnType &&Func, const FuncsType &Funcs,
                               StringRef Phase, const bool Flag) {
   bool IsAArch64 = Funcs.begin()->second.getBinaryContext().isAArch64();
   DynoStats DynoStatsBefore(IsAArch64);
-  if (Flag) {
+  if (Flag)
     DynoStatsBefore = getDynoStats(Funcs);
-  }
 
   Func();
 
@@ -173,9 +174,8 @@ inline void callWithDynoStats(FnType &&Func, const FuncsType &Funcs,
     outs() << "BOLT-INFO: program-wide dynostats after running " << Phase
            << (Changed ? "" : " (no change)") << ":\n\n"
            << DynoStatsBefore << '\n';
-    if (Changed) {
+    if (Changed)
       DynoStatsAfter.print(outs(), &DynoStatsBefore);
-    }
     outs() << '\n';
   }
 }
