@@ -259,6 +259,8 @@ private:
   std::unordered_map<uint64_t, AddressForDWOCU> AddressMaps;
   /// Maps DWOID to offset within .debug_addr section.
   std::unordered_map<uint64_t, uint64_t> DWOIdToOffsetMap;
+  /// Mutex used for parallel processing of debug info.
+  std::mutex WriterMutex;
 };
 
 using DebugStrBufferVector = SmallVector<char, 16>;
@@ -278,6 +280,8 @@ public:
   bool isInitialized() const { return !StrBuffer->empty(); }
 
 private:
+  /// Mutex used for parallel processing of debug info.
+  std::mutex WriterMutex;
   /// Initializes Buffer and Stream.
   void initialize();
   /// Creats internal data stractures.
@@ -493,6 +497,8 @@ public:
   struct Patch {
     Patch(uint32_t O, DebugPatchKind K) : Offset(O), Kind(K) {}
     DebugPatchKind getKind() const { return Kind; }
+
+    virtual ~Patch(){};
 
     static bool classof(const Patch *Writer) {
       return Writer->getKind() == DebugPatchKind::PatchBaseClass;

@@ -755,7 +755,7 @@ struct VectorizationState {
   DenseMap<Operation *, Value> vecLoopToMask;
 
   // The strategy drives which loop to vectorize by which amount.
-  const VectorizationStrategy *strategy;
+  const VectorizationStrategy *strategy = nullptr;
 
 private:
   /// Internal implementation to map input scalar values to new vector or scalar
@@ -1324,7 +1324,6 @@ static Operation *vectorizeAffineForOp(AffineForOp forOp,
       /*bodyBuilder=*/[](OpBuilder &, Location, Value, ValueRange) {
         // Make sure we don't create a default terminator in the loop body as
         // the proper terminator will be added during vectorization.
-        return;
       });
 
   // Register loop-related replacements:
