@@ -75,7 +75,7 @@ if not hasattr(config, 'clang_src_dir'):
 # Facebook T92898286
 should_test_bolt = get_required_attr(config, "llvm_test_bolt")
 if should_test_bolt:
-    llvm_config.use_clang(required=('clang' in config.llvm_enabled_projects), additional_flags=['--post-link-optimize'])
+    llvm_config.use_clang(required=('clang' in config.llvm_enabled_projects), additional_flags=['--post-link-optimize', '-fdebug-default-version=4'])
 else:
     llvm_config.use_clang(required=('clang' in config.llvm_enabled_projects))
 # End Facebook T92898286

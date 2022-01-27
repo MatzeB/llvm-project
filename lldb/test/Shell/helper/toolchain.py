@@ -140,7 +140,7 @@ def use_support_substitutions(config):
 
     # Facebook T92898286
     if config.llvm_test_bolt:
-        host_flags += ['--post-link-optimize']
+        host_flags += ['--post-link-optimize', '-fdebug-default-version=4']
     # End Facebook T92898286
 
     host_flags = ' '.join(host_flags)
