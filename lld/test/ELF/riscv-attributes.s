@@ -6,7 +6,9 @@
 # RUN: llvm-readelf -S -l --arch-specific out | FileCheck %s --check-prefixes=HDR,CHECK
 # RUN: ld.lld -e 0 a.o a.o -o out1 2>&1 | count 0
 # RUN: llvm-readobj --arch-specific out1 | FileCheck %s
-# RUN: ld.lld -r a.o a.o -o out1 2>&1 | count 0
+// facebook begin T46459577
+# RUN: ld.lld -r a.o a.o -o out1 2>&1 | count 1
+// facebook end T46459577
 # RUN: llvm-readobj --arch-specific out1 | FileCheck %s
 
 # RUN: llvm-mc -filetype=obj -triple=riscv64 b.s -o b.o
