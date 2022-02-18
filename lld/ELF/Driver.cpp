@@ -710,16 +710,24 @@ static DiscardPolicy getDiscard(opt::InputArgList &args) {
 // --no-discard-section=S.  This ensures we have a proper override
 // mechanism.
 static std::unordered_set<llvm::StringRef>
-getDiscardSections(opt::InputArgList &Args) {
+getDiscardSections(opt::InputArgList &Args, bool emitRelocs) {
   std::unordered_set<llvm::StringRef> discardSections;
   for (auto *A : Args) {
     if (!(A->getOption().matches(OPT_discard_section) ||
           A->getOption().matches(OPT_no_discard_section)))
       continue;
     A->claim();
-    if (A->getOption().matches(OPT_discard_section))
-      discardSections.insert(A->getValue());
-    else if (A->getOption().matches(OPT_no_discard_section))
+    if (A->getOption().matches(OPT_discard_section)) {
+      llvm::StringRef val = A->getValue();
+      // Discard DWARF sections even when --emit-relocs is used T87639747
+      if (!emitRelocs || val.find(".debug_") == 0 ||
+          val.find(".rela.debug_") == 0)
+        discardSections.insert(val);
+      else
+        warn("--emit-relocs  may not be used with --discard-section unless "
+             "section is a debug section, ignoring " +
+             A->getAsString(Args));
+    } else if (A->getOption().matches(OPT_no_discard_section))
       discardSections.erase(A->getValue());
   }
   return discardSections;
@@ -1102,7 +1110,6 @@ static void readConfigs(opt::InputArgList &args) {
   config->dependentLibraries = args.hasFlag(OPT_dependent_libraries, OPT_no_dependent_libraries, true);
   config->disableVerify = args.hasArg(OPT_disable_verify);
   config->discard = getDiscard(args);
-  config->discardSections = getDiscardSections(args); // facebook T46459577
   config->dwoDir = args.getLastArgValue(OPT_plugin_opt_dwo_dir_eq);
   config->dynamicLinker = getDynamicLinker(args);
   config->ehFrameHdr =
@@ -1580,11 +1587,11 @@ static void setConfigs(opt::InputArgList &args) {
   }
   // facebook end D16076751, D25918906
   // facebook begins T46459577
-  if (config->copyRelocs && config->discardSections.size() != 0) {
-    config->discardSections.clear();
-    warn("-r or -q may not be used with --discard-sections, "
-         "ignoring --discard-sections");
-  }
+  if (config->relocatable)
+    warn("-r may not be used with --discard-section, "
+         "ignoring all instances of --discard-section");
+  else
+    config->discardSections = getDiscardSections(args, config->emitRelocs);
   // facebook ends T46459577
   config->is64 = (k == ELF64LEKind || k == ELF64BEKind);
   config->isLE = (k == ELF32LEKind || k == ELF64LEKind);
