@@ -294,9 +294,7 @@ private:
 /// used by pass managers.
 class PMDataManager {
 public:
-  explicit PMDataManager() : TPM(nullptr), Depth(0) {
-    initializeAnalysisInfo();
-  }
+  explicit PMDataManager() { initializeAnalysisInfo(); }
 
   virtual ~PMDataManager();
 
@@ -418,7 +416,7 @@ public:
 
 protected:
   // Top level manager.
-  PMTopLevelManager *TPM;
+  PMTopLevelManager *TPM = nullptr;
 
   // Collection of pass that are managed by this manager
   SmallVector<Pass *, 16> PassVector;
@@ -446,7 +444,7 @@ private:
   // this manager.
   SmallVector<Pass *, 16> HigherLevelAnalysis;
 
-  unsigned Depth;
+  unsigned Depth = 0;
 };
 
 //===----------------------------------------------------------------------===//
@@ -459,8 +457,7 @@ private:
 class FPPassManager : public ModulePass, public PMDataManager {
 public:
   static char ID;
-  explicit FPPassManager()
-  : ModulePass(ID), PMDataManager() { }
+  explicit FPPassManager() : ModulePass(ID) {}
 
   /// run - Execute all of the passes scheduled for execution.  Keep track of
   /// whether any of the passes modifies the module, and if so, return true.

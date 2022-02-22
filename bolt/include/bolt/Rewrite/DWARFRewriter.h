@@ -10,11 +10,11 @@
 #define BOLT_REWRITE_DWARF_REWRITER_H
 
 #include "bolt/Core/DebugData.h"
-#include "bolt/Rewrite/RewriteInstance.h"
+#include "llvm/MC/MCAsmLayout.h"
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <unordered_map>
 #include <vector>
 

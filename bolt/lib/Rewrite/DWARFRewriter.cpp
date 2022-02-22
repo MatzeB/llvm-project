@@ -11,25 +11,26 @@
 #include "bolt/Core/BinaryFunction.h"
 #include "bolt/Core/DebugData.h"
 #include "bolt/Core/ParallelUtilities.h"
+#include "bolt/Rewrite/RewriteInstance.h"
 #include "bolt/Utils/Utils.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/DWP/DWP.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFDebugLoc.h"
+#include "llvm/DebugInfo/DWARF/DWARFExpression.h"
 #include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
 #include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmLayout.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCObjectWriter.h"
-#include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCStreamer.h"
-#include "llvm/MC/MCSymbol.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -51,49 +52,8 @@ static void printDie(const DWARFDie &DIE) {
   DIE.dump(dbgs(), 0, DumpOpts);
 }
 
-struct AttrInfo {
-  DWARFFormValue V;
-  uint64_t Offset;
-  uint32_t Size; // Size of the attribute.
-};
-
-/// Finds attributes FormValue and Offset.
-///
-/// \param DIE die to look up in.
-/// \param Index the attribute index to extract.
-/// \return an optional AttrInfo with DWARFFormValue and Offset.
-static Optional<AttrInfo>
-findAttributeInfo(const DWARFDie DIE,
-                  const DWARFAbbreviationDeclaration *AbbrevDecl,
-                  uint32_t Index) {
-  const DWARFUnit &U = *DIE.getDwarfUnit();
-  uint64_t Offset =
-      AbbrevDecl->getAttributeOffsetFromIndex(Index, DIE.getOffset(), U);
-  Optional<DWARFFormValue> Value =
-      AbbrevDecl->getAttributeValueFromOffset(Index, Offset, U);
-  if (!Value)
-    return None;
-  // AttributeSpec
-  const DWARFAbbreviationDeclaration::AttributeSpec *AttrVal =
-      AbbrevDecl->attributes().begin() + Index;
-  uint32_t ValSize = 0;
-  Optional<int64_t> ValSizeOpt = AttrVal->getByteSize(U);
-  if (ValSizeOpt) {
-    ValSize = static_cast<uint32_t>(*ValSizeOpt);
-  } else {
-    DWARFDataExtractor DebugInfoData = U.getDebugInfoExtractor();
-    uint64_t NewOffset = Offset;
-    DWARFFormValue::skipValue(Value->getForm(), DebugInfoData, &NewOffset,
-                              U.getFormParams());
-    // This includes entire size of the entry, which might not be just the
-    // encoding part. For example for DW_AT_loc it will include expression
-    // location.
-    ValSize = NewOffset - Offset;
-  }
-
-  return AttrInfo{*Value, Offset, ValSize};
-}
-
+namespace llvm {
+namespace bolt {
 /// Finds attributes FormValue and Offset.
 ///
 /// \param DIE die to look up in.
@@ -112,6 +72,8 @@ static Optional<AttrInfo> findAttributeInfo(const DWARFDie DIE,
     return None;
   return findAttributeInfo(DIE, AbbrevDecl, *Index);
 }
+} // namespace bolt
+} // namespace llvm
 
 using namespace llvm;
 using namespace llvm::support::endian;
@@ -662,22 +624,27 @@ void DWARFRewriter::updateDWARFObjectAddressRanges(
     }
   }
 
+  Optional<AttrInfo> LowPCAttrInfo =
+      findAttributeInfo(DIE, dwarf::DW_AT_low_pc);
   if (AbbreviationDecl->findAttributeIndex(dwarf::DW_AT_ranges)) {
     // Case 1: The object was already non-contiguous and had DW_AT_ranges.
     // In this case we simply need to update the value of DW_AT_ranges
     // and introduce DW_AT_GNU_ranges_base if required.
     Optional<AttrInfo> AttrVal = findAttributeInfo(DIE, dwarf::DW_AT_ranges);
-
     std::lock_guard<std::mutex> Lock(DebugInfoPatcherMutex);
     DebugInfoPatcher.addLE32Patch(
         AttrVal->Offset, DebugRangesOffset - DebugInfoPatcher.getRangeBase(),
         AttrVal->Size);
-    if (!RangesBase)
+
+    if (!RangesBase) {
+      if (LowPCAttrInfo &&
+          LowPCAttrInfo->V.getForm() != dwarf::DW_FORM_GNU_addr_index &&
+          LowPCAttrInfo->V.getForm() != dwarf::DW_FORM_addrx)
+        DebugInfoPatcher.addLE64Patch(LowPCAttrInfo->Offset, 0);
       return;
+    }
 
     // Convert DW_AT_low_pc into DW_AT_GNU_ranges_base.
-    Optional<AttrInfo> LowPCAttrInfo =
-        findAttributeInfo(DIE, dwarf::DW_AT_low_pc);
     if (!LowPCAttrInfo) {
       errs() << "BOLT-ERROR: skeleton CU at 0x"
              << Twine::utohexstr(DIE.getOffset())
@@ -686,20 +653,20 @@ void DWARFRewriter::updateDWARFObjectAddressRanges(
       return;
     }
 
-    AbbrevWriter.addAttributePatch(
-        *DIE.getDwarfUnit(), AbbreviationDecl, dwarf::DW_AT_low_pc,
-        dwarf::DW_AT_GNU_ranges_base, dwarf::DW_FORM_indirect);
-    DebugInfoPatcher.addUDataPatch(LowPCAttrInfo->Offset, dwarf::DW_FORM_udata,
-                                   1);
-    DebugInfoPatcher.addUDataPatch(LowPCAttrInfo->Offset + 1, *RangesBase, 7);
+    AbbrevWriter.addAttribute(*DIE.getDwarfUnit(), AbbreviationDecl,
+                              dwarf::DW_AT_GNU_ranges_base,
+                              dwarf::DW_FORM_sec_offset);
+    reinterpret_cast<DebugInfoBinaryPatcher &>(DebugInfoPatcher)
+        .insertNewEntry(DIE, *RangesBase);
 
     return;
   }
 
   // Case 2: The object has both DW_AT_low_pc and DW_AT_high_pc emitted back
   // to back. Replace with new attributes and patch the DIE.
-  if (AbbreviationDecl->findAttributeIndex(dwarf::DW_AT_low_pc) &&
-      AbbreviationDecl->findAttributeIndex(dwarf::DW_AT_high_pc)) {
+  Optional<AttrInfo> HighPCAttrInfo =
+      findAttributeInfo(DIE, dwarf::DW_AT_high_pc);
+  if (LowPCAttrInfo && HighPCAttrInfo) {
     convertToRangesPatchAbbrev(*DIE.getDwarfUnit(), AbbreviationDecl,
                                AbbrevWriter, RangesBase);
     convertToRangesPatchDebugInfo(DIE, DebugRangesOffset, DebugInfoPatcher,
@@ -897,11 +864,11 @@ namespace {
 
 std::unique_ptr<BinaryContext>
 createDwarfOnlyBC(const object::ObjectFile &File) {
-  return BinaryContext::createBinaryContext(
+  return cantFail(BinaryContext::createBinaryContext(
       &File, false,
       DWARFContext::create(File, DWARFContext::ProcessDebugRelocations::Ignore,
                            nullptr, "", WithColor::defaultErrorHandler,
-                           WithColor::defaultWarningHandler));
+                           WithColor::defaultWarningHandler)));
 }
 
 StringMap<KnownSectionsEntry>
@@ -1452,9 +1419,8 @@ void DWARFRewriter::convertToRangesPatchAbbrev(
   // there.
   if (RangesBase) {
     assert(LowPCForm != dwarf::DW_FORM_GNU_addr_index);
-    AbbrevWriter.addAttributePatch(Unit, Abbrev, dwarf::DW_AT_low_pc,
-                                   dwarf::DW_AT_GNU_ranges_base,
-                                   dwarf::DW_FORM_sec_offset);
+    AbbrevWriter.addAttribute(Unit, Abbrev, dwarf::DW_AT_GNU_ranges_base,
+                              dwarf::DW_FORM_sec_offset);
   }
 
   AbbrevWriter.addAttributePatch(Unit, Abbrev, dwarf::DW_AT_high_pc,
@@ -1480,11 +1446,11 @@ void DWARFRewriter::convertToRangesPatchDebugInfo(
     // Ranges are relative to DW_AT_GNU_ranges_base.
     BaseOffset = DebugInfoPatcher.getRangeBase();
   } else {
-    // If case DW_AT_low_pc was converted into DW_AT_GNU_ranges_base
+    DebugInfoPatcher.addLE64Patch(LowPCOffset, 0);
+    // If DW_AT_GNU_ranges_base was inserted.
     if (RangesBase)
-      DebugInfoPatcher.addLE32Patch(LowPCOffset, *RangesBase, 8);
-    else
-      DebugInfoPatcher.addLE64Patch(LowPCOffset, 0);
+      reinterpret_cast<DebugInfoBinaryPatcher &>(DebugInfoPatcher)
+          .insertNewEntry(DIE, *RangesBase);
   }
   DebugInfoPatcher.addLE32Patch(HighPCOffset, RangesSectionOffset - BaseOffset,
                                 HighPCVal->Size);

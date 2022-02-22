@@ -31,6 +31,7 @@ class MCCodeEmitter;
 namespace bolt {
 
 class BinaryFunction;
+class JumpTable;
 
 class BinaryBasicBlock {
 public:
@@ -87,10 +88,10 @@ private:
   MCSymbol *Label{nullptr};
 
   /// [Begin, End) address range for this block in the output binary.
-  std::pair<uint32_t, uint32_t> OutputAddressRange{0, 0};
+  std::pair<uint32_t, uint32_t> OutputAddressRange = {0, 0};
 
   /// Original offset range of the basic block in the function.
-  std::pair<uint32_t, uint32_t> InputRange{INVALID_OFFSET, INVALID_OFFSET};
+  std::pair<uint32_t, uint32_t> InputRange = {INVALID_OFFSET, INVALID_OFFSET};
 
   /// Map input offset (from function start) of an instruction to an output
   /// symbol. Enables writing BOLT address translation tables used for mapping
@@ -623,6 +624,10 @@ public:
   /// remove the conditional successor and branch instruction.
   void removeDuplicateConditionalSuccessor(MCInst *CondBranch);
 
+  /// Update successors of the basic block based on the jump table instruction.
+  /// The block must end with a jump table instruction.
+  void updateJumpTableSuccessors();
+
   /// Test if BB is a predecessor of this block.
   bool isPredecessor(const BinaryBasicBlock *BB) const {
     auto Itr = std::find(Predecessors.begin(), Predecessors.end(), BB);
@@ -909,7 +914,12 @@ public:
     return Index;
   }
 
-  bool hasJumpTable() const;
+  /// Return jump table if the block contains a jump table instruction or
+  /// nullptr otherwise.
+  const JumpTable *getJumpTable() const;
+
+  /// Check if the block has a jump table instruction.
+  bool hasJumpTable() const { return getJumpTable() != nullptr; }
 
 private:
   void adjustNumPseudos(const MCInst &Inst, int Sign);

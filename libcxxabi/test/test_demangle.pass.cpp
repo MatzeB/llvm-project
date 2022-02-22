@@ -15,6 +15,7 @@
 // UNSUPPORTED: use_system_cxx_lib && target={{.+}}-apple-macosx11.0
 
 #include "support/timer.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -29481,7 +29482,7 @@ const char* cases[][2] =
     {"_ZN5Casts8implicitILj4EEEvPN9enable_ifIXooT_Li4EEvE4typeE", "void Casts::implicit<4u>(enable_if<(4u) || (4), void>::type*)"},
     {"_ZN5Casts8implicitILj4EEEvPN9enable_ifIXorT_Li4EEvE4typeE", "void Casts::implicit<4u>(enable_if<(4u) | (4), void>::type*)"},
     {"_ZN5Casts8implicitILj4EEEvPN9enable_ifIXoRT_Li4EEvE4typeE", "void Casts::implicit<4u>(enable_if<(4u) |= (4), void>::type*)"},
-    {"_ZN5Casts8implicitILj4EEEvPN9enable_ifIXpmT_Li4EEvE4typeE", "void Casts::implicit<4u>(enable_if<(4u) ->* (4), void>::type*)"},
+    {"_ZN5Casts8implicitILj4EEEvPN9enable_ifIXpmT_Li4EEvE4typeE", "void Casts::implicit<4u>(enable_if<4u->*(4), void>::type*)"},
     {"_ZN5Casts8implicitILj4EEEvPN9enable_ifIXplT_Li4EEvE4typeE", "void Casts::implicit<4u>(enable_if<(4u) + (4), void>::type*)"},
     {"_ZN5Casts8implicitILj4EEEvPN9enable_ifIXpLT_Li4EEvE4typeE", "void Casts::implicit<4u>(enable_if<(4u) += (4), void>::type*)"},
     {"_ZN5Casts8implicitILj4EEEvPN9enable_ifIXppT_EvE4typeE", "void Casts::implicit<4u>(enable_if<(4u)++, void>::type*)"},
@@ -29658,7 +29659,7 @@ const char* cases[][2] =
     {"_ZN5test21hIPFfvEEEvT_DTcvPFDTclfL0p_EEvELi0EE", "void test2::h<float (*)()>(float (*)(), decltype((decltype(fp()) (*)())(0)))"},
     {"_ZN5test21iIPFfvEEEvDTcvPFDTclfp_EET_ELi0EE", "void test2::i<float (*)()>(decltype((decltype(fp()) (*)(float (*)()))(0)))"},
     {"_ZZN5test21gIPFfvEEEvT_DTclfL0p_EEE8variable", "void test2::g<float (*)()>(float (*)(), decltype(fp()))::variable"},
-    {"_ZN5test31aINS_1XEMS1_PiEEvT_T0_DTdsfL0p_fL0p0_E", "void test3::a<test3::X, int* test3::X::*>(test3::X, int* test3::X::*, decltype(fp.*fp0))"},
+    {"_ZN5test31aINS_1XEMS1_PiEEvT_T0_DTdsfL0p_fL0p0_E", "void test3::a<test3::X, int* test3::X::*>(test3::X, int* test3::X::*, decltype(fp.*(fp0)))"},
     {"_ZN5test43tf1INS_1XEEEvDTnw_T_piLi1EEE", "void test4::tf1<test4::X>(decltype(new test4::X(1)))"},
     {"_ZN5test51aIiEEvDTnxcvT__EE", "void test5::a<int>(decltype(noexcept ((int)())))"},
     {"_ZN5test62f1IiEEvDTcvT_dtdtL_ZNS_1zEE2ua1iE", "void test6::f1<int>(decltype((int)(test6::z.ua.i)))"},
@@ -29855,6 +29856,15 @@ const char* cases[][2] =
     // This should be invalid, but it is currently not recognized as such
     // See https://llvm.org/PR51407
     {"_Zcv1BIRT_EIS1_E", "operator B<><>"},
+
+    {"_ZN2FnIXgs4BaseEX4BaseEEEvv","void Fn<::Base, Base>()"},
+    
+    {"_ZN2FnIXgsnw_iEEXna_ipiLi4EEEEEvv", "void Fn<::new int, new[] int(4)>()"},
+    {"_ZN2FnIXnwLj4E_iEEXgsnaLj4E_ipiLi4EEEEEvv", "void Fn<new(4u) int, ::new[](4u) int(4)>()"},
+    {"_ZN2FnIXgsdlLi4EEXdaLi4EEEEvv", "void Fn<::delete 4, delete[] 4>()"},
+    {"_ZN2FnIXdlLj4EEXgsdaLj4EEEEvv", "void Fn<delete 4u, ::delete[] 4u>()"},
+
+    {"_Z3TPLIiET_S0_", "int TPL<int>(int)"},
 };
 
 const unsigned N = sizeof(cases) / sizeof(cases[0]);
@@ -29932,6 +29942,14 @@ const char* invalid_cases[] =
     "FSiIJEENT_IoE ",
     "ZTVSiIZTVSiIZTVSiIZTVSiINIJEET_T_T_T_T_ ",
     "Ana_T_E_T_IJEffffffffffffffersfffffrsrsffffffbgE",
+
+    "_ZN3TPLS_E",
+    "_ZN3CLSIiEIiEE",
+    "_ZN3CLSDtLi0EEE",
+    "_ZN3CLSIiEEvNS_T_Ev",
+
+    "_ZN1fIiEEvNTUt_E",
+    "_ZNDTUt_Ev",
 };
 
 const unsigned NI = sizeof(invalid_cases) / sizeof(invalid_cases[0]);
@@ -29944,51 +29962,43 @@ void test()
     for (unsigned i = 0; i < N; ++i)
     {
         int status;
-        char* demang = __cxxabiv1::__cxa_demangle(cases[i][0], buf, &len, &status);
-        if (demang == 0 || std::strcmp(demang, cases[i][1]) != 0)
+        char* demang =
+            __cxxabiv1::__cxa_demangle(cases[i][0], buf, &len, &status);
+        if (!demang || std::strcmp(demang, cases[i][1]) != 0)
         {
-            std::printf("ERROR demangling %s\nexpected: %s\n", cases[i][0], cases[i][1]);
-            if (demang)
-            {
-                std::printf(" reality: %s\n", demang);
-                buf = demang;
-                failed = true;
-            }
-            else
-            {
-                std::printf("Got instead: NULL, %d\n", status);
-                failed = true;
-            }
+            std::printf("ERROR demangling %s\nexpected: %s\n",
+                        cases[i][0], cases[i][1]);
+            std::printf("Got: %d, %s\n", status, demang ? demang : "(null)");
+            failed = true;
         }
-        else
-        {
-            buf = demang;
-        }
+        if (demang)
+          buf = demang;
     }
-    assert(!failed);
     free(buf);
+    assert(!failed && "demangle failed");
 }
 
 void test_invalid_cases()
 {
     std::size_t len = 0;
     char* buf = nullptr;
+    bool passed = false;
     for (unsigned i = 0; i < NI; ++i)
     {
         int status;
-        char* demang = __cxxabiv1::__cxa_demangle(invalid_cases[i], buf, &len, &status);
+        char* demang =
+            __cxxabiv1::__cxa_demangle(invalid_cases[i], buf, &len, &status);
         if (status != -2)
         {
             std::printf("%s should be invalid but is not\n", invalid_cases[i]);
-            std::printf("Got status %d\n", status);
-            assert(status == -2);
+            std::printf("Got: %d, %s\n", status, demang ? demang : "(null)");
+            passed = true;
         }
-        else
-        {
-            buf = demang;
-        }
+        if (demang)
+          buf = demang;
     }
     free(buf);
+    assert(!passed && "demangle did not fail");
 }
 
 const char *xfail_cases[] = {

@@ -91,12 +91,102 @@ define signext i32 @shfl32_demandedbits(i32 signext %a, i32 signext %b, i32 sign
   ret i32 %tmp
 }
 
+define signext i32 @zipni32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zipni32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip.n a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 1)
+ ret i32 %tmp
+}
+
+define signext i32 @zip2bi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zip2bi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip2.b a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 2)
+ ret i32 %tmp
+}
+
+define signext i32 @zipbi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zipbi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip.b a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 3)
+ ret i32 %tmp
+}
+
+define signext i32 @zip4hi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zip4hi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip4.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 4)
+ ret i32 %tmp
+}
+
+define signext i32 @zip2hi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zip2hi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip2.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 6)
+ ret i32 %tmp
+}
+
+define signext i32 @ziphi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: ziphi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 7)
+ ret i32 %tmp
+}
+
 define signext i32 @shfli32(i32 signext %a) nounwind {
 ; RV64ZBP-LABEL: shfli32:
 ; RV64ZBP:       # %bb.0:
 ; RV64ZBP-NEXT:    shfli a0, a0, 13
 ; RV64ZBP-NEXT:    ret
   %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 13)
+ ret i32 %tmp
+}
+
+define signext i32 @zip4wi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zip4wi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip4.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 12)
+ ret i32 %tmp
+}
+
+define signext i32 @zip2wi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zip2wi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip2.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 14)
+ ret i32 %tmp
+}
+
+define signext i32 @zipwi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zipwi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 15)
+ ret i32 %tmp
+}
+
+define signext i32 @zip8wi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: zip8wi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip8.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.shfl.i32(i32 %a, i32 8)
  ret i32 %tmp
 }
 
@@ -123,12 +213,102 @@ define signext i32 @unshfl32_demandedbits(i32 signext %a, i32 signext %b, i32 si
   ret i32 %tmp
 }
 
+define signext i32 @unzipni32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzipni32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip.n a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 1)
+ ret i32 %tmp
+}
+
+define signext i32 @unzip2bi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzip2bi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip2.b a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 2)
+ ret i32 %tmp
+}
+
+define signext i32 @unzipbi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzipbi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip.b a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 3)
+ ret i32 %tmp
+}
+
+define signext i32 @unzip4hi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzip4hi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip4.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 4)
+ ret i32 %tmp
+}
+
+define signext i32 @unzip2hi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzip2hi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip2.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 6)
+ ret i32 %tmp
+}
+
+define signext i32 @unziphi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unziphi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 7)
+ ret i32 %tmp
+}
+
 define signext i32 @unshfli32(i32 signext %a) nounwind {
 ; RV64ZBP-LABEL: unshfli32:
 ; RV64ZBP:       # %bb.0:
 ; RV64ZBP-NEXT:    unshfli a0, a0, 13
 ; RV64ZBP-NEXT:    ret
   %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 13)
+ ret i32 %tmp
+}
+
+define signext i32 @unzip4wi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzip4wi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip4.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 12)
+ ret i32 %tmp
+}
+
+define signext i32 @unzip2wi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzip2wi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip2.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 14)
+ ret i32 %tmp
+}
+
+define signext i32 @unzipwi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzipwi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 15)
+ ret i32 %tmp
+}
+
+define signext i32 @unzip8wi32(i32 signext %a) nounwind {
+; RV64ZBP-LABEL: unzip8wi32:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip8.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i32 @llvm.riscv.unshfl.i32(i32 %a, i32 8)
  ret i32 %tmp
 }
 
@@ -224,6 +404,123 @@ define i64 @shfli64(i64 %a) nounwind {
  ret i64 %tmp
 }
 
+define i64 @zip4wi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zip4wi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip4.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 12)
+ ret i64 %tmp
+}
+
+define i64 @zip2wi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zip2wi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip2.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 14)
+ ret i64 %tmp
+}
+
+define i64 @zipwi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zipwi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 15)
+ ret i64 %tmp
+}
+
+define i64 @zip8i64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zip8i64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip8 a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 24)
+ ret i64 %tmp
+}
+
+define i64 @zip4i64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zip4i64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip4 a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 28)
+ ret i64 %tmp
+}
+
+define i64 @zip2i64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zip2i64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip2 a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 30)
+ ret i64 %tmp
+}
+
+define i64 @zipi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zipi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 31)
+ ret i64 %tmp
+}
+
+define i64 @zipni64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zipni64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip.n a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 1)
+ ret i64 %tmp
+}
+
+define i64 @zip2bi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zip2bi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip2.b a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 2)
+ ret i64 %tmp
+}
+
+define i64 @zipbi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zipbi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip.b a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 3)
+ ret i64 %tmp
+}
+
+define i64 @zip4hi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zip4hi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip4.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 4)
+ ret i64 %tmp
+}
+
+define i64 @zip2hi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: zip2hi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip2.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 6)
+ ret i64 %tmp
+}
+
+define i64 @ziphi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: ziphi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    zip.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.shfl.i64(i64 %a, i64 7)
+ ret i64 %tmp
+}
+
 declare i64 @llvm.riscv.unshfl.i64(i64 %a, i64 %b)
 
 define i64 @unshfl64(i64 %a, i64 %b) nounwind {
@@ -251,6 +548,123 @@ define i64 @unshfli64(i64 %a) nounwind {
 ; RV64ZBP-NEXT:    unshfli a0, a0, 13
 ; RV64ZBP-NEXT:    ret
   %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 13)
+ ret i64 %tmp
+}
+
+define i64 @unzip4wi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzip4wi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip4.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 12)
+ ret i64 %tmp
+}
+
+define i64 @unzip2wi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzip2wi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip2.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 14)
+ ret i64 %tmp
+}
+
+define i64 @unzipwi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzipwi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip.w a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 15)
+ ret i64 %tmp
+}
+
+define i64 @unzip8i64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzip8i64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip8 a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 24)
+ ret i64 %tmp
+}
+
+define i64 @unzip4i64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzip4i64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip4 a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 28)
+ ret i64 %tmp
+}
+
+define i64 @unzip2i64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzip2i64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip2 a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 30)
+ ret i64 %tmp
+}
+
+define i64 @unzipi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzipi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 31)
+ ret i64 %tmp
+}
+
+define i64 @unzipni64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzipni64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip.n a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 1)
+ ret i64 %tmp
+}
+
+define i64 @unzip2bi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzip2bi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip2.b a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 2)
+ ret i64 %tmp
+}
+
+define i64 @unzipbi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzipbi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip.b a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 3)
+ ret i64 %tmp
+}
+
+define i64 @unzip4hi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzip4hi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip4.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 4)
+ ret i64 %tmp
+}
+
+define i64 @unzip2hi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unzip2hi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip2.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 6)
+ ret i64 %tmp
+}
+
+define i64 @unziphi64(i64 %a) nounwind {
+; RV64ZBP-LABEL: unziphi64:
+; RV64ZBP:       # %bb.0:
+; RV64ZBP-NEXT:    unzip.h a0, a0
+; RV64ZBP-NEXT:    ret
+  %tmp = call i64 @llvm.riscv.unshfl.i64(i64 %a, i64 7)
  ret i64 %tmp
 }
 
