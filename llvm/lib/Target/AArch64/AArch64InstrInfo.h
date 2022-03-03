@@ -280,11 +280,10 @@ public:
                                    bool OutlineFromLinkOnceODRs) const override;
   outliner::OutlinedFunction getOutliningCandidateInfo(
       std::vector<outliner::Candidate> &RepeatedSequenceLocs) const override;
-  outliner::InstrType getOutliningType(MachineBasicBlock::iterator &MIT,
-                                       unsigned Flags) const override;
-  SmallVector<
-      std::pair<MachineBasicBlock::iterator, MachineBasicBlock::iterator>>
-  getOutlinableRanges(MachineBasicBlock &MBB, unsigned &Flags) const override;
+  outliner::InstrType
+  getOutliningType(MachineBasicBlock::iterator &MIT, unsigned Flags) const override;
+  bool isMBBSafeToOutlineFrom(MachineBasicBlock &MBB,
+                              unsigned &Flags) const override;
   void buildOutlinedFrame(MachineBasicBlock &MBB, MachineFunction &MF,
                           const outliner::OutlinedFunction &OF) const override;
   MachineBasicBlock::iterator
@@ -396,6 +395,11 @@ bool isNZCVTouchedInInstructionRange(const MachineInstr &DefMI,
                                      const MachineInstr &UseMI,
                                      const TargetRegisterInfo *TRI);
 
+MCCFIInstruction createDefCFA(const TargetRegisterInfo &TRI, unsigned FrameReg,
+                              unsigned Reg, const StackOffset &Offset);
+MCCFIInstruction createCFAOffset(const TargetRegisterInfo &MRI, unsigned Reg,
+                                 const StackOffset &OffsetFromDefCFA);
+
 /// emitFrameOffset - Emit instructions as needed to set DestReg to SrcReg
 /// plus Offset.  This is intended to be used from within the prolog/epilog
 /// insertion (PEI) pass, where a virtual scratch register may be allocated
@@ -405,7 +409,9 @@ void emitFrameOffset(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                      StackOffset Offset, const TargetInstrInfo *TII,
                      MachineInstr::MIFlag = MachineInstr::NoFlags,
                      bool SetNZCV = false, bool NeedsWinCFI = false,
-                     bool *HasWinCFI = nullptr);
+                     bool *HasWinCFI = nullptr, bool EmitCFAOffset = false,
+                     StackOffset InitialOffset = {},
+                     unsigned FrameReg = AArch64::SP);
 
 /// rewriteAArch64FrameIndex - Rewrite MI to access 'Offset' bytes from the
 /// FP. Return false if the offset could not be handled directly in MI, and

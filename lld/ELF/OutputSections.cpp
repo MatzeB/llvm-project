@@ -8,6 +8,7 @@
 
 #include "OutputSections.h"
 #include "Config.h"
+#include "InputFiles.h"
 #include "LinkerScript.h"
 #include "Symbols.h"
 #include "SyntheticSections.h"
@@ -430,7 +431,10 @@ template <class ELFT> void OutputSection::writeTo(uint8_t *buf) {
 
   parallelForEachN(0, sections.size(), [&](size_t i) {
     InputSection *isec = sections[i];
-    isec->writeTo<ELFT>(buf + isec->outSecOff);
+    if (auto *s = dyn_cast<SyntheticSection>(isec))
+      s->writeTo(buf + isec->outSecOff);
+    else
+      isec->writeTo<ELFT>(buf + isec->outSecOff);
 
     // Fill gaps between sections.
     if (nonZeroFiller) {

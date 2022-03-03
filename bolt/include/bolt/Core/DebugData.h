@@ -537,13 +537,14 @@ public:
     uint32_t Value;
   };
 
+  /// Patch for 4 byte entry, where original entry size is not 4 bytes or 8
+  /// bytes.
   struct DebugPatch32GenericSize : public Patch {
     DebugPatch32GenericSize(uint32_t O, uint32_t V, uint32_t OVS)
         : Patch(O, DebugPatchKind::PatchValue32GenericSize) {
       Value = V;
       OldValueSize = OVS;
     }
-    DebugPatchKind getKind() const { return Kind; }
 
     static bool classof(const Patch *Writer) {
       return Writer->getKind() == DebugPatchKind::PatchValue32GenericSize;
