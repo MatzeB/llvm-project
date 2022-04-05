@@ -170,7 +170,7 @@ private:
 
   /// Memory map info for a single file
   struct MMapInfo {
-    uint64_t BaseAddress;
+    uint64_t MMapAddress;
     uint64_t Size;
     uint64_t Offset;
     int32_t PID{-1};
@@ -420,12 +420,8 @@ private:
   /// correspond to the binary allocated address space, are adjusted to avoid
   /// conflicts.
   void adjustAddress(uint64_t &Address, const MMapInfo &MMI) const {
-    if (Address >= MMI.BaseAddress && Address < MMI.BaseAddress + MMI.Size) {
-      // NOTE: Assumptions about the binary segment load table (PH for ELF)
-      //  Segment file offset equals virtual address (which is true for .so)
-      //  There aren't multiple executable segments loaded because MMapInfo
-      //  doesn't support them.
-      Address -= MMI.BaseAddress - MMI.Offset;
+    if (Address >= MMI.MMapAddress && Address < MMI.MMapAddress + MMI.Size) {
+      Address -= MMI.MMapAddress - MMI.Offset;
     } else if (Address < MMI.Size) {
       // Make sure the address is not treated as belonging to the binary.
       Address = (-1ULL);
