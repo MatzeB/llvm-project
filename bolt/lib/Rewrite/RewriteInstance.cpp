@@ -311,8 +311,9 @@ WriteBoltInfoSection("bolt-info",
 
 constexpr const char *RewriteInstance::SectionsToOverwrite[];
 std::vector<std::string> RewriteInstance::DebugSectionsToOverwrite = {
-    ".debug_abbrev", ".debug_aranges", ".debug_line", ".debug_loc",
-    ".debug_ranges", ".gdb_index",     ".debug_addr"};
+    ".debug_abbrev", ".debug_aranges",  ".debug_line",   ".debug_line_str",
+    ".debug_loc",    ".debug_loclists", ".debug_ranges", ".debug_rnglists",
+    ".gdb_index",    ".debug_addr"};
 
 const char RewriteInstance::TimerGroupName[] = "rewrite";
 const char RewriteInstance::TimerGroupDesc[] = "Rewrite passes";
@@ -363,7 +364,7 @@ RewriteInstance::createRewriteInstance(ELFObjectFileBase *File, const int Argc,
   auto RI = std::make_unique<RewriteInstance>(File, Argc, Argv, ToolPath, Err);
   if (Err)
     return std::move(Err);
-  return RI;
+  return std::move(RI);
 }
 
 RewriteInstance::RewriteInstance(ELFObjectFileBase *File, const int Argc,
@@ -765,7 +766,8 @@ Error RewriteInstance::run() {
 
   if (Error E = discoverStorage())
     return E;
-  readSpecialSections();
+  if (Error E = readSpecialSections())
+    return E;
   adjustCommandLineOptions();
   discoverFileObjects();
 
@@ -1250,19 +1252,30 @@ void RewriteInstance::createPLTBinaryFunction(uint64_t TargetAddress,
   if (!TargetAddress)
     return;
 
+  auto setPLTSymbol = [&](BinaryFunction *BF, StringRef Name) {
+    const unsigned PtrSize = BC->AsmInfo->getCodePointerSize();
+    MCSymbol *TargetSymbol = BC->registerNameAtAddress(
+        Name.str() + "@GOT", TargetAddress, PtrSize, PtrSize);
+    BF->setPLTSymbol(TargetSymbol);
+  };
+
+  BinaryFunction *BF = BC->getBinaryFunctionAtAddress(EntryAddress);
+  if (BF && BC->isAArch64()) {
+    // Handle IFUNC trampoline
+    setPLTSymbol(BF, BF->getOneName());
+    return;
+  }
+
   const Relocation *Rel = BC->getDynamicRelocationAt(TargetAddress);
   if (!Rel || !Rel->Symbol)
     return;
 
-  const unsigned PtrSize = BC->AsmInfo->getCodePointerSize();
   ErrorOr<BinarySection &> Section = BC->getSectionForAddress(EntryAddress);
   assert(Section && "cannot get section for address");
-  BinaryFunction *BF = BC->createBinaryFunction(
-      Rel->Symbol->getName().str() + "@PLT", *Section, EntryAddress, 0,
-      EntrySize, Section->getAlignment());
-  MCSymbol *TargetSymbol = BC->registerNameAtAddress(
-      Rel->Symbol->getName().str() + "@GOT", TargetAddress, PtrSize, PtrSize);
-  BF->setPLTSymbol(TargetSymbol);
+  BF = BC->createBinaryFunction(Rel->Symbol->getName().str() + "@PLT", *Section,
+                                EntryAddress, 0, EntrySize,
+                                Section->getAlignment());
+  setPLTSymbol(BF, Rel->Symbol->getName());
 }
 
 void RewriteInstance::disassemblePLTSectionAArch64(BinarySection &Section) {
@@ -1540,7 +1553,7 @@ ArrayRef<uint8_t> RewriteInstance::getLSDAData() {
 
 uint64_t RewriteInstance::getLSDAAddress() { return LSDASection->getAddress(); }
 
-void RewriteInstance::readSpecialSections() {
+Error RewriteInstance::readSpecialSections() {
   NamedRegionTimer T("readSpecialSections", "read special sections",
                      TimerGroupName, TimerGroupDesc, opts::TimeRewrite);
 
@@ -1555,6 +1568,8 @@ void RewriteInstance::readSpecialSections() {
 
     // Only register sections with names.
     if (!SectionName.empty()) {
+      if (Error E = Section.getContents().takeError())
+        return E;
       BC->registerSection(Section);
       LLVM_DEBUG(
           dbgs() << "BOLT-DEBUG: registering section " << SectionName << " @ 0x"
@@ -1632,7 +1647,7 @@ void RewriteInstance::readSpecialSections() {
   parseSDTNotes();
 
   // Read .dynamic/PT_DYNAMIC.
-  readELFDynamic();
+  return readELFDynamic();
 }
 
 void RewriteInstance::adjustCommandLineOptions() {
@@ -1728,6 +1743,9 @@ void RewriteInstance::adjustCommandLineOptions() {
 
   if (!opts::AlignText.getNumOccurrences())
     opts::AlignText = BC->PageAlign;
+
+  if (opts::AlignText < opts::AlignFunctions)
+    opts::AlignText = (unsigned)opts::AlignFunctions;
 
   if (BC->isX86() && opts::Lite.getNumOccurrences() == 0 && !opts::StrictMode &&
       !opts::UseOldText)
@@ -1833,7 +1851,7 @@ bool RewriteInstance::analyzeRelocation(
     IsSectionRelocation = (cantFail(Symbol.getType()) == SymbolRef::ST_Debug);
     // Check for PLT entry registered with symbol name
     if (!SymbolAddress && IsAArch64) {
-      BinaryData *BD = BC->getBinaryDataByName(SymbolName + "@PLT");
+      const BinaryData *BD = BC->getPLTBinaryDataByName(SymbolName);
       SymbolAddress = BD ? BD->getAddress() : 0;
     }
   }
@@ -2290,7 +2308,7 @@ void RewriteInstance::readRelocations(const SectionRef &Section) {
         continue;
     }
 
-    if (BC->getDynamicRelocationAt(Rel.getOffset())) {
+    if (!IsAArch64 && BC->getDynamicRelocationAt(Rel.getOffset())) {
       LLVM_DEBUG(
           dbgs() << "BOLT-DEBUG: address 0x"
                  << Twine::utohexstr(Rel.getOffset())
@@ -2900,8 +2918,10 @@ void RewriteInstance::buildFunctionsCFG() {
         if (!BF.buildCFG(AllocId))
           return;
 
-        if (opts::PrintAll)
+        if (opts::PrintAll) {
+          auto L = BC->scopeLock();
           BF.print(outs(), "while building cfg", true);
+        }
       };
 
   ParallelUtilities::PredicateTy SkipPredicate = [&](const BinaryFunction &BF) {
@@ -2980,7 +3000,7 @@ public:
         std::string SymName = Symbol.str();
         LLVM_DEBUG(dbgs() << "BOLT: looking for " << SymName << "\n");
         // Resolve to a PLT entry if possible
-        if (BinaryData *I = BC.getBinaryDataByName(SymName + "@PLT")) {
+        if (const BinaryData *I = BC.getPLTBinaryDataByName(SymName)) {
           AllResults[Symbol] =
               JITEvaluatedSymbol(I->getAddress(), JITSymbolFlags());
           continue;
@@ -3053,6 +3073,10 @@ void RewriteInstance::emitAndLink() {
   emitBinaryContext(*Streamer, *BC, getOrgSecPrefix());
 
   Streamer->Finish();
+  if (Streamer->getContext().hadError()) {
+    errs() << "BOLT-ERROR: Emission failed.\n";
+    exit(1);
+  }
 
   //////////////////////////////////////////////////////////////////////////////
   // Assign addresses to new sections.
@@ -3082,7 +3106,7 @@ void RewriteInstance::emitAndLink() {
 
   RTDyld->finalizeWithMemoryManagerLocking();
   if (RTDyld->hasError()) {
-    outs() << "BOLT-ERROR: RTDyld failed: " << RTDyld->getErrorString() << "\n";
+    errs() << "BOLT-ERROR: RTDyld failed: " << RTDyld->getErrorString() << "\n";
     exit(1);
   }
 
@@ -4974,7 +4998,7 @@ void RewriteInstance::patchELFDynamic(ELFObjectFile<ELFT> *File) {
 }
 
 template <typename ELFT>
-void RewriteInstance::readELFDynamic(ELFObjectFile<ELFT> *File) {
+Error RewriteInstance::readELFDynamic(ELFObjectFile<ELFT> *File) {
   const ELFFile<ELFT> &Obj = File->getELFFile();
 
   using Elf_Phdr = typename ELFFile<ELFT>::Elf_Phdr;
@@ -4993,15 +5017,18 @@ void RewriteInstance::readELFDynamic(ELFObjectFile<ELFT> *File) {
     outs() << "BOLT-INFO: static input executable detected\n";
     // TODO: static PIE executable might have dynamic header
     BC->IsStaticExecutable = true;
-    return;
+    return Error::success();
   }
 
-  assert(DynamicPhdr->p_memsz == DynamicPhdr->p_filesz &&
-         "dynamic section sizes should match");
+  if (DynamicPhdr->p_memsz != DynamicPhdr->p_filesz)
+    return createStringError(errc::executable_format_error,
+                             "dynamic section sizes should match");
 
   // Go through all dynamic entries to locate entries of interest.
-  typename ELFT::DynRange DynamicEntries =
-      cantFail(Obj.dynamicEntries(), "error accessing dynamic table");
+  auto DynamicEntriesOrErr = Obj.dynamicEntries();
+  if (!DynamicEntriesOrErr)
+    return DynamicEntriesOrErr.takeError();
+  typename ELFT::DynRange DynamicEntries = DynamicEntriesOrErr.get();
 
   for (const Elf_Dyn &Dyn : DynamicEntries) {
     switch (Dyn.d_tag) {
@@ -5034,6 +5061,8 @@ void RewriteInstance::readELFDynamic(ELFObjectFile<ELFT> *File) {
 
   if (!PLTRelocationsAddress)
     PLTRelocationsSize = 0;
+
+  return Error::success();
 }
 
 uint64_t RewriteInstance::getNewFunctionAddress(uint64_t OldAddress) {

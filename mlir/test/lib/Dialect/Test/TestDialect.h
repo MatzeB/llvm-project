@@ -18,6 +18,7 @@
 #include "TestInterfaces.h"
 #include "mlir/Dialect/DLTI/DLTI.h"
 #include "mlir/Dialect/DLTI/Traits.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Traits.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -33,7 +34,9 @@
 #include "mlir/Interfaces/CopyOpInterface.h"
 #include "mlir/Interfaces/DerivedAttributeOpInterface.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 
 namespace mlir {
 class DLTIDialect;

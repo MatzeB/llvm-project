@@ -1439,7 +1439,7 @@ bool AArch64InstrInfo::optimizeCompareInstr(
       return false;
     const MCInstrDesc &MCID = get(NewOpc);
     CmpInstr.setDesc(MCID);
-    CmpInstr.RemoveOperand(DeadNZCVIdx);
+    CmpInstr.removeOperand(DeadNZCVIdx);
     bool succeeded = UpdateOperandRegClass(CmpInstr);
     (void)succeeded;
     assert(succeeded && "Some operands reg class are incompatible!");
@@ -3462,7 +3462,8 @@ void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // Copy a Predicate register by ORRing with itself.
   if (AArch64::PPRRegClass.contains(DestReg) &&
       AArch64::PPRRegClass.contains(SrcReg)) {
-    assert(Subtarget.hasSVE() && "Unexpected SVE register.");
+    assert((Subtarget.hasSVE() || Subtarget.hasStreamingSVE()) &&
+           "Unexpected SVE register.");
     BuildMI(MBB, I, DL, get(AArch64::ORR_PPzPP), DestReg)
       .addReg(SrcReg) // Pg
       .addReg(SrcReg)
@@ -3473,7 +3474,8 @@ void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // Copy a Z register by ORRing with itself.
   if (AArch64::ZPRRegClass.contains(DestReg) &&
       AArch64::ZPRRegClass.contains(SrcReg)) {
-    assert(Subtarget.hasSVE() && "Unexpected SVE register.");
+    assert((Subtarget.hasSVE() || Subtarget.hasStreamingSVE()) &&
+           "Unexpected SVE register.");
     BuildMI(MBB, I, DL, get(AArch64::ORR_ZZZ), DestReg)
       .addReg(SrcReg)
       .addReg(SrcReg, getKillRegState(KillSrc));
@@ -3483,6 +3485,8 @@ void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // Copy a Z register pair by copying the individual sub-registers.
   if (AArch64::ZPR2RegClass.contains(DestReg) &&
       AArch64::ZPR2RegClass.contains(SrcReg)) {
+    assert((Subtarget.hasSVE() || Subtarget.hasStreamingSVE()) &&
+           "Unexpected SVE register.");
     static const unsigned Indices[] = {AArch64::zsub0, AArch64::zsub1};
     copyPhysRegTuple(MBB, I, DL, DestReg, SrcReg, KillSrc, AArch64::ORR_ZZZ,
                      Indices);
@@ -3492,6 +3496,8 @@ void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // Copy a Z register triple by copying the individual sub-registers.
   if (AArch64::ZPR3RegClass.contains(DestReg) &&
       AArch64::ZPR3RegClass.contains(SrcReg)) {
+    assert((Subtarget.hasSVE() || Subtarget.hasStreamingSVE()) &&
+           "Unexpected SVE register.");
     static const unsigned Indices[] = {AArch64::zsub0, AArch64::zsub1,
                                        AArch64::zsub2};
     copyPhysRegTuple(MBB, I, DL, DestReg, SrcReg, KillSrc, AArch64::ORR_ZZZ,
@@ -3502,6 +3508,8 @@ void AArch64InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   // Copy a Z register quad by copying the individual sub-registers.
   if (AArch64::ZPR4RegClass.contains(DestReg) &&
       AArch64::ZPR4RegClass.contains(SrcReg)) {
+    assert((Subtarget.hasSVE() || Subtarget.hasStreamingSVE()) &&
+           "Unexpected SVE register.");
     static const unsigned Indices[] = {AArch64::zsub0, AArch64::zsub1,
                                        AArch64::zsub2, AArch64::zsub3};
     copyPhysRegTuple(MBB, I, DL, DestReg, SrcReg, KillSrc, AArch64::ORR_ZZZ,
@@ -4139,11 +4147,12 @@ static MCCFIInstruction createDefCFAExpression(const TargetRegisterInfo &TRI,
 
 MCCFIInstruction llvm::createDefCFA(const TargetRegisterInfo &TRI,
                                     unsigned FrameReg, unsigned Reg,
-                                    const StackOffset &Offset) {
+                                    const StackOffset &Offset,
+                                    bool LastAdjustmentWasScalable) {
   if (Offset.getScalable())
     return createDefCFAExpression(TRI, Reg, Offset);
 
-  if (FrameReg == Reg)
+  if (FrameReg == Reg && !LastAdjustmentWasScalable)
     return MCCFIInstruction::cfiDefCfaOffset(nullptr, int(Offset.getFixed()));
 
   unsigned DwarfReg = TRI.getDwarfRegNum(Reg, true);
@@ -4275,8 +4284,8 @@ static void emitFrameOffsetAdj(MachineBasicBlock &MBB,
       const TargetSubtargetInfo &STI = MF.getSubtarget();
       const TargetRegisterInfo &TRI = *STI.getRegisterInfo();
 
-      unsigned CFIIndex =
-          MF.addFrameInst(createDefCFA(TRI, FrameReg, DestReg, CFAOffset));
+      unsigned CFIIndex = MF.addFrameInst(
+          createDefCFA(TRI, FrameReg, DestReg, CFAOffset, VScale != 1));
       BuildMI(MBB, MBBI, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
           .addCFIIndex(CFIIndex)
           .setMIFlags(Flag);
@@ -7587,7 +7596,8 @@ static void signOutlinedFunction(MachineFunction &MF, MachineBasicBlock &MBB,
     }
 
     // If v8.3a features are available we can replace a RET instruction by
-    // RETAA or RETAB and omit the AUT instructions
+    // RETAA or RETAB and omit the AUT instructions. In this case the
+    // DW_CFA_AARCH64_negate_ra_state can't be emitted.
     if (Subtarget.hasPAuth() && MBBAUT != MBB.end() &&
         MBBAUT->getOpcode() == AArch64::RET) {
       BuildMI(MBB, MBBAUT, DL,
@@ -7600,6 +7610,11 @@ static void signOutlinedFunction(MachineFunction &MF, MachineBasicBlock &MBB,
               TII->get(ShouldSignReturnAddrWithAKey ? AArch64::AUTIASP
                                                     : AArch64::AUTIBSP))
           .setMIFlag(MachineInstr::FrameDestroy);
+      unsigned CFIIndexAuth =
+          MF.addFrameInst(MCCFIInstruction::createNegateRAState(nullptr));
+      BuildMI(MBB, MBBAUT, DL, TII->get(TargetOpcode::CFI_INSTRUCTION))
+          .addCFIIndex(CFIIndexAuth)
+          .setMIFlags(MachineInstr::FrameDestroy);
     }
   }
 }

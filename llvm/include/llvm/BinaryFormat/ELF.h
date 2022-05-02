@@ -755,15 +755,17 @@ enum : unsigned {
   EF_AMDGPU_MACH_AMDGCN_GFX1034       = 0x03e,
   EF_AMDGPU_MACH_AMDGCN_GFX90A        = 0x03f,
   EF_AMDGPU_MACH_AMDGCN_GFX940        = 0x040,
-  EF_AMDGPU_MACH_AMDGCN_RESERVED_0X41 = 0x041,
+  EF_AMDGPU_MACH_AMDGCN_GFX1100       = 0x041,
   EF_AMDGPU_MACH_AMDGCN_GFX1013       = 0x042,
   EF_AMDGPU_MACH_AMDGCN_RESERVED_0X43 = 0x043,
-  EF_AMDGPU_MACH_AMDGCN_RESERVED_0X44 = 0x044,
+  EF_AMDGPU_MACH_AMDGCN_GFX1103       = 0x044,
   EF_AMDGPU_MACH_AMDGCN_GFX1036       = 0x045,
+  EF_AMDGPU_MACH_AMDGCN_GFX1101       = 0x046,
+  EF_AMDGPU_MACH_AMDGCN_GFX1102       = 0x047,
 
   // First/last AMDGCN-based processors.
   EF_AMDGPU_MACH_AMDGCN_FIRST = EF_AMDGPU_MACH_AMDGCN_GFX600,
-  EF_AMDGPU_MACH_AMDGCN_LAST = EF_AMDGPU_MACH_AMDGCN_GFX1036,
+  EF_AMDGPU_MACH_AMDGCN_LAST = EF_AMDGPU_MACH_AMDGCN_GFX1102,
 
   // Indicates if the "xnack" target feature is enabled for all code contained
   // in the object.
@@ -1557,6 +1559,31 @@ enum {
   NT_GNU_BUILD_ID = 3,
   NT_GNU_GOLD_VERSION = 4,
   NT_GNU_PROPERTY_TYPE_0 = 5,
+};
+
+// Android note types.
+enum {
+  NT_ANDROID_TYPE_IDENT = 1,
+  NT_ANDROID_TYPE_KUSER = 3,
+  NT_ANDROID_TYPE_MEMTAG = 4,
+};
+
+// Memory tagging values used in NT_ANDROID_TYPE_MEMTAG notes.
+enum {
+  // Enumeration to determine the tagging mode. In Android-land, 'SYNC' means
+  // running all threads in MTE Synchronous mode, and 'ASYNC' means to use the
+  // kernels auto-upgrade feature to allow for either MTE Asynchronous,
+  // Asymmetric, or Synchronous mode. This allows silicon vendors to specify, on
+  // a per-cpu basis what 'ASYNC' should mean. Generally, the expectation is
+  // "pick the most precise mode that's very fast".
+  NT_MEMTAG_LEVEL_NONE = 0,
+  NT_MEMTAG_LEVEL_ASYNC = 1,
+  NT_MEMTAG_LEVEL_SYNC = 2,
+  NT_MEMTAG_LEVEL_MASK = 3,
+  // Bits indicating whether the loader should prepare for MTE to be enabled on
+  // the heap and/or stack.
+  NT_MEMTAG_HEAP = 4,
+  NT_MEMTAG_STACK = 8,
 };
 
 // Property types used in GNU_PROPERTY_TYPE_0 notes.

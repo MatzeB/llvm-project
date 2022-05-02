@@ -80,17 +80,11 @@ DynamicTypeDefinition::DynamicTypeDefinition(StringRef nameRef,
                                              PrinterFn &&printer)
     : name(nameRef), dialect(dialect), verifier(std::move(verifier)),
       parser(std::move(parser)), printer(std::move(printer)),
-      ctx(dialect->getContext()) {
-  assert(!nameRef.contains('.') &&
-         "name should not be prefixed by the dialect name");
-}
+      ctx(dialect->getContext()) {}
 
 DynamicTypeDefinition::DynamicTypeDefinition(ExtensibleDialect *dialect,
                                              StringRef nameRef)
-    : name(nameRef), dialect(dialect), ctx(dialect->getContext()) {
-  assert(!nameRef.contains('.') &&
-         "name should not be prefixed by the dialect name");
-}
+    : name(nameRef), dialect(dialect), ctx(dialect->getContext()) {}
 
 void DynamicTypeDefinition::registerInTypeUniquer() {
   detail::TypeUniquer::registerType<DynamicType>(&getContext(), getTypeID());
@@ -156,7 +150,7 @@ DynamicTypeDefinition *DynamicType::getTypeDef() { return getImpl()->typeDef; }
 ArrayRef<Attribute> DynamicType::getParams() { return getImpl()->params; }
 
 bool DynamicType::classof(Type type) {
-  return type.hasTrait<IsDynamicTypeTrait>();
+  return type.hasTrait<TypeTrait::IsDynamicType>();
 }
 
 ParseResult DynamicType::parse(AsmParser &parser,
@@ -203,17 +197,11 @@ DynamicAttrDefinition::DynamicAttrDefinition(StringRef nameRef,
                                              PrinterFn &&printer)
     : name(nameRef), dialect(dialect), verifier(std::move(verifier)),
       parser(std::move(parser)), printer(std::move(printer)),
-      ctx(dialect->getContext()) {
-  assert(!nameRef.contains('.') &&
-         "name should not be prefixed by the dialect name");
-}
+      ctx(dialect->getContext()) {}
 
 DynamicAttrDefinition::DynamicAttrDefinition(ExtensibleDialect *dialect,
                                              StringRef nameRef)
-    : name(nameRef), dialect(dialect), ctx(dialect->getContext()) {
-  assert(!nameRef.contains('.') &&
-         "name should not be prefixed by the dialect name");
-}
+    : name(nameRef), dialect(dialect), ctx(dialect->getContext()) {}
 
 void DynamicAttrDefinition::registerInAttrUniquer() {
   detail::AttributeUniquer::registerAttribute<DynamicAttr>(&getContext(),
@@ -275,7 +263,7 @@ DynamicAttrDefinition *DynamicAttr::getAttrDef() { return getImpl()->attrDef; }
 ArrayRef<Attribute> DynamicAttr::getParams() { return getImpl()->params; }
 
 bool DynamicAttr::classof(Attribute attr) {
-  return attr.hasTrait<IsDynamicAttrTrait>();
+  return attr.hasTrait<AttributeTrait::IsDynamicAttr>();
 }
 
 ParseResult DynamicAttr::parse(AsmParser &parser,
@@ -313,10 +301,7 @@ DynamicOpDefinition::DynamicOpDefinition(
       verifyFn(std::move(verifyFn)), verifyRegionFn(std::move(verifyRegionFn)),
       parseFn(std::move(parseFn)), printFn(std::move(printFn)),
       foldHookFn(std::move(foldHookFn)),
-      getCanonicalizationPatternsFn(std::move(getCanonicalizationPatternsFn)) {
-  assert(!name.contains('.') &&
-         "name should not be prefixed by the dialect name");
-}
+      getCanonicalizationPatternsFn(std::move(getCanonicalizationPatternsFn)) {}
 
 std::unique_ptr<DynamicOpDefinition> DynamicOpDefinition::get(
     StringRef name, ExtensibleDialect *dialect,
@@ -382,6 +367,8 @@ namespace {
 class IsExtensibleDialect : public DialectInterface::Base<IsExtensibleDialect> {
 public:
   IsExtensibleDialect(Dialect *dialect) : Base(dialect) {}
+
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(IsExtensibleDialect)
 };
 } // namespace
 

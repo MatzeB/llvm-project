@@ -9,9 +9,9 @@
 #include "mlir/Conversion/AsyncToLLVM/AsyncToLLVM.h"
 
 #include "../PassDetail.h"
+#include "mlir/Conversion/FuncToLLVM/ConvertFuncToLLVM.h"
 #include "mlir/Conversion/LLVMCommon/ConversionTarget.h"
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
-#include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Async/IR/Async.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -204,7 +204,7 @@ static void addAsyncRuntimeApiDeclarations(ModuleOp module) {
   auto addFuncDecl = [&](StringRef name, FunctionType type) {
     if (module.lookupSymbol(name))
       return;
-    builder.create<FuncOp>(name, type).setPrivate();
+    builder.create<func::FuncOp>(name, type).setPrivate();
   };
 
   MLIRContext *ctx = module.getContext();
@@ -1006,7 +1006,8 @@ void ConvertAsyncToLLVMPass::runOnOperation() {
   llvmConverter.addConversion(AsyncRuntimeTypeConverter::convertAsyncTypes);
 
   // Convert async types in function signatures and function calls.
-  populateFunctionOpInterfaceTypeConversionPattern<FuncOp>(patterns, converter);
+  populateFunctionOpInterfaceTypeConversionPattern<func::FuncOp>(patterns,
+                                                                 converter);
   populateCallOpTypeConversionPattern(patterns, converter);
 
   // Convert return operations inside async.execute regions.
@@ -1042,8 +1043,9 @@ void ConvertAsyncToLLVMPass::runOnOperation() {
   target.addIllegalDialect<AsyncDialect>();
 
   // Add dynamic legality constraints to apply conversions defined above.
-  target.addDynamicallyLegalOp<FuncOp>(
-      [&](FuncOp op) { return converter.isSignatureLegal(op.getType()); });
+  target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
+    return converter.isSignatureLegal(op.getFunctionType());
+  });
   target.addDynamicallyLegalOp<func::ReturnOp>([&](func::ReturnOp op) {
     return converter.isLegal(op.getOperandTypes());
   });

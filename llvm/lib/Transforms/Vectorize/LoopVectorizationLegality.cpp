@@ -17,7 +17,9 @@
 #include "llvm/Transforms/Vectorize/LoopVectorizationLegality.h"
 #include "llvm/Analysis/Loads.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -770,7 +772,7 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
         auto *SE = PSE.getSE();
         Intrinsic::ID IntrinID = getVectorIntrinsicIDForCall(CI, TLI);
         for (unsigned i = 0, e = CI->arg_size(); i != e; ++i)
-          if (hasVectorInstrinsicScalarOpd(IntrinID, i)) {
+          if (hasVectorIntrinsicScalarOpd(IntrinID, i)) {
             if (!SE->isLoopInvariant(PSE.getSCEV(CI->getOperand(i)), TheLoop)) {
               reportVectorizationFailure("Found unvectorizable intrinsic",
                   "intrinsic instruction cannot be vectorized",
@@ -965,6 +967,16 @@ LoopVectorizationLegality::getIntOrFpInductionDescriptor(PHINode *Phi) const {
   auto &ID = getInductionVars().find(Phi)->second;
   if (ID.getKind() == InductionDescriptor::IK_IntInduction ||
       ID.getKind() == InductionDescriptor::IK_FpInduction)
+    return &ID;
+  return nullptr;
+}
+
+const InductionDescriptor *
+LoopVectorizationLegality::getPointerInductionDescriptor(PHINode *Phi) const {
+  if (!isInductionPhi(Phi))
+    return nullptr;
+  auto &ID = getInductionVars().find(Phi)->second;
+  if (ID.getKind() == InductionDescriptor::IK_PtrInduction)
     return &ID;
   return nullptr;
 }

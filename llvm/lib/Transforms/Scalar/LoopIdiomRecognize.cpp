@@ -797,7 +797,7 @@ bool LoopIdiomRecognize::processLoopStores(SmallVectorImpl<StoreInst *> &SL,
 }
 
 /// processLoopMemIntrinsic - Template function for calling different processor
-/// functions based on mem instrinsic type.
+/// functions based on mem intrinsic type.
 template <typename MemInst>
 bool LoopIdiomRecognize::processLoopMemIntrinsic(
     BasicBlock *BB,
@@ -1172,6 +1172,8 @@ bool LoopIdiomRecognize::processLoopStridedStore(
   CallInst *NewCall;
   if (SplatValue) {
     AAMDNodes AATags = TheStore->getAAMetadata();
+    for (Instruction *Store : Stores)
+      AATags = AATags.merge(Store->getAAMetadata());
     if (auto CI = dyn_cast<ConstantInt>(NumBytes))
       AATags = AATags.extendTo(CI->getZExtValue());
     else

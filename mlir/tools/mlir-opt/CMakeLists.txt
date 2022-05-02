@@ -12,7 +12,7 @@ set(LLVM_LINK_COMPONENTS
 
 if(MLIR_INCLUDE_TESTS)
   set(test_libs
-    MLIRTestStandardToLLVM
+    MLIRTestFuncToLLVM
     MLIRAffineTransformsTestPasses
     MLIRDLTITestPasses
     MLIRFuncTestPasses
@@ -28,8 +28,10 @@ if(MLIR_INCLUDE_TESTS)
     MLIRTestDialect
     MLIRTestIR
     MLIRTestPass
+    MLIRTestPDLL
     MLIRTestReducer
     MLIRTestRewrite
+    MLIRTestTransformDialect
     MLIRTestTransforms
     MLIRVectorTestPasses
     )

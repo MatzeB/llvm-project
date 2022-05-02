@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "unit.h"
-#include "environment.h"
 #include "io-error.h"
 #include "lock.h"
 #include "unit-map.h"
@@ -48,7 +47,7 @@ ExternalFileUnit &ExternalFileUnit::LookUpOrCrash(
     int unit, const Terminator &terminator) {
   ExternalFileUnit *file{LookUp(unit)};
   if (!file) {
-    terminator.Crash("Not an open I/O unit number: %d", unit);
+    terminator.Crash("%d is not an open I/O unit number", unit);
   }
   return *file;
 }
@@ -233,7 +232,6 @@ UnitMap &ExternalFileUnit::GetUnitMap() {
   error.isUnformatted = false;
   errorOutput = &error;
 
-  // TODO: Set UTF-8 mode from the environment
   unitMap = newUnitMap;
   return *unitMap;
 }
@@ -299,7 +297,8 @@ bool ExternalFileUnit::Emit(const char *data, std::size_t bytes,
           static_cast<std::intmax_t>(*openRecl));
       return false;
     }
-  } else if (recordLength) {
+  }
+  if (recordLength) {
     // It is possible for recordLength to have a value now for a
     // variable-length output record if the previous operation
     // was a BACKSPACE or non advancing input statement.
@@ -350,7 +349,7 @@ bool ExternalFileUnit::Receive(char *data, std::size_t bytes,
     return true;
   } else {
     handler.SignalEnd();
-    if (access == Access::Sequential) {
+    if (IsRecordFile() && access != Access::Direct) {
       endfileRecordNumber = currentRecordNumber;
     }
     return false;
@@ -373,18 +372,6 @@ std::size_t ExternalFileUnit::GetNextInputBytes(
   return p ? length : 0;
 }
 
-std::optional<char32_t> ExternalFileUnit::GetCurrentChar(
-    IoErrorHandler &handler) {
-  const char *p{nullptr};
-  std::size_t bytes{GetNextInputBytes(p, handler)};
-  if (bytes == 0) {
-    return std::nullopt;
-  } else {
-    // TODO: UTF-8 decoding; may have to get more bytes in a loop
-    return *p;
-  }
-}
-
 const char *ExternalFileUnit::FrameNextInput(
     IoErrorHandler &handler, std::size_t bytes) {
   RUNTIME_CHECK(handler, isUnformatted.has_value() && !*isUnformatted);
@@ -398,7 +385,7 @@ const char *ExternalFileUnit::FrameNextInput(
       return Frame() + at;
     }
     handler.SignalEnd();
-    if (access == Access::Sequential) {
+    if (IsRecordFile() && access != Access::Direct) {
       endfileRecordNumber = currentRecordNumber;
     }
   }
@@ -421,11 +408,6 @@ bool ExternalFileUnit::SetVariableFormattedRecordLength() {
     }
   }
   return false;
-}
-
-void ExternalFileUnit::SetLeftTabLimit() {
-  leftTabLimit = furthestPositionInRecord;
-  positionInRecord = furthestPositionInRecord;
 }
 
 bool ExternalFileUnit::BeginReadingRecord(IoErrorHandler &handler) {
@@ -545,6 +527,11 @@ bool ExternalFileUnit::AdvanceRecord(IoErrorHandler &handler) {
       } else {
         // Unformatted stream: nothing to do
       }
+    } else if (handler.GetIoStat() != IostatOk &&
+        furthestPositionInRecord == 0) {
+      // Error in formatted variable length record, and no output yet; do
+      // nothing, like most other Fortran compilers do.
+      return true;
     } else {
       // Terminate formatted variable length record
       const char *lineEnding{"\n"};
@@ -557,6 +544,7 @@ bool ExternalFileUnit::AdvanceRecord(IoErrorHandler &handler) {
 #endif
       ok = ok && Emit(lineEnding, lineEndingBytes, 1, handler);
     }
+    leftTabLimit.reset();
     if (IsAfterEndfile()) {
       return false;
     }
@@ -633,7 +621,7 @@ void ExternalFileUnit::Endfile(IoErrorHandler &handler) {
     // ENDFILE after ENDFILE
   } else {
     DoEndfile(handler);
-    if (access == Access::Sequential) {
+    if (IsRecordFile() && access != Access::Direct) {
       // Explicit ENDFILE leaves position *after* the endfile record
       RUNTIME_CHECK(handler, endfileRecordNumber.has_value());
       currentRecordNumber = *endfileRecordNumber + 1;
@@ -729,6 +717,7 @@ void ExternalFileUnit::BeginVariableFormattedInputRecord(
       if (length > 0) {
         // final record w/o \n
         recordLength = length;
+        unterminatedRecord = true;
       } else {
         handler.SignalEnd();
       }
@@ -761,10 +750,16 @@ void ExternalFileUnit::BackspaceVariableUnformattedRecord(
   // checked informatively in NextSequentialVariableUnformattedInputRecord().
   std::size_t got{
       ReadFrame(frameOffsetInFile_ - headerBytes, headerBytes, handler)};
-  RUNTIME_CHECK(handler, got >= sizeof footer);
+  if (static_cast<std::int64_t>(got) < headerBytes) {
+    handler.SignalError(IostatShortRead);
+    return;
+  }
   std::memcpy(&footer, Frame(), sizeof footer);
   recordLength = footer;
-  RUNTIME_CHECK(handler, frameOffsetInFile_ >= *recordLength + 2 * headerBytes);
+  if (frameOffsetInFile_ < *recordLength + 2 * headerBytes) {
+    handler.SignalError(IostatBadUnformattedRecord);
+    return;
+  }
   frameOffsetInFile_ -= *recordLength + 2 * headerBytes;
   if (frameOffsetInFile_ >= headerBytes) {
     frameOffsetInFile_ -= headerBytes;
@@ -773,9 +768,15 @@ void ExternalFileUnit::BackspaceVariableUnformattedRecord(
   auto need{static_cast<std::size_t>(
       recordOffsetInFrame_ + sizeof header + *recordLength)};
   got = ReadFrame(frameOffsetInFile_, need, handler);
-  RUNTIME_CHECK(handler, got >= need);
+  if (got < need) {
+    handler.SignalError(IostatShortRead);
+    return;
+  }
   std::memcpy(&header, Frame() + recordOffsetInFrame_, sizeof header);
-  RUNTIME_CHECK(handler, header == *recordLength);
+  if (header != *recordLength) {
+    handler.SignalError(IostatBadUnformattedRecord);
+    return;
+  }
 }
 
 // There's no portable memrchr(), unfortunately, and strrchr() would
@@ -815,9 +816,15 @@ void ExternalFileUnit::BackspaceVariableFormattedRecord(
     frameOffsetInFile_ -= std::min<std::int64_t>(frameOffsetInFile_, 1024);
     auto need{static_cast<std::size_t>(prevNL + 1 - frameOffsetInFile_)};
     auto got{ReadFrame(frameOffsetInFile_, need, handler)};
-    RUNTIME_CHECK(handler, got >= need);
+    if (got < need) {
+      handler.SignalError(IostatShortRead);
+      return;
+    }
   }
-  RUNTIME_CHECK(handler, Frame()[recordOffsetInFrame_ + *recordLength] == '\n');
+  if (Frame()[recordOffsetInFrame_ + *recordLength] != '\n') {
+    handler.SignalError(IostatMissingTerminator);
+    return;
+  }
   if (*recordLength > 0 &&
       Frame()[recordOffsetInFrame_ + *recordLength - 1] == '\r') {
     --*recordLength;
@@ -834,11 +841,17 @@ void ExternalFileUnit::DoImpliedEndfile(IoErrorHandler &handler) {
 }
 
 void ExternalFileUnit::DoEndfile(IoErrorHandler &handler) {
-  if (access == Access::Sequential) {
+  if (IsRecordFile() && access != Access::Direct) {
+    if (furthestPositionInRecord > 0) {
+      // Last write was non-advancing, so AdvanceRecord() was not called.
+      leftTabLimit.reset();
+      ++currentRecordNumber;
+    }
     endfileRecordNumber = currentRecordNumber;
   }
   FlushOutput(handler);
-  Truncate(frameOffsetInFile_ + recordOffsetInFrame_, handler);
+  Truncate(frameOffsetInFile_ + recordOffsetInFrame_ + furthestPositionInRecord,
+      handler);
   BeginRecord();
   impliedEndfile_ = false;
 }
@@ -854,7 +867,8 @@ bool ExternalFileUnit::CheckDirectAccess(IoErrorHandler &handler) {
   if (access == Access::Direct) {
     RUNTIME_CHECK(handler, openRecl);
     if (!directAccessRecWasSet_) {
-      handler.SignalError("No REC= was specified for a data transfer with ACCESS='DIRECT'");
+      handler.SignalError(
+          "No REC= was specified for a data transfer with ACCESS='DIRECT'");
       return false;
     }
   }

@@ -224,9 +224,9 @@ SubElementAttrInterface TestSubElementsAccessAttr::replaceImmediateSubAttribute(
 
 /// Define a singleton dynamic attribute.
 static std::unique_ptr<DynamicAttrDefinition>
-getSingletonDynamicAttr(TestDialect *testDialect) {
+getDynamicSingletonAttr(TestDialect *testDialect) {
   return DynamicAttrDefinition::get(
-      "singleton_dynattr", testDialect,
+      "dynamic_singleton", testDialect,
       [](function_ref<InFlightDiagnostic()> emitError,
          ArrayRef<Attribute> args) {
         if (!args.empty()) {
@@ -240,9 +240,9 @@ getSingletonDynamicAttr(TestDialect *testDialect) {
 
 /// Define a dynamic attribute representing a pair or attributes.
 static std::unique_ptr<DynamicAttrDefinition>
-getPairDynamicAttr(TestDialect *testDialect) {
+getDynamicPairAttr(TestDialect *testDialect) {
   return DynamicAttrDefinition::get(
-      "pair_dynattr", testDialect,
+      "dynamic_pair", testDialect,
       [](function_ref<InFlightDiagnostic()> emitError,
          ArrayRef<Attribute> args) {
         if (args.size() != 2) {
@@ -255,7 +255,7 @@ getPairDynamicAttr(TestDialect *testDialect) {
 }
 
 static std::unique_ptr<DynamicAttrDefinition>
-getCustomAssemblyFormatDynamicAttr(TestDialect *testDialect) {
+getDynamicCustomAssemblyFormatAttr(TestDialect *testDialect) {
   auto verifier = [](function_ref<InFlightDiagnostic()> emitError,
                      ArrayRef<Attribute> args) {
     if (args.size() != 2) {
@@ -281,7 +281,7 @@ getCustomAssemblyFormatDynamicAttr(TestDialect *testDialect) {
     printer << "<" << params[0] << ":" << params[1] << ">";
   };
 
-  return DynamicAttrDefinition::get("custom_assembly_format_dynattr",
+  return DynamicAttrDefinition::get("dynamic_custom_assembly_format",
                                     testDialect, std::move(verifier),
                                     std::move(parser), std::move(printer));
 }
@@ -295,7 +295,7 @@ void TestDialect::registerAttributes() {
 #define GET_ATTRDEF_LIST
 #include "TestAttrDefs.cpp.inc"
       >();
-  registerDynamicAttr(getSingletonDynamicAttr(this));
-  registerDynamicAttr(getPairDynamicAttr(this));
-  registerDynamicAttr(getCustomAssemblyFormatDynamicAttr(this));
+  registerDynamicAttr(getDynamicSingletonAttr(this));
+  registerDynamicAttr(getDynamicPairAttr(this));
+  registerDynamicAttr(getDynamicCustomAssemblyFormatAttr(this));
 }

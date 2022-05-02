@@ -165,7 +165,7 @@ namespace detail {
 struct TypeUniquer {
   /// Get an uniqued instance of a type T.
   template <typename T, typename... Args>
-  static T get(MLIRContext *ctx, Args &&... args) {
+  static T get(MLIRContext *ctx, Args &&...args) {
     return getWithTypeID<T, Args...>(ctx, T::getTypeID(),
                                      std::forward<Args>(args)...);
   }
@@ -176,7 +176,7 @@ struct TypeUniquer {
   template <typename T, typename... Args>
   static typename std::enable_if_t<
       !std::is_same<typename T::ImplType, TypeStorage>::value, T>
-  getWithTypeID(MLIRContext *ctx, TypeID typeID, Args &&... args) {
+  getWithTypeID(MLIRContext *ctx, TypeID typeID, Args &&...args) {
 #ifndef NDEBUG
     if (!ctx->getTypeUniquer().isParametricStorageInitialized(typeID))
       llvm::report_fatal_error(

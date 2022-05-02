@@ -16,7 +16,7 @@
 
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/Parser.h"
+#include "mlir/Parser/Parser.h"
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/Optional.h"
@@ -53,6 +53,7 @@ struct LinalgOpMetadata {
   std::string cppClassName;
   Optional<std::string> doc;
   SmallVector<std::string> implements;
+  SmallVector<std::string> defines;
 };
 
 struct SerializedAffineMap {
@@ -233,6 +234,7 @@ struct MappingTraits<LinalgOpMetadata> {
     io.mapRequired("cpp_class_name", info.cppClassName);
     io.mapOptional("doc", info.doc);
     io.mapOptional("implements", info.implements);
+    io.mapOptional("defines", info.defines);
   }
 };
 
@@ -471,6 +473,7 @@ std::string convertFunctionKindToEnumName(ScalarFnKind kind) {
   case ScalarFnKind::Type:
     return std::string("TypeFn");
   }
+  llvm_unreachable("unsupported function kind");
 }
 
 //===----------------------------------------------------------------------===//
@@ -498,7 +501,8 @@ static const char bannerFormat[] = R"FMT(
 // {3}: documentation (summary + description)
 // {4}: op attribute list
 // {5}: builder methods taking standalone attribute parameters
-// {6}: additional methods for attributes used by indexing maps
+// {6}: additional method defintions
+// {7}: additional methods for attributes used by indexing maps
 static const char structuredOpOdsHeaderFormat[] = R"FMT(
 //===----------------------------------------------------------------------===//
 // Op definition for {0}
@@ -520,44 +524,16 @@ def {0} : LinalgStructuredBase_Op<"{1}", !listconcat([AttrSizedOperandSegments],
       (ins "ValueRange":$inputs, "ValueRange":$outputs,
             CArg<"ArrayRef<NamedAttribute>", "{{}">:$attributes),
       [{{
-        $_state.addOperands(inputs);
-        $_state.addOperands(outputs);
-        SmallVector<Type> resultTensorTypes;
-        copy_if(outputs.getTypes(),
-                std::back_inserter(resultTensorTypes),
-                [](Type type) {{ return type.isa<RankedTensorType>(); });
-        $_state.addTypes(resultTensorTypes);
-        $_state.addAttribute(
-          "operand_segment_sizes",
-          $_builder.getI32VectorAttr({{
-            static_cast<int32_t>(inputs.size()),
-            static_cast<int32_t>(outputs.size())}));
-        $_state.addAttributes(attributes);
-        createAndFillStructuredOpRegion<{0}>(
-          $_builder,
-          $_state,
-          TypeRange(inputs),
-          TypeRange(outputs));
+        buildStructuredOp($_builder, $_state, llvm::None, inputs, outputs,
+          attributes, {0}::getRegionBuilder());
       }]>,
       OpBuilder<
       (ins "TypeRange":$resultTensorTypes, "ValueRange":$inputs,
             "ValueRange":$outputs,
             CArg<"ArrayRef<NamedAttribute>", "{{}">:$attributes),
       [{{
-        $_state.addOperands(inputs);
-        $_state.addOperands(outputs);
-        $_state.addTypes(resultTensorTypes);
-        $_state.addAttributes(attributes);
-        $_state.addAttribute(
-          "operand_segment_sizes",
-          $_builder.getI32VectorAttr({{
-            static_cast<int32_t>(inputs.size()),
-            static_cast<int32_t>(outputs.size())}));
-        createAndFillStructuredOpRegion<{0}>(
-          $_builder,
-          $_state,
-          TypeRange(inputs),
-          TypeRange(outputs));
+        buildStructuredOp($_builder, $_state, resultTensorTypes,
+          inputs, outputs, attributes, {0}::getRegionBuilder());
       }]>,
       OpBuilder<
       (ins "TypeRange":$resultTensorTypes, "ValueRange":$operands,
@@ -572,6 +548,7 @@ def {0} : LinalgStructuredBase_Op<"{1}", !listconcat([AttrSizedOperandSegments],
     ];
     let hasCustomAssemblyFormat = 1;
     let hasFolder = 1;
+    {6}
 
     let extraClassDeclaration = structuredOpsBaseDecls # [{{
       // Auto-generated.
@@ -588,7 +565,7 @@ def {0} : LinalgStructuredBase_Op<"{1}", !listconcat([AttrSizedOperandSegments],
       // Generic methods.
       static unsigned getNumRegionArgs();
       std::string getLibraryCallName();
-      {6}
+      {7}
     }];
 }
 )FMT";
@@ -603,21 +580,9 @@ static const char structuredOpBuilderFormat[] = R"FMT(
        "ValueRange":$outputs, {1},
        CArg<"ArrayRef<NamedAttribute>", "{{}">:$attributes),
   [{{
-    $_state.addOperands(inputs);
-    $_state.addOperands(outputs);
-    $_state.addTypes(resultTensorTypes);
     {2}
-    $_state.addAttributes(attributes);
-    $_state.addAttribute(
-      "operand_segment_sizes",
-      $_builder.getI32VectorAttr({{
-        static_cast<int32_t>(inputs.size()),
-        static_cast<int32_t>(outputs.size())}));
-    createAndFillStructuredOpRegion<{0}>(
-      $_builder,
-      $_state,
-      TypeRange(inputs),
-      TypeRange(outputs));
+    buildStructuredOp($_builder, $_state, resultTensorTypes, inputs, outputs,
+      attributes, {0}::getRegionBuilder());
   }]>
 )FMT";
 
@@ -673,7 +638,7 @@ ArrayAttr {0}::indexing_maps() {{
     getNumParallelLoops(), context);
   SmallVector<AffineMap> indexingMaps;
   for (OpOperand *opOperand : getInputAndOutputOperands())
-    indexingMaps.push_back(isScalar(opOperand) ? scalarMap : tensorMap);
+    indexingMaps.push_back(getRank(opOperand) == 0 ? scalarMap : tensorMap);
   return Builder(getContext()).getAffineMapArrayAttr(indexingMaps);
 }
 )FMT";
@@ -700,10 +665,11 @@ void {0}::getEffects(SmallVectorImpl<
 // {0}: Class name
 static const char structuredOpParserFormat[] = R"FMT(
 ParseResult {0}::parse(OpAsmParser &parser, OperationState &result) {{
-  return ::parseNamedStructuredOp<{0}>(parser, result);
+  return ::parseNamedStructuredOp(parser, result,
+    {0}::getNumRegionArgs(), {0}::getRegionBuilder());
 }
 void {0}::print(OpAsmPrinter &p) {{
-  ::printNamedStructuredOp(p, *this);
+  ::printNamedStructuredOp(p, getOperation(), inputs(), outputs());
 }
 )FMT";
 
@@ -734,6 +700,12 @@ static LogicalResult generateNamedGenericOpOds(LinalgOpConfig &opConfig,
   }
 
   interfaceNameList = interleaveToString(opConfig.metadata->implements, ", ");
+
+  std::string definitionList;
+  for (const std::string &definition : opConfig.metadata->defines) {
+    static const char definitionFmt[] = "let {0} = 1;\n";
+    definitionList.append(llvm::formatv(definitionFmt, definition));
+  }
 
   if (llvm::any_of(opConfig.structuredOp->args, [](LinalgOperandDef &arg) {
         return isAttribute(arg.kind);
@@ -793,7 +765,7 @@ static LogicalResult generateNamedGenericOpOds(LinalgOpConfig &opConfig,
   os << llvm::formatv(structuredOpOdsHeaderFormat,
                       opConfig.metadata->cppClassName, opConfig.metadata->name,
                       interfaceNameList, doc, attrList, attrBuilder,
-                      attrMethods);
+                      definitionList, attrMethods);
 
   return success();
 }

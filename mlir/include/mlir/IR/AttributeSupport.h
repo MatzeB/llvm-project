@@ -188,7 +188,7 @@ class AttributeUniquer {
 public:
   /// Get an uniqued instance of an attribute T.
   template <typename T, typename... Args>
-  static T get(MLIRContext *ctx, Args &&... args) {
+  static T get(MLIRContext *ctx, Args &&...args) {
     return getWithTypeID<T, Args...>(ctx, T::getTypeID(),
                                      std::forward<Args>(args)...);
   }
@@ -199,7 +199,7 @@ public:
   template <typename T, typename... Args>
   static typename std::enable_if_t<
       !std::is_same<typename T::ImplType, AttributeStorage>::value, T>
-  getWithTypeID(MLIRContext *ctx, TypeID typeID, Args &&... args) {
+  getWithTypeID(MLIRContext *ctx, TypeID typeID, Args &&...args) {
 #ifndef NDEBUG
     if (!ctx->getAttributeUniquer().isParametricStorageInitialized(typeID))
       llvm::report_fatal_error(
@@ -238,7 +238,7 @@ public:
 
   template <typename T, typename... Args>
   static LogicalResult mutate(MLIRContext *ctx, typename T::ImplType *impl,
-                              Args &&... args) {
+                              Args &&...args) {
     assert(impl && "cannot mutate null attribute");
     return ctx->getAttributeUniquer().mutate(T::getTypeID(), impl,
                                              std::forward<Args>(args)...);

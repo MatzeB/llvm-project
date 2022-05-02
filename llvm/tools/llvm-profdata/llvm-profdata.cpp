@@ -266,12 +266,25 @@ static void loadInput(const WeightedFile &Input, SymbolRemapper *Remapper,
       return;
     }
 
-    // Add the records into the writer context.
-    for (const memprof::MemProfRecord &MR : *Reader) {
-      WC->Writer.addRecord(MR, [&](Error E) {
-        instrprof_error IPE = InstrProfError::take(std::move(E));
-        WC->Errors.emplace_back(make_error<InstrProfError>(IPE), Filename);
-      });
+    auto MemProfError = [&](Error E) {
+      instrprof_error IPE = InstrProfError::take(std::move(E));
+      WC->Errors.emplace_back(make_error<InstrProfError>(IPE), Filename);
+    };
+
+    // Add the frame mappings into the writer context.
+    const auto &IdToFrame = Reader->getFrameMapping();
+    for (const auto &I : IdToFrame) {
+      bool Succeeded = WC->Writer.addMemProfFrame(
+          /*Id=*/I.first, /*Frame=*/I.getSecond(), MemProfError);
+      // If we weren't able to add the frame mappings then it doesn't make sense
+      // to try to add the records from this profile.
+      if (!Succeeded)
+        return;
+    }
+    const auto &FunctionProfileData = Reader->getProfileData();
+    // Add the memprof records into the writer context.
+    for (const auto &I : FunctionProfileData) {
+      WC->Writer.addMemProfRecord(/*Id=*/I.first, /*Record=*/I.second);
     }
     return;
   }
@@ -741,7 +754,7 @@ mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
   LLVMContext Context;
   sampleprof::ProfileSymbolList WriterList;
   Optional<bool> ProfileIsProbeBased;
-  Optional<bool> ProfileIsCSFlat;
+  Optional<bool> ProfileIsCS;
   for (const auto &Input : Inputs) {
     auto ReaderOrErr = SampleProfileReader::create(Input.Filename, Context,
                                                    FSDiscriminatorPassOption);
@@ -768,10 +781,9 @@ mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
       exitWithError(
           "cannot merge probe-based profile with non-probe-based profile");
     ProfileIsProbeBased = FunctionSamples::ProfileIsProbeBased;
-    if (ProfileIsCSFlat.hasValue() &&
-        ProfileIsCSFlat != FunctionSamples::ProfileIsCSFlat)
+    if (ProfileIsCS.hasValue() && ProfileIsCS != FunctionSamples::ProfileIsCS)
       exitWithError("cannot merge CS profile with non-CS profile");
-    ProfileIsCSFlat = FunctionSamples::ProfileIsCSFlat;
+    ProfileIsCS = FunctionSamples::ProfileIsCS;
     for (SampleProfileMap::iterator I = Profiles.begin(), E = Profiles.end();
          I != E; ++I) {
       sampleprof_error Result = sampleprof_error::success;
@@ -794,7 +806,7 @@ mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
       WriterList.merge(*ReaderList);
   }
 
-  if (ProfileIsCSFlat && (SampleMergeColdContext || SampleTrimColdContext)) {
+  if (ProfileIsCS && (SampleMergeColdContext || SampleTrimColdContext)) {
     // Use threshold calculated from profile summary unless specified.
     SampleProfileSummaryBuilder Builder(ProfileSummaryBuilder::DefaultCutoffs);
     auto Summary = Builder.computeSummaryForProfiles(ProfileMap);
@@ -809,10 +821,10 @@ mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
             SampleMergeColdContext, SampleColdContextFrameDepth, false);
   }
 
-  if (ProfileIsCSFlat && GenCSNestedProfile) {
+  if (ProfileIsCS && GenCSNestedProfile) {
     CSProfileConverter CSConverter(ProfileMap);
     CSConverter.convertProfiles();
-    ProfileIsCSFlat = FunctionSamples::ProfileIsCSFlat = false;
+    ProfileIsCS = FunctionSamples::ProfileIsCS = false;
   }
 
   auto WriterOrErr =
@@ -1972,7 +1984,7 @@ std::error_code SampleOverlapAggregator::loadProfiles() {
   if (BaseReader->profileIsProbeBased() != TestReader->profileIsProbeBased())
     exitWithError(
         "cannot compare probe-based profile with non-probe-based profile");
-  if (BaseReader->profileIsCSFlat() != TestReader->profileIsCSFlat())
+  if (BaseReader->profileIsCS() != TestReader->profileIsCS())
     exitWithError("cannot compare CS profile with non-CS profile");
 
   // Load BaseHotThreshold and TestHotThreshold as 99-percentile threshold in
@@ -2133,7 +2145,7 @@ static int showInstrProfile(const std::string &Filename, bool ShowCounts,
   auto ReaderOrErr = InstrProfReader::create(Filename);
   std::vector<uint32_t> Cutoffs = std::move(DetailedSummaryCutoffs);
   if (ShowDetailedSummary && Cutoffs.empty()) {
-    Cutoffs = {800000, 900000, 950000, 990000, 999000, 999900, 999990};
+    Cutoffs = ProfileSummaryBuilder::DefaultCutoffs;
   }
   InstrProfSummaryBuilder Builder(std::move(Cutoffs));
   if (Error E = ReaderOrErr.takeError())

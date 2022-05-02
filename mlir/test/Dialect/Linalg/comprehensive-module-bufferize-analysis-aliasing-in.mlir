@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -linalg-comprehensive-module-bufferize="test-analysis-only allow-return-memref always-aliasing-with-dest=0" -split-input-file | FileCheck %s
+// RUN: mlir-opt %s -linalg-comprehensive-module-bufferize="test-analysis-only allow-return-allocs always-aliasing-with-dest=0" -split-input-file | FileCheck %s
 
 // This is a test case for alwaysAliasingWithDest = 0. In that case, an OpResult
 // may bufferize in-place with an "in" OpOperand or any non-"out" OpOperand.
@@ -15,10 +15,10 @@
 }
 
 // CHECK-LABEL: func @linalg_op_same_out_tensors(
-func @linalg_op_same_out_tensors(
-    %t1: tensor<?xf32> {linalg.inplaceable = true},
+func.func @linalg_op_same_out_tensors(
+    %t1: tensor<?xf32> {bufferization.writable = true},
 // CHECK-SAME:          bufferization.access = "read-write"
-    %t2: tensor<?xf32> {linalg.inplaceable = true})
+    %t2: tensor<?xf32> {bufferization.writable = true})
 // CHECK-SAME:          bufferization.access = "write"
   -> (tensor<?xf32>, tensor<?xf32>){
 
@@ -53,10 +53,10 @@ func @linalg_op_same_out_tensors(
 }
 
 // CHECK-LABEL: func @linalg_op_same_out_tensors_2(
-func @linalg_op_same_out_tensors_2(
-    %t1: tensor<?xf32> {linalg.inplaceable = true},
+func.func @linalg_op_same_out_tensors_2(
+    %t1: tensor<?xf32> {bufferization.writable = true},
 // CHECK-SAME:          bufferization.access = "read-write"
-    %t2: tensor<?xf32> {linalg.inplaceable = true})
+    %t2: tensor<?xf32> {bufferization.writable = true})
 // CHECK-SAME:          bufferization.access = "write"
         -> (tensor<?xf32>, tensor<?xf32>, tensor<?xf32>){
 

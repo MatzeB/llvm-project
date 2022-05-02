@@ -261,6 +261,7 @@ TARGET_BUILTIN(__builtin_ia32_packsswb128, "V16cV8sV8s", "ncV:128:", "sse2")
 TARGET_BUILTIN(__builtin_ia32_packssdw128, "V8sV4iV4i", "ncV:128:", "sse2")
 TARGET_BUILTIN(__builtin_ia32_packuswb128, "V16cV8sV8s", "ncV:128:", "sse2")
 TARGET_BUILTIN(__builtin_ia32_pmulhuw128, "V8sV8sV8s", "ncV:128:", "sse2")
+TARGET_BUILTIN(__builtin_ia32_vec_ext_v2di, "OiV2OiIi", "ncV:128:", "sse2")
 TARGET_BUILTIN(__builtin_ia32_vec_ext_v4si, "iV4iIi", "ncV:128:", "sse2")
 TARGET_BUILTIN(__builtin_ia32_vec_ext_v4sf, "fV4fIi", "ncV:128:", "sse2")
 TARGET_BUILTIN(__builtin_ia32_vec_ext_v8hi, "sV8sIi", "ncV:128:", "sse2")
@@ -2070,6 +2071,9 @@ TARGET_HEADER_BUILTIN(_BitScanReverse, "UcUNi*UNi", "nh", "intrin.h", ALL_MS_LAN
 TARGET_HEADER_BUILTIN(_ReadWriteBarrier, "v", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
 TARGET_HEADER_BUILTIN(_ReadBarrier,      "v", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
 TARGET_HEADER_BUILTIN(_WriteBarrier,     "v", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
+
+TARGET_HEADER_BUILTIN(__cpuid,   "vi*i",  "nh", "intrin.h", ALL_MS_LANGUAGES, "")
+TARGET_HEADER_BUILTIN(__cpuidex, "vi*ii", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
 
 TARGET_HEADER_BUILTIN(__emul,  "LLiii",    "nch", "intrin.h", ALL_MS_LANGUAGES, "")
 TARGET_HEADER_BUILTIN(__emulu, "ULLiUiUi", "nch", "intrin.h", ALL_MS_LANGUAGES, "")

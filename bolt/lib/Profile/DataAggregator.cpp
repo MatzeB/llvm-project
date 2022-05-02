@@ -1295,43 +1295,63 @@ std::error_code DataAggregator::printLBRHeatMap() {
              opts::HeatmapMaxAddress);
   uint64_t NumTotalSamples = 0;
 
-  while (hasData()) {
-    ErrorOr<PerfBranchSample> SampleRes = parseBranchSample();
-    if (std::error_code EC = SampleRes.getError()) {
-      if (EC == errc::no_such_process)
-        continue;
-      return EC;
-    }
-
-    PerfBranchSample &Sample = SampleRes.get();
-
-    // LBRs are stored in reverse execution order. NextLBR refers to the next
-    // executed branch record.
-    const LBREntry *NextLBR = nullptr;
-    for (const LBREntry &LBR : Sample.LBR) {
-      if (NextLBR) {
-        // Record fall-through trace.
-        const uint64_t TraceFrom = LBR.To;
-        const uint64_t TraceTo = NextLBR->From;
-        ++FallthroughLBRs[Trace(TraceFrom, TraceTo)].InternCount;
+  if (opts::BasicAggregation) {
+    while (hasData()) {
+      ErrorOr<PerfBasicSample> SampleRes = parseBasicSample();
+      if (std::error_code EC = SampleRes.getError()) {
+        if (EC == errc::no_such_process)
+          continue;
+        return EC;
       }
-      NextLBR = &LBR;
+      PerfBasicSample &Sample = SampleRes.get();
+      HM.registerAddress(Sample.PC);
+      NumTotalSamples++;
     }
-    if (!Sample.LBR.empty()) {
-      HM.registerAddress(Sample.LBR.front().To);
-      HM.registerAddress(Sample.LBR.back().From);
+    outs() << "HEATMAP: read " << NumTotalSamples << " basic samples\n";
+  } else {
+    while (hasData()) {
+      ErrorOr<PerfBranchSample> SampleRes = parseBranchSample();
+      if (std::error_code EC = SampleRes.getError()) {
+        if (EC == errc::no_such_process)
+          continue;
+        return EC;
+      }
+
+      PerfBranchSample &Sample = SampleRes.get();
+
+      // LBRs are stored in reverse execution order. NextLBR refers to the next
+      // executed branch record.
+      const LBREntry *NextLBR = nullptr;
+      for (const LBREntry &LBR : Sample.LBR) {
+        if (NextLBR) {
+          // Record fall-through trace.
+          const uint64_t TraceFrom = LBR.To;
+          const uint64_t TraceTo = NextLBR->From;
+          ++FallthroughLBRs[Trace(TraceFrom, TraceTo)].InternCount;
+        }
+        NextLBR = &LBR;
+      }
+      if (!Sample.LBR.empty()) {
+        HM.registerAddress(Sample.LBR.front().To);
+        HM.registerAddress(Sample.LBR.back().From);
+      }
+      NumTotalSamples += Sample.LBR.size();
     }
-    NumTotalSamples += Sample.LBR.size();
+    outs() << "HEATMAP: read " << NumTotalSamples << " LBR samples\n";
+    outs() << "HEATMAP: " << FallthroughLBRs.size() << " unique traces\n";
   }
 
   if (!NumTotalSamples) {
-    errs() << "HEATMAP-ERROR: no LBR traces detected in profile. "
-              "Cannot build heatmap.\n";
+    if (opts::BasicAggregation) {
+      errs() << "HEATMAP-ERROR: no basic event samples detected in profile. "
+                "Cannot build heatmap.";
+    } else {
+      errs() << "HEATMAP-ERROR: no LBR traces detected in profile. "
+                "Cannot build heatmap. Use -nl for building heatmap from "
+                "basic events.\n";
+    }
     exit(1);
   }
-
-  outs() << "HEATMAP: read " << NumTotalSamples << " LBR samples\n";
-  outs() << "HEATMAP: " << FallthroughLBRs.size() << " unique traces\n";
 
   outs() << "HEATMAP: building heat map...\n";
 
@@ -2022,23 +2042,19 @@ std::error_code DataAggregator::parseMMapEvents() {
       }
     }
 
-    // For shared objects, adjust the offset used for calculating the base
-    // address.
+    // Set base address for shared objects.
     if (!BC->HasFixedLoadAddress) {
-      for (auto &KV : BC->SegmentMapInfo) {
-        SegmentInfo &SegInfo = KV.second;
-        // File offset of the mmaped page is reported by perf script.
-        const uint64_t FileOffset =
-            alignDown(SegInfo.FileOffset, SegInfo.Alignment);
-        if (MMapInfo.Offset == FileOffset) {
-          const uint64_t VOffset =
-              alignDown(SegInfo.Address, SegInfo.Alignment);
-          // To correctly adjust the address, we need to use a memory offset
-          // from the base address.
-          if (FileOffset != VOffset)
-            MMapInfo.Offset = VOffset;
-          break;
-        }
+      Optional<uint64_t> BaseAddress =
+          BC->getBaseAddressForMapping(MMapInfo.MMapAddress, MMapInfo.Offset);
+      if (!BaseAddress) {
+        errs() << "PERF2BOLT-WARNING: unable to find base address of the "
+                  "binary when memory mapped at 0x"
+               << Twine::utohexstr(MMapInfo.MMapAddress)
+               << " using file offset 0x" << Twine::utohexstr(MMapInfo.Offset)
+               << ". Ignoring profile data for this mapping\n";
+        continue;
+      } else {
+        MMapInfo.BaseAddress = *BaseAddress;
       }
     }
 

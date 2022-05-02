@@ -85,6 +85,65 @@ static llvm::hash_code test::hash_value(const FieldInfo &fi) { // NOLINT
 }
 
 //===----------------------------------------------------------------------===//
+// TestCustomType
+//===----------------------------------------------------------------------===//
+
+static LogicalResult parseCustomTypeA(AsmParser &parser,
+                                      FailureOr<int> &aResult) {
+  aResult.emplace();
+  return parser.parseInteger(*aResult);
+}
+
+static void printCustomTypeA(AsmPrinter &printer, int a) { printer << a; }
+
+static LogicalResult parseCustomTypeB(AsmParser &parser, int a,
+                                      FailureOr<Optional<int>> &bResult) {
+  if (a < 0)
+    return success();
+  for (int i : llvm::seq(0, a))
+    if (failed(parser.parseInteger(i)))
+      return failure();
+  bResult.emplace(0);
+  return parser.parseInteger(**bResult);
+}
+
+static void printCustomTypeB(AsmPrinter &printer, int a, Optional<int> b) {
+  if (a < 0)
+    return;
+  printer << ' ';
+  for (int i : llvm::seq(0, a))
+    printer << i << ' ';
+  printer << *b;
+}
+
+static LogicalResult parseFooString(AsmParser &parser,
+                                    FailureOr<std::string> &foo) {
+  std::string result;
+  if (parser.parseString(&result))
+    return failure();
+  foo = std::move(result);
+  return success();
+}
+
+static void printFooString(AsmPrinter &printer, StringRef foo) {
+  printer << '"' << foo << '"';
+}
+
+static LogicalResult parseBarString(AsmParser &parser, StringRef foo) {
+  return parser.parseKeyword(foo);
+}
+
+static void printBarString(AsmPrinter &printer, StringRef foo) {
+  printer << ' ' << foo;
+}
+//===----------------------------------------------------------------------===//
+// Tablegen Generated Definitions
+//===----------------------------------------------------------------------===//
+
+#define GET_TYPEDEF_CLASSES
+#include "TestTypeDefs.cpp.inc"
+
+//===----------------------------------------------------------------------===//
 // CompoundAType
 //===----------------------------------------------------------------------===//
 
@@ -128,6 +187,54 @@ TestIntegerType::verify(function_ref<InFlightDiagnostic()> emitError,
   if (width > 8)
     return failure();
   return success();
+}
+
+Type TestIntegerType::parse(AsmParser &parser) {
+  SignednessSemantics signedness;
+  int width;
+  if (parser.parseLess() || parseSignedness(parser, signedness) ||
+      parser.parseComma() || parser.parseInteger(width) ||
+      parser.parseGreater())
+    return Type();
+  Location loc = parser.getEncodedSourceLoc(parser.getNameLoc());
+  return getChecked(loc, loc.getContext(), width, signedness);
+}
+
+void TestIntegerType::print(AsmPrinter &p) const {
+  p << "<";
+  printSignedness(p, getSignedness());
+  p << ", " << getWidth() << ">";
+}
+
+//===----------------------------------------------------------------------===//
+// TestStructType
+//===----------------------------------------------------------------------===//
+
+Type StructType::parse(AsmParser &p) {
+  SmallVector<FieldInfo, 4> parameters;
+  if (p.parseLess())
+    return Type();
+  while (succeeded(p.parseOptionalLBrace())) {
+    Type type;
+    StringRef name;
+    if (p.parseKeyword(&name) || p.parseComma() || p.parseType(type) ||
+        p.parseRBrace())
+      return Type();
+    parameters.push_back(FieldInfo{name, type});
+    if (p.parseOptionalComma())
+      break;
+  }
+  if (p.parseGreater())
+    return Type();
+  return get(p.getContext(), parameters);
+}
+
+void StructType::print(AsmPrinter &p) const {
+  p << "<";
+  llvm::interleaveComma(getFields(), p, [&](const FieldInfo &field) {
+    p << "{" << field.name << "," << field.type << "}";
+  });
+  p << ">";
 }
 
 //===----------------------------------------------------------------------===//
@@ -210,13 +317,6 @@ unsigned TestTypeWithLayoutType::extractKind(DataLayoutEntryListRef params,
 }
 
 //===----------------------------------------------------------------------===//
-// Tablegen Generated Definitions
-//===----------------------------------------------------------------------===//
-
-#define GET_TYPEDEF_CLASSES
-#include "TestTypeDefs.cpp.inc"
-
-//===----------------------------------------------------------------------===//
 // Dynamic Types
 //===----------------------------------------------------------------------===//
 
@@ -224,7 +324,7 @@ unsigned TestTypeWithLayoutType::extractKind(DataLayoutEntryListRef params,
 static std::unique_ptr<DynamicTypeDefinition>
 getSingletonDynamicType(TestDialect *testDialect) {
   return DynamicTypeDefinition::get(
-      "singleton_dyntype", testDialect,
+      "dynamic_singleton", testDialect,
       [](function_ref<InFlightDiagnostic()> emitError,
          ArrayRef<Attribute> args) {
         if (!args.empty()) {
@@ -239,7 +339,7 @@ getSingletonDynamicType(TestDialect *testDialect) {
 static std::unique_ptr<DynamicTypeDefinition>
 getPairDynamicType(TestDialect *testDialect) {
   return DynamicTypeDefinition::get(
-      "pair_dyntype", testDialect,
+      "dynamic_pair", testDialect,
       [](function_ref<InFlightDiagnostic()> emitError,
          ArrayRef<Attribute> args) {
         if (args.size() != 2) {
@@ -277,7 +377,7 @@ getCustomAssemblyFormatDynamicType(TestDialect *testDialect) {
     printer << "<" << params[0] << ":" << params[1] << ">";
   };
 
-  return DynamicTypeDefinition::get("custom_assembly_format_dyntype",
+  return DynamicTypeDefinition::get("dynamic_custom_assembly_format",
                                     testDialect, std::move(verifier),
                                     std::move(parser), std::move(printer));
 }

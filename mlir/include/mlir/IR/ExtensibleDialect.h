@@ -128,9 +128,10 @@ private:
 /// not; it should only be implemented by dynamic attributes.
 /// Note: This is only required because dynamic attributes do not have a
 /// static/single TypeID.
+namespace AttributeTrait {
 template <typename ConcreteType>
-class IsDynamicAttrTrait
-    : public AttributeTrait::TraitBase<ConcreteType, IsDynamicAttrTrait> {};
+class IsDynamicAttr : public TraitBase<ConcreteType, IsDynamicAttr> {};
+} // namespace AttributeTrait
 
 /// A dynamic attribute instance. This is an attribute whose definition is
 /// defined at runtime.
@@ -142,7 +143,7 @@ class IsDynamicAttrTrait
 
 class DynamicAttr : public Attribute::AttrBase<DynamicAttr, Attribute,
                                                detail::DynamicAttrStorage,
-                                               IsDynamicAttrTrait> {
+                                               AttributeTrait::IsDynamicAttr> {
 public:
   // Inherit Base constructors.
   using Base::Base;
@@ -272,9 +273,11 @@ private:
 /// it should only be implemented by dynamic types.
 /// Note: This is only required because dynamic type do not have a
 /// static/single TypeID.
+namespace TypeTrait {
 template <typename ConcreteType>
-class IsDynamicTypeTrait
-    : public TypeTrait::TraitBase<ConcreteType, IsDynamicTypeTrait> {};
+class IsDynamicType : public TypeTrait::TraitBase<ConcreteType, IsDynamicType> {
+};
+} // namespace TypeTrait
 
 /// A dynamic type instance. This is a type whose definition is defined at
 /// runtime.
@@ -284,7 +287,7 @@ class IsDynamicTypeTrait
 /// All dynamic types have the same storage, which is an array of attributes.
 class DynamicType
     : public Type::TypeBase<DynamicType, Type, detail::DynamicTypeStorage,
-                            IsDynamicTypeTrait> {
+                            TypeTrait::IsDynamicType> {
 public:
   // Inherit Base constructors.
   using Base::Base;
@@ -538,5 +541,16 @@ private:
   TypeIDAllocator typeIDAllocator;
 };
 } // namespace mlir
+
+namespace llvm {
+/// Provide isa functionality for ExtensibleDialect.
+/// This is to override the isa functionality for Dialect.
+template <>
+struct isa_impl<mlir::ExtensibleDialect, mlir::Dialect> {
+  static inline bool doit(const ::mlir::Dialect &dialect) {
+    return mlir::ExtensibleDialect::classof(&dialect);
+  }
+};
+} // namespace llvm
 
 #endif // MLIR_IR_EXTENSIBLEDIALECT_H

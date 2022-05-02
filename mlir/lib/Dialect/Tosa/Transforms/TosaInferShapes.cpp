@@ -279,21 +279,21 @@ void propagateShapesInRegion(Region &region) {
 struct TosaInferShapes : public TosaInferShapesBase<TosaInferShapes> {
 public:
   void runOnOperation() override {
-    FuncOp func = getOperation();
+    func::FuncOp func = getOperation();
 
     IRRewriter rewriter(func.getContext());
 
-    propagateShapesInRegion(func.body());
+    propagateShapesInRegion(func.getBody());
 
     // Insert UnrealizedConversionCasts to guarantee ReturnOp agress with
     // the FuncOp type.
     func.walk([&](func::ReturnOp op) {
-      FuncOp parent = dyn_cast<FuncOp>(op->getParentOp());
+      func::FuncOp parent = dyn_cast<func::FuncOp>(op->getParentOp());
       if (!parent)
         return;
 
       rewriter.setInsertionPoint(op);
-      FunctionType funcTy = func.getType();
+      FunctionType funcTy = func.getFunctionType();
       auto resultTys = funcTy.getResults();
 
       bool castAdded = false;

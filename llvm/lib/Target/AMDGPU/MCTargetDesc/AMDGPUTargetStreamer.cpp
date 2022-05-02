@@ -118,6 +118,10 @@ StringRef AMDGPUTargetStreamer::getArchNameFromElfMach(unsigned ElfMach) {
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1034: AK = GK_GFX1034; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1035: AK = GK_GFX1035; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1036: AK = GK_GFX1036; break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100: AK = GK_GFX1100; break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1101: AK = GK_GFX1101; break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1102: AK = GK_GFX1102; break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1103: AK = GK_GFX1103; break;
   case ELF::EF_AMDGPU_MACH_NONE:           AK = GK_NONE;    break;
   }
 
@@ -183,6 +187,10 @@ unsigned AMDGPUTargetStreamer::getElfMach(StringRef GPU) {
   case GK_GFX1034: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1034;
   case GK_GFX1035: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1035;
   case GK_GFX1036: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1036;
+  case GK_GFX1100: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1100;
+  case GK_GFX1101: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1101;
+  case GK_GFX1102: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1102;
+  case GK_GFX1103: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1103;
   case GK_NONE:    return ELF::EF_AMDGPU_MACH_NONE;
   }
 
@@ -447,6 +455,8 @@ void AMDGPUTargetAsmStreamer::EmitAmdhsaKernelDescriptor(
     PRINT_FIELD(OS, ".amdhsa_forward_progress", KD,
                 compute_pgm_rsrc1,
                 amdhsa::COMPUTE_PGM_RSRC1_FWD_PROGRESS);
+    PRINT_FIELD(OS, ".amdhsa_shared_vgpr_count", KD, compute_pgm_rsrc3,
+                amdhsa::COMPUTE_PGM_RSRC3_GFX10_SHARED_VGPR_COUNT);
   }
   PRINT_FIELD(
       OS, ".amdhsa_exception_fp_ieee_invalid_op", KD,
