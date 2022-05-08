@@ -355,7 +355,6 @@ AddressSectionBuffer DebugAddrWriter::finalize() {
     if (!DWOId)
       continue;
     auto AM = AddressMaps.find(*DWOId);
-    assert(AM != AddressMaps.end() && "Address Map not found.");
     // Adding to map even if it did not contribute to .debug_addr.
     // The Skeleton CU will still have DW_AT_GNU_addr_base.
     DWOIdToOffsetMap[*DWOId] = Buffer.size();
@@ -489,7 +488,7 @@ uint64_t DebugAddrWriter::getOffset(DWARFUnit &Unit) {
 uint64_t DebugAddrWriterDwarf5::getOffset(DWARFUnit &Unit) {
   auto Iter = DWOIdToOffsetMap.find(Unit.getOffset());
   assert(Iter != DWOIdToOffsetMap.end() &&
-         "Offset in to.debug_addr was not found for DWO ID.");
+         "Offset in to.debug_addr was not found for CU ID.");
   return Iter->second;
 }
 
