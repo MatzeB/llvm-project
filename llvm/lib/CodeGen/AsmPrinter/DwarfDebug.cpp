@@ -579,6 +579,13 @@ void DwarfDebug::constructAbstractSubprogramScopeDIE(DwarfCompileUnit &SrcCU,
 
   auto *SP = cast<DISubprogram>(Scope->getScopeNode());
 
+  // facebook begin T116556788
+  // Handling a case with LTO where function is inlined from CU which doesn't
+  // have SplitDebugInlining enabled into one that does.
+  if (SrcCU.getCUNode()->getSplitDebugInlining())
+    SP->getUnit()->setSplitDebugInlining(true);
+  // facebook end T116556788
+
   // Find the subprogram's DwarfCompileUnit in the SPMap in case the subprogram
   // was inlined from another compile unit.
   if ((useSplitDwarf() && !shareAcrossDWOCUs() &&
