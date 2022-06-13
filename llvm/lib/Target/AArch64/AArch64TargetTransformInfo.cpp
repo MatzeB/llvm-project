@@ -51,6 +51,12 @@ bool AArch64TTIImpl::areInlineCompatible(const Function *Caller,
   return (CallerBits & CalleeBits) == CalleeBits;
 }
 
+bool AArch64TTIImpl::shouldMaximizeVectorBandwidth(
+    TargetTransformInfo::RegisterKind K) const {
+  assert(K != TargetTransformInfo::RGK_Scalar);
+  return K == TargetTransformInfo::RGK_FixedWidthVector;
+}
+
 /// Calculate the cost of materializing a 64-bit value. This helper
 /// method might only calculate a fraction of a larger immediate. Therefore it
 /// is valid to return a cost of ZERO.
@@ -369,6 +375,49 @@ AArch64TTIImpl::getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
       if (const auto *Entry = CostTableLookup(WithOverflowCostTbl, ICA.getID(),
                                               MTy.getSimpleVT()))
         return Entry->Cost;
+    break;
+  }
+  case Intrinsic::fptosi_sat:
+  case Intrinsic::fptoui_sat: {
+    if (ICA.getArgTypes().empty())
+      break;
+    bool IsSigned = ICA.getID() == Intrinsic::fptosi_sat;
+    auto LT = TLI->getTypeLegalizationCost(DL, ICA.getArgTypes()[0]);
+    EVT MTy = TLI->getValueType(DL, RetTy);
+    // Check for the legal types, which are where the size of the input and the
+    // output are the same, or we are using cvt f64->i32 or f32->i64.
+    if ((LT.second == MVT::f32 || LT.second == MVT::f64 ||
+         LT.second == MVT::v2f32 || LT.second == MVT::v4f32 ||
+         LT.second == MVT::v2f64) &&
+        (LT.second.getScalarSizeInBits() == MTy.getScalarSizeInBits() ||
+         (LT.second == MVT::f64 && MTy == MVT::i32) ||
+         (LT.second == MVT::f32 && MTy == MVT::i64)))
+      return LT.first;
+    // Similarly for fp16 sizes
+    if (ST->hasFullFP16() &&
+        ((LT.second == MVT::f16 && MTy == MVT::i32) ||
+         ((LT.second == MVT::v4f16 || LT.second == MVT::v8f16) &&
+          (LT.second.getScalarSizeInBits() == MTy.getScalarSizeInBits()))))
+      return LT.first;
+
+    // Otherwise we use a legal convert followed by a min+max
+    if ((LT.second.getScalarType() == MVT::f32 ||
+         LT.second.getScalarType() == MVT::f64 ||
+         (ST->hasFullFP16() && LT.second.getScalarType() == MVT::f16)) &&
+        LT.second.getScalarSizeInBits() >= MTy.getScalarSizeInBits()) {
+      Type *LegalTy =
+          Type::getIntNTy(RetTy->getContext(), LT.second.getScalarSizeInBits());
+      if (LT.second.isVector())
+        LegalTy = VectorType::get(LegalTy, LT.second.getVectorElementCount());
+      InstructionCost Cost = 1;
+      IntrinsicCostAttributes Attrs1(IsSigned ? Intrinsic::smin : Intrinsic::umin,
+                                    LegalTy, {LegalTy, LegalTy});
+      Cost += getIntrinsicInstrCost(Attrs1, CostKind);
+      IntrinsicCostAttributes Attrs2(IsSigned ? Intrinsic::smax : Intrinsic::umax,
+                                    LegalTy, {LegalTy, LegalTy});
+      Cost += getIntrinsicInstrCost(Attrs2, CostKind);
+      return LT.first * Cost;
+    }
     break;
   }
   default:
@@ -1176,6 +1225,52 @@ static Optional<Instruction *> instCombineSVESDIV(InstCombiner &IC,
   return None;
 }
 
+static Optional<Instruction *> instCombineMaxMinNM(InstCombiner &IC,
+                                                   IntrinsicInst &II) {
+  Value *A = II.getArgOperand(0);
+  Value *B = II.getArgOperand(1);
+  if (A == B)
+    return IC.replaceInstUsesWith(II, A);
+
+  return None;
+}
+
+static Optional<Instruction *> instCombineSVESrshl(InstCombiner &IC,
+                                                   IntrinsicInst &II) {
+  IRBuilder<> Builder(&II);
+  Value *Pred = II.getOperand(0);
+  Value *Vec = II.getOperand(1);
+  Value *Shift = II.getOperand(2);
+
+  // Convert SRSHL into the simpler LSL intrinsic when fed by an ABS intrinsic.
+  Value *AbsPred, *MergedValue;
+  if (!match(Vec, m_Intrinsic<Intrinsic::aarch64_sve_sqabs>(
+                      m_Value(MergedValue), m_Value(AbsPred), m_Value())) &&
+      !match(Vec, m_Intrinsic<Intrinsic::aarch64_sve_abs>(
+                      m_Value(MergedValue), m_Value(AbsPred), m_Value())))
+
+    return None;
+
+  // Transform is valid if any of the following are true:
+  // * The ABS merge value is an undef or non-negative
+  // * The ABS predicate is all active
+  // * The ABS predicate and the SRSHL predicates are the same
+  if (!isa<UndefValue>(MergedValue) &&
+      !match(MergedValue, m_NonNegative()) &&
+      AbsPred != Pred && !isAllActivePredicate(AbsPred))
+    return None;
+
+  // Only valid when the shift amount is non-negative, otherwise the rounding
+  // behaviour of SRSHL cannot be ignored.
+  if (!match(Shift, m_NonNegative()))
+    return None;
+
+  auto LSL = Builder.CreateIntrinsic(Intrinsic::aarch64_sve_lsl, {II.getType()},
+                                     {Pred, Vec, Shift});
+
+  return IC.replaceInstUsesWith(II, LSL);
+}
+
 Optional<Instruction *>
 AArch64TTIImpl::instCombineIntrinsic(InstCombiner &IC,
                                      IntrinsicInst &II) const {
@@ -1183,6 +1278,9 @@ AArch64TTIImpl::instCombineIntrinsic(InstCombiner &IC,
   switch (IID) {
   default:
     break;
+  case Intrinsic::aarch64_neon_fmaxnm:
+  case Intrinsic::aarch64_neon_fminnm:
+    return instCombineMaxMinNM(IC, II);
   case Intrinsic::aarch64_sve_convert_from_svbool:
     return instCombineConvertFromSVBool(IC, II);
   case Intrinsic::aarch64_sve_dup:
@@ -1240,6 +1338,8 @@ AArch64TTIImpl::instCombineIntrinsic(InstCombiner &IC,
     return instCombineSVESDIV(IC, II);
   case Intrinsic::aarch64_sve_sel:
     return instCombineSVESel(IC, II);
+  case Intrinsic::aarch64_sve_srshl:
+    return instCombineSVESrshl(IC, II);
   }
 
   return None;
@@ -2739,6 +2839,12 @@ InstructionCost AArch64TTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
       { TTI::SK_Reverse, MVT::v2f32, 1 }, // mov.
       { TTI::SK_Reverse, MVT::v4f32, 2 }, // REV64; EXT
       { TTI::SK_Reverse, MVT::v2f64, 1 }, // mov.
+      { TTI::SK_Reverse, MVT::v8f16, 2 }, // REV64; EXT
+      { TTI::SK_Reverse, MVT::v8i16, 2 }, // REV64; EXT
+      { TTI::SK_Reverse, MVT::v16i8, 2 }, // REV64; EXT
+      { TTI::SK_Reverse, MVT::v4f16, 1 }, // REV64
+      { TTI::SK_Reverse, MVT::v4i16, 1 }, // REV64
+      { TTI::SK_Reverse, MVT::v8i8, 1 }, // REV64
       // Broadcast shuffle kinds for scalable vectors
       { TTI::SK_Broadcast, MVT::nxv16i8,  1 },
       { TTI::SK_Broadcast, MVT::nxv8i16,  1 },

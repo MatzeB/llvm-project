@@ -205,8 +205,7 @@ if is_configured('lldb_framework_dir'):
 
 # Facebook T92898286
 if is_configured("llvm_test_bolt"):
-    dotest_cmd += ['-E', '"--post-link-optimize"',
-                   '-E', '"-fdebug-default-version=4"']
+    dotest_cmd += ['-E', '"--post-link-optimize"']
 # End Facebook T92898286
 
 if 'lldb-repro-capture' in config.available_features or \

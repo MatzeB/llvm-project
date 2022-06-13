@@ -77,7 +77,7 @@ if not hasattr(config, 'clang_src_dir'):
 # Facebook T92898286
 should_test_bolt = get_required_attr(config, "llvm_test_bolt")
 if should_test_bolt:
-    llvm_config.use_clang(required=('clang' in config.llvm_enabled_projects), additional_flags=['--post-link-optimize', '-fdebug-default-version=4'])
+    llvm_config.use_clang(required=('clang' in config.llvm_enabled_projects), additional_flags=['--post-link-optimize'])
 else:
     llvm_config.use_clang(required=('clang' in config.llvm_enabled_projects))
 # End Facebook T92898286
@@ -88,11 +88,6 @@ llvm_config.use_lld(required=('lld' in config.llvm_enabled_projects))
 
 if 'compiler-rt' in config.llvm_enabled_projects:
   config.available_features.add('compiler-rt')
-
-if config.llvm_use_sanitizer:
-    # Propagate path to symbolizer for ASan/MSan.
-    llvm_config.with_system_environment(
-        ['ASAN_SYMBOLIZER_PATH', 'MSAN_SYMBOLIZER_PATH'])
 
 # Check which debuggers are available:
 lldb_path = llvm_config.use_llvm_tool('lldb', search_env='LLDB')

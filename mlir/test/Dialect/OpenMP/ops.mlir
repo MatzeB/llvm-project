@@ -29,19 +29,19 @@ func.func @omp_taskyield() -> () {
 }
 
 // CHECK-LABEL: func @omp_flush
-// CHECK-SAME: ([[ARG0:%.*]]: i32) {
-func.func @omp_flush(%arg0 : i32) -> () {
+// CHECK-SAME: ([[ARG0:%.*]]: memref<i32>) {
+func.func @omp_flush(%arg0 : memref<i32>) -> () {
   // Test without data var
   // CHECK: omp.flush
   omp.flush
 
   // Test with one data var
-  // CHECK: omp.flush([[ARG0]] : i32)
-  omp.flush(%arg0 : i32)
+  // CHECK: omp.flush([[ARG0]] : memref<i32>)
+  omp.flush(%arg0 : memref<i32>)
 
   // Test with two data var
-  // CHECK: omp.flush([[ARG0]], [[ARG0]] : i32, i32)
-  omp.flush(%arg0, %arg0: i32, i32)
+  // CHECK: omp.flush([[ARG0]], [[ARG0]] : memref<i32>, memref<i32>)
+  omp.flush(%arg0, %arg0: memref<i32>, memref<i32>)
 
   return
 }
@@ -51,15 +51,15 @@ func.func @omp_terminator() -> () {
   omp.terminator
 }
 
-func.func @omp_parallel(%data_var : memref<i32>, %if_cond : i1, %num_threads : si32) -> () {
-  // CHECK: omp.parallel if(%{{.*}}) num_threads(%{{.*}} : si32) allocate(%{{.*}} : memref<i32> -> %{{.*}} : memref<i32>)
+func.func @omp_parallel(%data_var : memref<i32>, %if_cond : i1, %num_threads : i32) -> () {
+  // CHECK: omp.parallel if(%{{.*}}) num_threads(%{{.*}} : i32) allocate(%{{.*}} : memref<i32> -> %{{.*}} : memref<i32>)
   "omp.parallel" (%if_cond, %num_threads, %data_var, %data_var) ({
 
   // test without if condition
-  // CHECK: omp.parallel num_threads(%{{.*}} : si32) allocate(%{{.*}} : memref<i32> -> %{{.*}} : memref<i32>)
+  // CHECK: omp.parallel num_threads(%{{.*}} : i32) allocate(%{{.*}} : memref<i32> -> %{{.*}} : memref<i32>)
     "omp.parallel"(%num_threads, %data_var, %data_var) ({
       omp.terminator
-    }) {operand_segment_sizes = dense<[0,1,1,1,0]> : vector<5xi32>} : (si32, memref<i32>, memref<i32>) -> ()
+    }) {operand_segment_sizes = dense<[0,1,1,1,0]> : vector<5xi32>} : (i32, memref<i32>, memref<i32>) -> ()
 
   // CHECK: omp.barrier
     omp.barrier
@@ -71,13 +71,13 @@ func.func @omp_parallel(%data_var : memref<i32>, %if_cond : i1, %num_threads : s
     }) {operand_segment_sizes = dense<[1,0,1,1,0]> : vector<5xi32>} : (i1, memref<i32>, memref<i32>) -> ()
 
   // test without allocate
-  // CHECK: omp.parallel if(%{{.*}}) num_threads(%{{.*}} : si32)
+  // CHECK: omp.parallel if(%{{.*}}) num_threads(%{{.*}} : i32)
     "omp.parallel"(%if_cond, %num_threads) ({
       omp.terminator
-    }) {operand_segment_sizes = dense<[1,1,0,0,0]> : vector<5xi32>} : (i1, si32) -> ()
+    }) {operand_segment_sizes = dense<[1,1,0,0,0]> : vector<5xi32>} : (i1, i32) -> ()
 
     omp.terminator
-  }) {operand_segment_sizes = dense<[1,1,1,1,0]> : vector<5xi32>, proc_bind_val = #omp<"procbindkind spread">} : (i1, si32, memref<i32>, memref<i32>) -> ()
+  }) {operand_segment_sizes = dense<[1,1,1,1,0]> : vector<5xi32>, proc_bind_val = #omp<"procbindkind spread">} : (i1, i32, memref<i32>, memref<i32>) -> ()
 
   // test with multiple parameters for single variadic argument
   // CHECK: omp.parallel allocate(%{{.*}} : memref<i32> -> %{{.*}} : memref<i32>)
@@ -88,14 +88,26 @@ func.func @omp_parallel(%data_var : memref<i32>, %if_cond : i1, %num_threads : s
   return
 }
 
-func.func @omp_parallel_pretty(%data_var : memref<i32>, %if_cond : i1, %num_threads : si32, %allocator : si32) -> () {
+func.func @omp_parallel_pretty(%data_var : memref<i32>, %if_cond : i1, %num_threads : i32, %allocator : si32) -> () {
  // CHECK: omp.parallel
  omp.parallel {
   omp.terminator
  }
 
- // CHECK: omp.parallel num_threads(%{{.*}} : si32)
- omp.parallel num_threads(%num_threads : si32) {
+ // CHECK: omp.parallel num_threads(%{{.*}} : i32)
+ omp.parallel num_threads(%num_threads : i32) {
+   omp.terminator
+ }
+
+ %n_index = arith.constant 2 : index
+ // CHECK: omp.parallel num_threads(%{{.*}} : index)
+ omp.parallel num_threads(%n_index : index) {
+   omp.terminator
+ }
+
+ %n_i64 = arith.constant 4 : i64
+ // CHECK: omp.parallel num_threads(%{{.*}} : i64)
+ omp.parallel num_threads(%n_i64 : i64) {
    omp.terminator
  }
 
@@ -113,8 +125,8 @@ func.func @omp_parallel_pretty(%data_var : memref<i32>, %if_cond : i1, %num_thre
    omp.terminator
  }
 
- // CHECK omp.parallel if(%{{.*}}) num_threads(%{{.*}} : si32) private(%{{.*}} : memref<i32>) proc_bind(close)
- omp.parallel num_threads(%num_threads : si32) if(%if_cond: i1) proc_bind(close) {
+ // CHECK omp.parallel if(%{{.*}}) num_threads(%{{.*}} : i32) private(%{{.*}} : memref<i32>) proc_bind(close)
+ omp.parallel num_threads(%num_threads : i32) if(%if_cond: i1) proc_bind(close) {
    omp.terminator
  }
 
@@ -347,14 +359,14 @@ func.func @omp_simdloop_pretty_multiple(%lb1 : index, %ub1 : index, %step1 : ind
 }
 
 // CHECK-LABEL: omp_target
-func.func @omp_target(%if_cond : i1, %device : si32,  %num_threads : si32) -> () {
+func.func @omp_target(%if_cond : i1, %device : si32,  %num_threads : i32) -> () {
 
     // Test with optional operands; if_expr, device, thread_limit, private, firstprivate and nowait.
     // CHECK: omp.target if({{.*}}) device({{.*}}) thread_limit({{.*}}) nowait
     "omp.target"(%if_cond, %device, %num_threads) ({
        // CHECK: omp.terminator
        omp.terminator
-    }) {nowait, operand_segment_sizes = dense<[1,1,1]>: vector<3xi32>} : ( i1, si32, si32 ) -> ()
+    }) {nowait, operand_segment_sizes = dense<[1,1,1]>: vector<3xi32>} : ( i1, si32, i32 ) -> ()
 
     // CHECK: omp.barrier
     omp.barrier
@@ -363,14 +375,14 @@ func.func @omp_target(%if_cond : i1, %device : si32,  %num_threads : si32) -> ()
 }
 
 // CHECK-LABEL: omp_target_pretty
-func.func @omp_target_pretty(%if_cond : i1, %device : si32,  %num_threads : si32) -> () {
+func.func @omp_target_pretty(%if_cond : i1, %device : si32,  %num_threads : i32) -> () {
     // CHECK: omp.target if({{.*}}) device({{.*}})
     omp.target if(%if_cond) device(%device : si32) {
       omp.terminator
     }
 
     // CHECK: omp.target if({{.*}}) device({{.*}}) nowait
-    omp.target if(%if_cond) device(%device : si32) thread_limit(%num_threads : si32) nowait {
+    omp.target if(%if_cond) device(%device : si32) thread_limit(%num_threads : i32) nowait {
       omp.terminator
     }
 
@@ -827,6 +839,46 @@ func.func @omp_atomic_update(%x : memref<i32>, %expr : i32, %xBool : memref<i1>,
     omp.yield(%newval : i32)
   }
 
+  // CHECK: omp.atomic.update memory_order(seq_cst) %[[X]] : memref<i32>
+  // CHECK-NEXT: (%[[XVAL:.*]]: i32):
+  // CHECK-NEXT:   %[[NEWVAL:.*]] = llvm.add %[[XVAL]], %[[EXPR]] : i32
+  // CHECK-NEXT:   omp.yield(%[[NEWVAL]] : i32)
+  omp.atomic.update memory_order(seq_cst) %x : memref<i32> {
+  ^bb0(%xval: i32):
+    %newval = llvm.add %xval, %expr : i32
+    omp.yield(%newval : i32)
+  }
+
+  // CHECK: omp.atomic.update memory_order(release) %[[X]] : memref<i32>
+  // CHECK-NEXT: (%[[XVAL:.*]]: i32):
+  // CHECK-NEXT:   %[[NEWVAL:.*]] = llvm.add %[[XVAL]], %[[EXPR]] : i32
+  // CHECK-NEXT:   omp.yield(%[[NEWVAL]] : i32)
+  omp.atomic.update memory_order(release) %x : memref<i32> {
+  ^bb0(%xval: i32):
+    %newval = llvm.add %xval, %expr : i32
+    omp.yield(%newval : i32)
+  }
+
+  // CHECK: omp.atomic.update memory_order(relaxed) %[[X]] : memref<i32>
+  // CHECK-NEXT: (%[[XVAL:.*]]: i32):
+  // CHECK-NEXT:   %[[NEWVAL:.*]] = llvm.add %[[XVAL]], %[[EXPR]] : i32
+  // CHECK-NEXT:   omp.yield(%[[NEWVAL]] : i32)
+  omp.atomic.update memory_order(relaxed) %x : memref<i32> {
+  ^bb0(%xval: i32):
+    %newval = llvm.add %xval, %expr : i32
+    omp.yield(%newval : i32)
+  }
+
+  // CHECK: omp.atomic.update memory_order(seq_cst) hint(uncontended, speculative) %[[X]] : memref<i32>
+  // CHECK-NEXT: (%[[XVAL:.*]]: i32):
+  // CHECK-NEXT:   %[[NEWVAL:.*]] = llvm.add %[[XVAL]], %[[EXPR]] : i32
+  // CHECK-NEXT:   omp.yield(%[[NEWVAL]] : i32)
+  omp.atomic.update memory_order(seq_cst) hint(uncontended, speculative) %x : memref<i32> {
+  ^bb0(%xval: i32):
+    %newval = llvm.add %xval, %expr : i32
+    omp.yield(%newval : i32)
+  }
+
   return
 }
 
@@ -1026,6 +1078,109 @@ func.func @omp_atomic_capture(%v: memref<i32>, %x: memref<i32>, %expr: i32) {
     }
     omp.atomic.read %v = %x : memref<i32>
   }
+
+  // CHECK: omp.atomic.capture memory_order(seq_cst) {
+  // CHECK-NEXT: omp.atomic.update %[[x]] : memref<i32>
+  // CHECK-NEXT: (%[[xval:.*]]: i32):
+  // CHECK-NEXT:   %[[newval:.*]] = llvm.add %[[xval]], %[[expr]] : i32
+  // CHECK-NEXT:   omp.yield(%[[newval]] : i32)
+  // CHECK-NEXT: }
+  // CHECK-NEXT: omp.atomic.read %[[v]] = %[[x]] : memref<i32>
+  // CHECK-NEXT: }
+  omp.atomic.capture memory_order(seq_cst) {
+    omp.atomic.update %x : memref<i32> {
+    ^bb0(%xval: i32):
+      %newval = llvm.add %xval, %expr : i32
+      omp.yield(%newval : i32)
+    }
+    omp.atomic.read %v = %x : memref<i32>
+  }
+
+  // CHECK: omp.atomic.capture memory_order(acq_rel) {
+  // CHECK-NEXT: omp.atomic.update %[[x]] : memref<i32>
+  // CHECK-NEXT: (%[[xval:.*]]: i32):
+  // CHECK-NEXT:   %[[newval:.*]] = llvm.add %[[xval]], %[[expr]] : i32
+  // CHECK-NEXT:   omp.yield(%[[newval]] : i32)
+  // CHECK-NEXT: }
+  // CHECK-NEXT: omp.atomic.read %[[v]] = %[[x]] : memref<i32>
+  // CHECK-NEXT: }
+  omp.atomic.capture memory_order(acq_rel) {
+    omp.atomic.update %x : memref<i32> {
+    ^bb0(%xval: i32):
+      %newval = llvm.add %xval, %expr : i32
+      omp.yield(%newval : i32)
+    }
+    omp.atomic.read %v = %x : memref<i32>
+  }
+
+  // CHECK: omp.atomic.capture memory_order(acquire) {
+  // CHECK-NEXT: omp.atomic.update %[[x]] : memref<i32>
+  // CHECK-NEXT: (%[[xval:.*]]: i32):
+  // CHECK-NEXT:   %[[newval:.*]] = llvm.add %[[xval]], %[[expr]] : i32
+  // CHECK-NEXT:   omp.yield(%[[newval]] : i32)
+  // CHECK-NEXT: }
+  // CHECK-NEXT: omp.atomic.read %[[v]] = %[[x]] : memref<i32>
+  // CHECK-NEXT: }
+  omp.atomic.capture memory_order(acquire) {
+    omp.atomic.update %x : memref<i32> {
+    ^bb0(%xval: i32):
+      %newval = llvm.add %xval, %expr : i32
+      omp.yield(%newval : i32)
+    }
+    omp.atomic.read %v = %x : memref<i32>
+  }
+
+  // CHECK: omp.atomic.capture memory_order(release) {
+  // CHECK-NEXT: omp.atomic.update %[[x]] : memref<i32>
+  // CHECK-NEXT: (%[[xval:.*]]: i32):
+  // CHECK-NEXT:   %[[newval:.*]] = llvm.add %[[xval]], %[[expr]] : i32
+  // CHECK-NEXT:   omp.yield(%[[newval]] : i32)
+  // CHECK-NEXT: }
+  // CHECK-NEXT: omp.atomic.read %[[v]] = %[[x]] : memref<i32>
+  // CHECK-NEXT: }
+  omp.atomic.capture memory_order(release) {
+    omp.atomic.update %x : memref<i32> {
+    ^bb0(%xval: i32):
+      %newval = llvm.add %xval, %expr : i32
+      omp.yield(%newval : i32)
+    }
+    omp.atomic.read %v = %x : memref<i32>
+  }
+
+  // CHECK: omp.atomic.capture memory_order(relaxed) {
+  // CHECK-NEXT: omp.atomic.update %[[x]] : memref<i32>
+  // CHECK-NEXT: (%[[xval:.*]]: i32):
+  // CHECK-NEXT:   %[[newval:.*]] = llvm.add %[[xval]], %[[expr]] : i32
+  // CHECK-NEXT:   omp.yield(%[[newval]] : i32)
+  // CHECK-NEXT: }
+  // CHECK-NEXT: omp.atomic.read %[[v]] = %[[x]] : memref<i32>
+  // CHECK-NEXT: }
+  omp.atomic.capture memory_order(relaxed) {
+    omp.atomic.update %x : memref<i32> {
+    ^bb0(%xval: i32):
+      %newval = llvm.add %xval, %expr : i32
+      omp.yield(%newval : i32)
+    }
+    omp.atomic.read %v = %x : memref<i32>
+  }
+
+  // CHECK: omp.atomic.capture memory_order(seq_cst) hint(contended, speculative) {
+  // CHECK-NEXT: omp.atomic.update %[[x]] : memref<i32>
+  // CHECK-NEXT: (%[[xval:.*]]: i32):
+  // CHECK-NEXT:   %[[newval:.*]] = llvm.add %[[xval]], %[[expr]] : i32
+  // CHECK-NEXT:   omp.yield(%[[newval]] : i32)
+  // CHECK-NEXT: }
+  // CHECK-NEXT: omp.atomic.read %[[v]] = %[[x]] : memref<i32>
+  // CHECK-NEXT: }
+  omp.atomic.capture hint(contended, speculative) memory_order(seq_cst) {
+    omp.atomic.update %x : memref<i32> {
+    ^bb0(%xval: i32):
+      %newval = llvm.add %xval, %expr : i32
+      omp.yield(%newval : i32)
+    }
+    omp.atomic.read %v = %x : memref<i32>
+  }
+
   return
 }
 
@@ -1264,3 +1419,77 @@ func.func @omp_threadprivate() {
 }
 
 llvm.mlir.global internal @_QFsubEx() : i32
+
+func.func @omp_cancel_parallel(%if_cond : i1) -> () {
+  // Test with optional operand; if_expr.
+  omp.parallel {
+    // CHECK: omp.cancel cancellation_construct_type(parallel) if(%{{.*}})
+    omp.cancel cancellation_construct_type(parallel) if(%if_cond)
+    // CHECK: omp.terminator
+    omp.terminator
+  }
+  return
+}
+
+func.func @omp_cancel_wsloop(%lb : index, %ub : index, %step : index) {
+  omp.wsloop
+  for (%iv) : index = (%lb) to (%ub) step (%step) {
+    // CHECK: omp.cancel cancellation_construct_type(loop)
+    omp.cancel cancellation_construct_type(loop)
+    // CHECK: omp.terminator
+    omp.terminator
+  }
+  return
+}
+
+func.func @omp_cancel_sections() -> () {
+  omp.sections {
+    omp.section {
+      // CHECK: omp.cancel cancellation_construct_type(sections)
+      omp.cancel cancellation_construct_type(sections)
+      omp.terminator
+    }
+    // CHECK: omp.terminator
+    omp.terminator
+  }
+  return
+}
+
+func.func @omp_cancellationpoint_parallel() -> () {
+  omp.parallel {
+    // CHECK: omp.cancellationpoint cancellation_construct_type(parallel)
+    omp.cancellationpoint cancellation_construct_type(parallel)
+    // CHECK: omp.cancel cancellation_construct_type(parallel)
+    omp.cancel cancellation_construct_type(parallel)
+    omp.terminator
+  }
+  return
+}
+
+func.func @omp_cancellationpoint_wsloop(%lb : index, %ub : index, %step : index) {
+  omp.wsloop
+  for (%iv) : index = (%lb) to (%ub) step (%step) {
+    // CHECK: omp.cancellationpoint cancellation_construct_type(loop)
+    omp.cancellationpoint cancellation_construct_type(loop)
+    // CHECK: omp.cancel cancellation_construct_type(loop)
+    omp.cancel cancellation_construct_type(loop)
+    // CHECK: omp.terminator
+    omp.terminator
+  }
+  return
+}
+
+func.func @omp_cancellationpoint_sections() -> () {
+  omp.sections {
+    omp.section {
+      // CHECK: omp.cancellationpoint cancellation_construct_type(sections)
+      omp.cancellationpoint cancellation_construct_type(sections)
+      // CHECK: omp.cancel cancellation_construct_type(sections)
+      omp.cancel cancellation_construct_type(sections)
+      omp.terminator
+    }
+    // CHECK: omp.terminator
+    omp.terminator
+  }
+  return
+}

@@ -195,6 +195,10 @@ private:
                                               bool VariableMask,
                                               bool IsGatherScatter,
                                               TTI::TargetCostKind CostKind) {
+    // We cannot scalarize scalable vectors, so return Invalid.
+    if (isa<ScalableVectorType>(DataTy))
+      return InstructionCost::getInvalid();
+
     auto *VT = cast<FixedVectorType>(DataTy);
     // Assume the target does not have support for gather/scatter operations
     // and provide a rough estimate.
@@ -312,6 +316,26 @@ public:
     return getTLI()->isLegalAddressingMode(DL, AM, Ty, AddrSpace, I);
   }
 
+  unsigned getStoreMinimumVF(unsigned VF, Type *ScalarMemTy,
+                             Type *ScalarValTy) const {
+    auto &&IsSupportedByTarget = [this, ScalarMemTy, ScalarValTy](unsigned VF) {
+      auto *SrcTy = FixedVectorType::get(ScalarMemTy, VF / 2);
+      EVT VT = getTLI()->getValueType(DL, SrcTy);
+      if (getTLI()->isOperationLegal(ISD::STORE, VT) ||
+          getTLI()->isOperationCustom(ISD::STORE, VT))
+        return true;
+
+      EVT ValVT =
+          getTLI()->getValueType(DL, FixedVectorType::get(ScalarValTy, VF / 2));
+      EVT LegalizedVT =
+          getTLI()->getTypeToTransformTo(ScalarMemTy->getContext(), VT);
+      return getTLI()->isTruncStoreLegal(LegalizedVT, ValVT);
+    };
+    while (VF > 2 && IsSupportedByTarget(VF))
+      VF /= 2;
+    return VF;
+  }
+
   bool isIndexedLoadLegal(TTI::MemIndexedMode M, Type *Ty,
                           const DataLayout &DL) const {
     EVT VT = getTLI()->getValueType(DL, Ty);
@@ -362,10 +386,9 @@ public:
     return getTLI()->isTypeLegal(VT);
   }
 
-  InstructionCost getRegUsageForType(Type *Ty) {
-    InstructionCost Val = getTLI()->getTypeLegalizationCost(DL, Ty).first;
-    assert(Val >= 0 && "Negative cost!");
-    return Val;
+  unsigned getRegUsageForType(Type *Ty) {
+    EVT ETy = getTLI()->getValueType(DL, Ty);
+    return getTLI()->getNumRegisters(Ty->getContext(), ETy);
   }
 
   InstructionCost getGEPCost(Type *PointeeType, const Value *Ptr,
@@ -1221,6 +1244,11 @@ public:
       unsigned Opcode, Type *VecTy, unsigned Factor, ArrayRef<unsigned> Indices,
       Align Alignment, unsigned AddressSpace, TTI::TargetCostKind CostKind,
       bool UseMaskForCond = false, bool UseMaskForGaps = false) {
+
+    // We cannot scalarize scalable vectors, so return Invalid.
+    if (isa<ScalableVectorType>(VecTy))
+      return InstructionCost::getInvalid();
+
     auto *VT = cast<FixedVectorType>(VecTy);
 
     unsigned NumElts = VT->getNumElements();
@@ -2111,6 +2139,11 @@ public:
   /// vector is reduced on each iteration.
   InstructionCost getTreeReductionCost(unsigned Opcode, VectorType *Ty,
                                        TTI::TargetCostKind CostKind) {
+    // Targets must implement a default value for the scalable case, since
+    // we don't know how many lanes the vector has.
+    if (isa<ScalableVectorType>(Ty))
+      return InstructionCost::getInvalid();
+
     Type *ScalarTy = Ty->getElementType();
     unsigned NumVecElts = cast<FixedVectorType>(Ty)->getNumElements();
     if ((Opcode == Instruction::Or || Opcode == Instruction::And) &&
@@ -2209,6 +2242,11 @@ public:
   InstructionCost getMinMaxReductionCost(VectorType *Ty, VectorType *CondTy,
                                          bool IsUnsigned,
                                          TTI::TargetCostKind CostKind) {
+    // Targets must implement a default value for the scalable case, since
+    // we don't know how many lanes the vector has.
+    if (isa<ScalableVectorType>(Ty))
+      return InstructionCost::getInvalid();
+
     Type *ScalarTy = Ty->getElementType();
     Type *ScalarCondTy = CondTy->getElementType();
     unsigned NumVecElts = cast<FixedVectorType>(Ty)->getNumElements();

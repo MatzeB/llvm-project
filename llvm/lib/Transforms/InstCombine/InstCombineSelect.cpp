@@ -450,8 +450,11 @@ Instruction *InstCombinerImpl::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
         }
 
         if (OpToFold) {
-          Constant *C = ConstantExpr::getBinOpIdentity(TVI->getOpcode(),
-                                                       TVI->getType(), true);
+          FastMathFlags FMF;
+          if (isa<FPMathOperator>(&SI))
+            FMF = SI.getFastMathFlags();
+          Constant *C = ConstantExpr::getBinOpIdentity(
+              TVI->getOpcode(), TVI->getType(), true, FMF.noSignedZeros());
           Value *OOp = TVI->getOperand(2-OpToFold);
           // Avoid creating select between 2 constants unless it's selecting
           // between 0, 1 and -1.
@@ -460,6 +463,8 @@ Instruction *InstCombinerImpl::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
           if (!isa<Constant>(OOp) ||
               (OOpIsAPInt && isSelect01(C->getUniqueInteger(), *OOpC))) {
             Value *NewSel = Builder.CreateSelect(SI.getCondition(), OOp, C);
+            if (isa<FPMathOperator>(&SI))
+              cast<Instruction>(NewSel)->setFastMathFlags(FMF);
             NewSel->takeName(TVI);
             BinaryOperator *BO = BinaryOperator::Create(TVI->getOpcode(),
                                                         FalseVal, NewSel);
@@ -482,8 +487,11 @@ Instruction *InstCombinerImpl::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
         }
 
         if (OpToFold) {
-          Constant *C = ConstantExpr::getBinOpIdentity(FVI->getOpcode(),
-                                                       FVI->getType(), true);
+          FastMathFlags FMF;
+          if (isa<FPMathOperator>(&SI))
+            FMF = SI.getFastMathFlags();
+          Constant *C = ConstantExpr::getBinOpIdentity(
+              FVI->getOpcode(), FVI->getType(), true, FMF.noSignedZeros());
           Value *OOp = FVI->getOperand(2-OpToFold);
           // Avoid creating select between 2 constants unless it's selecting
           // between 0, 1 and -1.
@@ -492,6 +500,8 @@ Instruction *InstCombinerImpl::foldSelectIntoOp(SelectInst &SI, Value *TrueVal,
           if (!isa<Constant>(OOp) ||
               (OOpIsAPInt && isSelect01(C->getUniqueInteger(), *OOpC))) {
             Value *NewSel = Builder.CreateSelect(SI.getCondition(), C, OOp);
+            if (isa<FPMathOperator>(&SI))
+              cast<Instruction>(NewSel)->setFastMathFlags(FMF);
             NewSel->takeName(FVI);
             BinaryOperator *BO = BinaryOperator::Create(FVI->getOpcode(),
                                                         TrueVal, NewSel);
@@ -1619,8 +1629,7 @@ Instruction *InstCombinerImpl::foldSelectInstWithICmp(SelectInst &SI,
       ICI->hasOneUse()) {
     InstCombiner::BuilderTy::InsertPointGuard Guard(Builder);
     Builder.SetInsertPoint(&SI);
-    Value *IsNeg = Builder.CreateICmpSLT(
-        CmpLHS, ConstantInt::getNullValue(CmpLHS->getType()), ICI->getName());
+    Value *IsNeg = Builder.CreateIsNeg(CmpLHS, ICI->getName());
     replaceOperand(SI, 0, IsNeg);
     SI.swapValues();
     SI.swapProfMetadata();
@@ -2277,7 +2286,8 @@ static Instruction *foldSelectToCopysign(SelectInst &Sel,
   // Match select ?, TC, FC where the constants are equal but negated.
   // TODO: Generalize to handle a negated variable operand?
   const APFloat *TC, *FC;
-  if (!match(TVal, m_APFloat(TC)) || !match(FVal, m_APFloat(FC)) ||
+  if (!match(TVal, m_APFloatAllowUndef(TC)) ||
+      !match(FVal, m_APFloatAllowUndef(FC)) ||
       !abs(*TC).bitwiseIsEqual(abs(*FC)))
     return nullptr;
 
@@ -2303,7 +2313,7 @@ static Instruction *foldSelectToCopysign(SelectInst &Sel,
 
   // Canonicalize the magnitude argument as the positive constant since we do
   // not care about its sign.
-  Value *MagArg = TC->isNegative() ? FVal : TVal;
+  Value *MagArg = ConstantFP::get(SelType, abs(*TC));
   Function *F = Intrinsic::getDeclaration(Sel.getModule(), Intrinsic::copysign,
                                           Sel.getType());
   return CallInst::Create(F, { MagArg, X });
@@ -2644,7 +2654,7 @@ Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
   Value *FalseVal = SI.getFalseValue();
   Type *SelType = SI.getType();
 
-  if (Value *V = SimplifySelectInst(CondVal, TrueVal, FalseVal,
+  if (Value *V = simplifySelectInst(CondVal, TrueVal, FalseVal,
                                     SQ.getWithInstruction(&SI)))
     return replaceInstUsesWith(SI, V);
 
@@ -2781,22 +2791,11 @@ Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
                                                         /* IsAnd */ IsAnd))
           return I;
 
-      if (auto *ICmp0 = dyn_cast<ICmpInst>(CondVal)) {
-        if (auto *ICmp1 = dyn_cast<ICmpInst>(Op1)) {
-          if (auto *V = foldAndOrOfICmpsOfAndWithPow2(ICmp0, ICmp1, &SI, IsAnd,
-                                                      /* IsLogical */ true))
+      if (auto *ICmp0 = dyn_cast<ICmpInst>(CondVal))
+        if (auto *ICmp1 = dyn_cast<ICmpInst>(Op1))
+          if (auto *V = foldAndOrOfICmps(ICmp0, ICmp1, SI, IsAnd,
+                                         /* IsLogical */ true))
             return replaceInstUsesWith(SI, V);
-
-          if (auto *V = foldEqOfParts(ICmp0, ICmp1, IsAnd))
-            return replaceInstUsesWith(SI, V);
-
-          // This pattern would usually be converted into a bitwise and/or based
-          // on "implies poison" reasoning. However, this may fail if adds with
-          // nowrap flags are involved.
-          if (auto *V = foldAndOrOfICmpsUsingRanges(ICmp0, ICmp1, IsAnd))
-            return replaceInstUsesWith(SI, V);
-        }
-      }
     }
 
     // select (select a, true, b), c, false -> select a, c, false
@@ -3201,7 +3200,7 @@ Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
     // between the load and select masks.
     // (i.e (load_mask & select_mask) == 0 == no overlap)
     bool CanMergeSelectIntoLoad = false;
-    if (Value *V = SimplifyAndInst(CondVal, Mask, SQ.getWithInstruction(&SI)))
+    if (Value *V = simplifyAndInst(CondVal, Mask, SQ.getWithInstruction(&SI)))
       CanMergeSelectIntoLoad = match(V, m_Zero());
 
     if (CanMergeSelectIntoLoad) {

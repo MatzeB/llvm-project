@@ -4905,8 +4905,7 @@ bool X86AsmParser::parseDirectiveNops(SMLoc L) {
     if (getParser().parseAbsoluteExpression(Control))
       return true;
   }
-  if (getParser().parseToken(AsmToken::EndOfStatement,
-                             "unexpected token in '.nops' directive"))
+  if (getParser().parseEOL())
     return true;
 
   if (NumBytes <= 0) {
@@ -4928,7 +4927,7 @@ bool X86AsmParser::parseDirectiveNops(SMLoc L) {
 /// parseDirectiveEven
 ///  ::= .even
 bool X86AsmParser::parseDirectiveEven(SMLoc L) {
-  if (parseToken(AsmToken::EndOfStatement, "unexpected token in directive"))
+  if (parseEOL())
     return false;
 
   const MCSection *Section = getStreamer().getCurrentSectionOnly();
@@ -5121,7 +5120,7 @@ bool X86AsmParser::parseDirectiveSEHPushReg(SMLoc Loc) {
     return TokError("unexpected token in directive");
 
   getParser().Lex();
-  getStreamer().EmitWinCFIPushReg(Reg, Loc);
+  getStreamer().emitWinCFIPushReg(Reg, Loc);
   return false;
 }
 
@@ -5141,7 +5140,7 @@ bool X86AsmParser::parseDirectiveSEHSetFrame(SMLoc Loc) {
     return TokError("unexpected token in directive");
 
   getParser().Lex();
-  getStreamer().EmitWinCFISetFrame(Reg, Off, Loc);
+  getStreamer().emitWinCFISetFrame(Reg, Off, Loc);
   return false;
 }
 
@@ -5161,7 +5160,7 @@ bool X86AsmParser::parseDirectiveSEHSaveReg(SMLoc Loc) {
     return TokError("unexpected token in directive");
 
   getParser().Lex();
-  getStreamer().EmitWinCFISaveReg(Reg, Off, Loc);
+  getStreamer().emitWinCFISaveReg(Reg, Off, Loc);
   return false;
 }
 
@@ -5181,7 +5180,7 @@ bool X86AsmParser::parseDirectiveSEHSaveXMM(SMLoc Loc) {
     return TokError("unexpected token in directive");
 
   getParser().Lex();
-  getStreamer().EmitWinCFISaveXMM(Reg, Off, Loc);
+  getStreamer().emitWinCFISaveXMM(Reg, Off, Loc);
   return false;
 }
 
@@ -5202,7 +5201,7 @@ bool X86AsmParser::parseDirectiveSEHPushFrame(SMLoc Loc) {
     return TokError("unexpected token in directive");
 
   getParser().Lex();
-  getStreamer().EmitWinCFIPushFrame(Code, Loc);
+  getStreamer().emitWinCFIPushFrame(Code, Loc);
   return false;
 }
 

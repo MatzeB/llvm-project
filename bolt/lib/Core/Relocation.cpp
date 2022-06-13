@@ -562,6 +562,12 @@ bool Relocation::isGOT(uint64_t Type) {
   return isGOTX86(Type);
 }
 
+bool Relocation::isX86GOTPCRELX(uint64_t Type) {
+  if (Arch != Triple::x86_64)
+    return false;
+  return Type == ELF::R_X86_64_GOTPCRELX || Type == ELF::R_X86_64_REX_GOTPCRELX;
+}
+
 bool Relocation::isNone(uint64_t Type) {
   if (Arch == Triple::aarch64)
     return Type == ELF::R_AARCH64_NONE;
