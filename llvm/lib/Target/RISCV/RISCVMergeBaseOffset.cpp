@@ -93,7 +93,7 @@ bool RISCVMergeBaseOffsetOpt::detectLuiAddiGlobal(MachineInstr &HiLUI,
                                                   MachineInstr *&LoADDI) {
   if (HiLUI.getOpcode() != RISCV::LUI ||
       HiLUI.getOperand(1).getTargetFlags() != RISCVII::MO_HI ||
-      HiLUI.getOperand(1).getType() != MachineOperand::MO_GlobalAddress ||
+      !HiLUI.getOperand(1).isGlobal() ||
       HiLUI.getOperand(1).getOffset() != 0 ||
       !MRI->hasOneUse(HiLUI.getOperand(0).getReg()))
     return false;
@@ -101,7 +101,7 @@ bool RISCVMergeBaseOffsetOpt::detectLuiAddiGlobal(MachineInstr &HiLUI,
   LoADDI = &*MRI->use_instr_begin(HiLuiDestReg);
   if (LoADDI->getOpcode() != RISCV::ADDI ||
       LoADDI->getOperand(2).getTargetFlags() != RISCVII::MO_LO ||
-      LoADDI->getOperand(2).getType() != MachineOperand::MO_GlobalAddress ||
+      !LoADDI->getOperand(2).isGlobal() ||
       LoADDI->getOperand(2).getOffset() != 0 ||
       !MRI->hasOneUse(LoADDI->getOperand(0).getReg()))
     return false;
@@ -212,6 +212,7 @@ bool RISCVMergeBaseOffsetOpt::matchShiftedOffset(MachineInstr &TailShXAdd,
           TailShXAdd.getOpcode() == RISCV::SH2ADD ||
           TailShXAdd.getOpcode() == RISCV::SH3ADD) &&
          "Expected SHXADD instruction!");
+
   // The first source is the shifted operand.
   Register Rs1 = TailShXAdd.getOperand(1).getReg();
 
@@ -233,12 +234,15 @@ bool RISCVMergeBaseOffsetOpt::matchShiftedOffset(MachineInstr &TailShXAdd,
   Offset = OffsetTail.getOperand(2).getImm();
   assert(isInt<12>(Offset) && "Unexpected offset");
 
+  unsigned ShAmt;
   switch (TailShXAdd.getOpcode()) {
   default: llvm_unreachable("Unexpected opcode");
-  case RISCV::SH1ADD: Offset <<= 1; break;
-  case RISCV::SH2ADD: Offset <<= 2; break;
-  case RISCV::SH3ADD: Offset <<= 3; break;
+  case RISCV::SH1ADD: ShAmt = 1; break;
+  case RISCV::SH2ADD: ShAmt = 2; break;
+  case RISCV::SH3ADD: ShAmt = 3; break;
   }
+
+  Offset = (uint64_t)Offset << ShAmt;
 
   LLVM_DEBUG(dbgs() << "  Offset Instr: " << OffsetTail);
   DeadInstrs.insert(&OffsetTail);

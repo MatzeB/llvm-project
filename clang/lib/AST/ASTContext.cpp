@@ -887,7 +887,7 @@ ASTContext::getCanonicalTemplateTemplateParmDecl(
 
 TargetCXXABI::Kind ASTContext::getCXXABIKind() const {
   auto Kind = getTargetInfo().getCXXABI().getKind();
-  return getLangOpts().CXXABI.getValueOr(Kind);
+  return getLangOpts().CXXABI.value_or(Kind);
 }
 
 CXXABI *ASTContext::createCXXABI(const TargetInfo &T) {
@@ -2833,8 +2833,7 @@ bool ASTContext::hasUniqueObjectRepresentations(QualType Ty) const {
     Optional<int64_t> StructSize =
         structHasUniqueObjectRepresentations(*this, Record);
 
-    return StructSize &&
-           StructSize.getValue() == static_cast<int64_t>(getTypeSize(Ty));
+    return StructSize && *StructSize == static_cast<int64_t>(getTypeSize(Ty));
   }
 
   // FIXME: More cases to handle here (list by rsmith):
@@ -11758,6 +11757,8 @@ QualType ASTContext::getRealTypeForBitwidth(unsigned DestWidth,
   FloatModeKind Ty =
       getTargetInfo().getRealTypeByWidth(DestWidth, ExplicitType);
   switch (Ty) {
+  case FloatModeKind::Half:
+    return HalfTy;
   case FloatModeKind::Float:
     return FloatTy;
   case FloatModeKind::Double:

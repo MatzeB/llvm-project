@@ -1070,7 +1070,7 @@ static void computeKnownBitsFromShiftOperator(
     // bits. This check is sunk down as far as possible to avoid the expensive
     // call to isKnownNonZero if the cheaper checks above fail.
     if (ShiftAmt == 0) {
-      if (!ShifterOperandIsNonZero.hasValue())
+      if (!ShifterOperandIsNonZero)
         ShifterOperandIsNonZero =
             isKnownNonZero(I->getOperand(1), DemandedElts, Depth + 1, Q);
       if (*ShifterOperandIsNonZero)
@@ -1755,8 +1755,7 @@ static void computeKnownBitsFromOperator(const Operator *I,
           break;
         }
 
-        unsigned FirstZeroHighBit =
-            32 - countLeadingZeros(VScaleMax.getValue());
+        unsigned FirstZeroHighBit = 32 - countLeadingZeros(*VScaleMax);
         if (FirstZeroHighBit < BitWidth)
           Known.Zero.setBitsFrom(FirstZeroHighBit);
 
@@ -4955,11 +4954,18 @@ OverflowResult llvm::computeOverflowForUnsignedSub(const Value *LHS,
   // X - (X % ?)
   // The remainder of a value can't have greater magnitude than itself,
   // so the subtraction can't overflow.
+
+  // X - (X -nuw ?)
+  // In the minimal case, this would simplify to "?", so there's no subtract
+  // at all. But if this analysis is used to peek through casts, for example,
+  // then determining no-overflow may allow other transforms.
+
   // TODO: There are other patterns like this.
   //       See simplifyICmpWithBinOpOnLHS() for candidates.
-  if (match(RHS, m_URem(m_Specific(LHS), m_Value())) &&
-      isGuaranteedNotToBeUndefOrPoison(LHS, AC, CxtI, DT))
-    return OverflowResult::NeverOverflows;
+  if (match(RHS, m_URem(m_Specific(LHS), m_Value())) ||
+      match(RHS, m_NUWSub(m_Specific(LHS), m_Value())))
+    if (isGuaranteedNotToBeUndefOrPoison(LHS, AC, CxtI, DT))
+      return OverflowResult::NeverOverflows;
 
   // Checking for conditions implied by dominating conditions may be expensive.
   // Limit it to usub_with_overflow calls for now.
@@ -4987,9 +4993,15 @@ OverflowResult llvm::computeOverflowForSignedSub(const Value *LHS,
   // X - (X % ?)
   // The remainder of a value can't have greater magnitude than itself,
   // so the subtraction can't overflow.
-  if (match(RHS, m_SRem(m_Specific(LHS), m_Value())) &&
-      isGuaranteedNotToBeUndefOrPoison(LHS, AC, CxtI, DT))
-    return OverflowResult::NeverOverflows;
+
+  // X - (X -nsw ?)
+  // In the minimal case, this would simplify to "?", so there's no subtract
+  // at all. But if this analysis is used to peek through casts, for example,
+  // then determining no-overflow may allow other transforms.
+  if (match(RHS, m_SRem(m_Specific(LHS), m_Value())) ||
+      match(RHS, m_NSWSub(m_Specific(LHS), m_Value())))
+    if (isGuaranteedNotToBeUndefOrPoison(LHS, AC, CxtI, DT))
+      return OverflowResult::NeverOverflows;
 
   // If LHS and RHS each have at least two sign bits, the subtraction
   // cannot overflow.

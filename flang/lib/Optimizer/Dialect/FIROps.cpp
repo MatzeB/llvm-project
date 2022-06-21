@@ -14,6 +14,8 @@
 #include "flang/Optimizer/Dialect/FIRAttr.h"
 #include "flang/Optimizer/Dialect/FIROpsSupport.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
+#include "flang/Optimizer/Support/FIRContext.h"
+#include "flang/Optimizer/Support/KindMapping.h"
 #include "flang/Optimizer/Support/Utils.h"
 #include "mlir/Dialect/CommonFolders.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -3077,7 +3079,7 @@ void fir::StringLitOp::build(mlir::OpBuilder &builder,
                              fir::CharacterType inType, llvm::StringRef val,
                              llvm::Optional<int64_t> len) {
   auto valAttr = builder.getNamedAttr(value(), builder.getStringAttr(val));
-  int64_t length = len.hasValue() ? len.getValue() : inType.getLen();
+  int64_t length = len ? *len : inType.getLen();
   auto lenAttr = mkNamedIntegerAttr(builder, size(), length);
   result.addAttributes({valAttr, lenAttr});
   result.addTypes(inType);
@@ -3100,7 +3102,7 @@ void fir::StringLitOp::build(mlir::OpBuilder &builder,
                              llvm::Optional<std::int64_t> len) {
   auto valAttr =
       builder.getNamedAttr(xlist(), convertToArrayAttr(builder, vlist));
-  std::int64_t length = len.hasValue() ? len.getValue() : inType.getLen();
+  std::int64_t length = len ? *len : inType.getLen();
   auto lenAttr = mkNamedIntegerAttr(builder, size(), length);
   result.addAttributes({valAttr, lenAttr});
   result.addTypes(inType);
@@ -3113,7 +3115,7 @@ void fir::StringLitOp::build(mlir::OpBuilder &builder,
                              llvm::Optional<std::int64_t> len) {
   auto valAttr =
       builder.getNamedAttr(xlist(), convertToArrayAttr(builder, vlist));
-  std::int64_t length = len.hasValue() ? len.getValue() : inType.getLen();
+  std::int64_t length = len ? *len : inType.getLen();
   auto lenAttr = mkNamedIntegerAttr(builder, size(), length);
   result.addAttributes({valAttr, lenAttr});
   result.addTypes(inType);
@@ -3126,7 +3128,7 @@ void fir::StringLitOp::build(mlir::OpBuilder &builder,
                              llvm::Optional<std::int64_t> len) {
   auto valAttr =
       builder.getNamedAttr(xlist(), convertToArrayAttr(builder, vlist));
-  std::int64_t length = len.hasValue() ? len.getValue() : inType.getLen();
+  std::int64_t length = len ? *len : inType.getLen();
   auto lenAttr = mkNamedIntegerAttr(builder, size(), length);
   result.addAttributes({valAttr, lenAttr});
   result.addTypes(inType);
@@ -3437,8 +3439,11 @@ mlir::Type fir::applyPathToType(mlir::Type eleTy, mlir::ValueRange path) {
                   return mlir::Type{};
                 })
                 .Case<fir::ComplexType>([&](fir::ComplexType ty) {
-                  if (fir::isa_integer((*i++).getType()))
-                    return ty.getElementType();
+                  auto x = *i;
+                  if (auto *op = (*i++).getDefiningOp())
+                    if (fir::isa_integer(x.getType()))
+                      return ty.getEleType(fir::getKindMapping(
+                          op->getParentOfType<mlir::ModuleOp>()));
                   return mlir::Type{};
                 })
                 .Case<mlir::ComplexType>([&](mlir::ComplexType ty) {

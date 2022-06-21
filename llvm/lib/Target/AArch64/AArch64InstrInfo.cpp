@@ -3152,6 +3152,41 @@ bool AArch64InstrInfo::isPreLdSt(const MachineInstr &MI) {
   return isPreLd(MI) || isPreSt(MI);
 }
 
+bool AArch64InstrInfo::isPairedLdSt(const MachineInstr &MI) {
+  switch (MI.getOpcode()) {
+  default:
+    return false;
+  case AArch64::LDPSi:
+  case AArch64::LDPSWi:
+  case AArch64::LDPDi:
+  case AArch64::LDPQi:
+  case AArch64::LDPWi:
+  case AArch64::LDPXi:
+  case AArch64::STPSi:
+  case AArch64::STPDi:
+  case AArch64::STPQi:
+  case AArch64::STPWi:
+  case AArch64::STPXi:
+  case AArch64::STGPi:
+    return true;
+  }
+}
+
+const MachineOperand &AArch64InstrInfo::getLdStBaseOp(const MachineInstr &MI) {
+  unsigned Idx =
+      AArch64InstrInfo::isPairedLdSt(MI) || AArch64InstrInfo::isPreLdSt(MI) ? 2
+                                                                            : 1;
+  return MI.getOperand(Idx);
+}
+
+const MachineOperand &
+AArch64InstrInfo::getLdStOffsetOp(const MachineInstr &MI) {
+  unsigned Idx =
+      AArch64InstrInfo::isPairedLdSt(MI) || AArch64InstrInfo::isPreLdSt(MI) ? 3
+                                                                            : 2;
+  return MI.getOperand(Idx);
+}
+
 static const TargetRegisterClass *getRegClass(const MachineInstr &MI,
                                               Register Reg) {
   if (MI.getParent() == nullptr)
@@ -4402,6 +4437,9 @@ MachineInstr *AArch64InstrInfo::foldMemoryOperandImpl(
       MF.getRegInfo().constrainRegClass(SrcReg, &AArch64::GPR64RegClass);
       return nullptr;
     }
+    // Nothing can folded with copy from/to NZCV.
+    if (SrcReg == AArch64::NZCV || DstReg == AArch64::NZCV)
+      return nullptr;
   }
 
   // Handle the case where a copy is being spilled or filled but the source
@@ -7289,7 +7327,7 @@ bool AArch64InstrInfo::isFunctionSafeToOutlineFrom(
   // modify the stack. Check if hasRedZone is true or unknown; if yes, don't
   // outline from it.
   AArch64FunctionInfo *AFI = MF.getInfo<AArch64FunctionInfo>();
-  if (!AFI || AFI->hasRedZone().getValueOr(true))
+  if (!AFI || AFI->hasRedZone().value_or(true))
     return false;
 
   // FIXME: Teach the outliner to generate/handle Windows unwind info.

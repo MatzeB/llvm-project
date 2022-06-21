@@ -187,36 +187,11 @@ static bool hasMemOffset(SDNode *N, unsigned &BaseOpIdx,
   return false;
 }
 
-static SDNode *selectImmWithConstantPool(SelectionDAG *CurDAG, const SDLoc &DL,
-                                         const MVT VT, int64_t Imm,
-                                         const RISCVSubtarget &Subtarget) {
-  assert(VT == MVT::i64 && "Expecting MVT::i64");
-  const RISCVTargetLowering *TLI = Subtarget.getTargetLowering();
-  ConstantPoolSDNode *CP = cast<ConstantPoolSDNode>(CurDAG->getConstantPool(
-      ConstantInt::get(EVT(VT).getTypeForEVT(*CurDAG->getContext()), Imm), VT));
-  SDValue Addr = TLI->getAddr(CP, *CurDAG);
-  SDValue Offset = CurDAG->getTargetConstant(0, DL, VT);
-  // Since there is no data race, the chain can be the entry node.
-  SDNode *Load = CurDAG->getMachineNode(RISCV::LD, DL, VT, Addr, Offset,
-                                        CurDAG->getEntryNode());
-  MachineFunction &MF = CurDAG->getMachineFunction();
-  MachineMemOperand *MemOp = MF.getMachineMemOperand(
-      MachinePointerInfo::getConstantPool(MF), MachineMemOperand::MOLoad,
-      LLT(VT), CP->getAlign());
-  CurDAG->setNodeMemRefs(cast<MachineSDNode>(Load), {MemOp});
-  return Load;
-}
-
 static SDNode *selectImm(SelectionDAG *CurDAG, const SDLoc &DL, const MVT VT,
                          int64_t Imm, const RISCVSubtarget &Subtarget) {
   MVT XLenVT = Subtarget.getXLenVT();
   RISCVMatInt::InstSeq Seq =
       RISCVMatInt::generateInstSeq(Imm, Subtarget.getFeatureBits());
-
-  // If Imm is expensive to build, then we put it into constant pool.
-  if (Subtarget.useConstantPoolForLargeInts() &&
-      Seq.size() > Subtarget.getMaxBuildIntsCost())
-    return selectImmWithConstantPool(CurDAG, DL, VT, Imm, Subtarget);
 
   SDNode *Result = nullptr;
   SDValue SrcReg = CurDAG->getRegister(RISCV::X0, XLenVT);
@@ -2408,27 +2383,18 @@ bool RISCVDAGToDAGISel::doPeepholeMaskedRVV(SDNode *N) {
     }
   }
 
-  if (IsTA) {
-    uint64_t TSFlags = TII.get(I->UnmaskedPseudo).TSFlags;
-
-    // Check that we're dropping the merge operand, the mask operand, and any
-    // policy operand when we transform to this unmasked pseudo.
-    assert(!RISCVII::hasMergeOp(TSFlags) && RISCVII::hasDummyMaskOp(TSFlags) &&
-           !RISCVII::hasVecPolicyOp(TSFlags) &&
-           "Unexpected pseudo to transform to");
-    (void)TSFlags;
-  } else {
-    uint64_t TSFlags = TII.get(I->UnmaskedTUPseudo).TSFlags;
-
-    // Check that we're dropping the mask operand, and any policy operand
-    // when we transform to this unmasked tu pseudo.
-    assert(RISCVII::hasMergeOp(TSFlags) && RISCVII::hasDummyMaskOp(TSFlags) &&
-           !RISCVII::hasVecPolicyOp(TSFlags) &&
-           "Unexpected pseudo to transform to");
-    (void)TSFlags;
-  }
-
   unsigned Opc = IsTA ? I->UnmaskedPseudo : I->UnmaskedTUPseudo;
+
+  // Check that we're dropping the mask operand and any policy operand
+  // when we transform to this unmasked pseudo. Additionally, if this insturtion
+  // is tail agnostic, the unmasked instruction should not have a merge op.
+  uint64_t TSFlags = TII.get(Opc).TSFlags;
+  assert((IsTA != RISCVII::hasMergeOp(TSFlags)) &&
+         RISCVII::hasDummyMaskOp(TSFlags) &&
+         !RISCVII::hasVecPolicyOp(TSFlags) &&
+         "Unexpected pseudo to transform to");
+  (void)TSFlags;
+
   SmallVector<SDValue, 8> Ops;
   // Skip the merge operand at index 0 if IsTA
   for (unsigned I = IsTA, E = N->getNumOperands(); I != E; I++) {

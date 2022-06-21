@@ -339,7 +339,7 @@ static bool genericValueTraversal(
     if (auto *SI = dyn_cast<SelectInst>(V)) {
       Optional<Constant *> C = A.getAssumedConstant(
           *SI->getCondition(), QueryingAA, UsedAssumedInformation);
-      bool NoValueYet = !C.hasValue();
+      bool NoValueYet = !C;
       if (NoValueYet || isa_and_nonnull<UndefValue>(*C))
         continue;
       if (auto *CI = dyn_cast_or_null<ConstantInt>(*C)) {
@@ -551,7 +551,7 @@ static void clampReturnedValueStates(
     LLVM_DEBUG(dbgs() << "[Attributor] RV: " << RV << " AA: " << AA.getAsStr()
                       << " @ " << RVPos << "\n");
     const StateType &AAS = AA.getState();
-    if (!T.hasValue())
+    if (!T)
       T = StateType::getBestState(AAS);
     *T &= AAS;
     LLVM_DEBUG(dbgs() << "[Attributor] AA State: " << AAS << " RV State: " << T
@@ -561,7 +561,7 @@ static void clampReturnedValueStates(
 
   if (!A.checkForAllReturnedValues(CheckReturnValue, QueryingAA))
     S.indicatePessimisticFixpoint();
-  else if (T.hasValue())
+  else if (T)
     S ^= *T;
 }
 
@@ -617,7 +617,7 @@ static void clampCallSiteArgumentStates(Attributor &A, const AAType &QueryingAA,
     LLVM_DEBUG(dbgs() << "[Attributor] ACS: " << *ACS.getInstruction()
                       << " AA: " << AA.getAsStr() << " @" << ACSArgPos << "\n");
     const StateType &AAS = AA.getState();
-    if (!T.hasValue())
+    if (!T)
       T = StateType::getBestState(AAS);
     *T &= AAS;
     LLVM_DEBUG(dbgs() << "[Attributor] AA State: " << AAS << " CSA State: " << T
@@ -629,7 +629,7 @@ static void clampCallSiteArgumentStates(Attributor &A, const AAType &QueryingAA,
   if (!A.checkForAllCallSites(CallSiteCheck, QueryingAA, true,
                               UsedAssumedInformation))
     S.indicatePessimisticFixpoint();
-  else if (T.hasValue())
+  else if (T)
     S ^= *T;
 }
 
@@ -2667,7 +2667,7 @@ struct AAUndefinedBehaviorImpl : public AAUndefinedBehavior {
       // or we got back a simplified value to continue.
       Optional<Value *> SimplifiedCond =
           stopOnUndefOrAssumed(A, BrInst->getCondition(), BrInst);
-      if (!SimplifiedCond.hasValue() || !SimplifiedCond.getValue())
+      if (!SimplifiedCond || !*SimplifiedCond)
         return true;
       AssumedNoUBInsts.insert(&I);
       return true;
@@ -2737,7 +2737,7 @@ struct AAUndefinedBehaviorImpl : public AAUndefinedBehavior {
       // or we got back a simplified return value to continue.
       Optional<Value *> SimplifiedRetValue =
           stopOnUndefOrAssumed(A, RI.getReturnValue(), &I);
-      if (!SimplifiedRetValue.hasValue() || !SimplifiedRetValue.getValue())
+      if (!SimplifiedRetValue || !*SimplifiedRetValue)
         return true;
 
       // Check if a return instruction always cause UB or not
@@ -2886,13 +2886,13 @@ private:
         IRPosition::value(*V), *this, UsedAssumedInformation);
     if (!UsedAssumedInformation) {
       // Don't depend on assumed values.
-      if (!SimplifiedV.hasValue()) {
+      if (!SimplifiedV) {
         // If it is known (which we tested above) but it doesn't have a value,
         // then we can assume `undef` and hence the instruction is UB.
         KnownUBInsts.insert(I);
         return llvm::None;
       }
-      if (!SimplifiedV.getValue())
+      if (!*SimplifiedV)
         return nullptr;
       V = *SimplifiedV;
     }
@@ -3529,7 +3529,7 @@ struct AAIsDeadValueImpl : public AAIsDead {
       bool UsedAssumedInformation = false;
       Optional<Constant *> C =
           A.getAssumedConstant(V, *this, UsedAssumedInformation);
-      if (!C.hasValue() || *C)
+      if (!C || *C)
         return true;
     }
 
@@ -4036,7 +4036,7 @@ identifyAliveSuccessors(Attributor &A, const BranchInst &BI,
   } else {
     Optional<Constant *> C =
         A.getAssumedConstant(*BI.getCondition(), AA, UsedAssumedInformation);
-    if (!C.hasValue() || isa_and_nonnull<UndefValue>(C.getValue())) {
+    if (!C || isa_and_nonnull<UndefValue>(*C)) {
       // No value yet, assume both edges are dead.
     } else if (isa_and_nonnull<ConstantInt>(*C)) {
       const BasicBlock *SuccBB =
@@ -4543,16 +4543,16 @@ struct AAAlignImpl : AAAlign {
     for (const Use &U : AssociatedValue.uses()) {
       if (auto *SI = dyn_cast<StoreInst>(U.getUser())) {
         if (SI->getPointerOperand() == &AssociatedValue)
-          if (SI->getAlignment() < getAssumedAlign()) {
+          if (SI->getAlign() < getAssumedAlign()) {
             STATS_DECLTRACK(AAAlign, Store,
                             "Number of times alignment added to a store");
-            SI->setAlignment(Align(getAssumedAlign()));
+            SI->setAlignment(getAssumedAlign());
             LoadStoreChanged = ChangeStatus::CHANGED;
           }
       } else if (auto *LI = dyn_cast<LoadInst>(U.getUser())) {
         if (LI->getPointerOperand() == &AssociatedValue)
-          if (LI->getAlignment() < getAssumedAlign()) {
-            LI->setAlignment(Align(getAssumedAlign()));
+          if (LI->getAlign() < getAssumedAlign()) {
+            LI->setAlignment(getAssumedAlign());
             STATS_DECLTRACK(AAAlign, Load,
                             "Number of times alignment added to a load");
             LoadStoreChanged = ChangeStatus::CHANGED;
@@ -4596,9 +4596,8 @@ struct AAAlignImpl : AAAlign {
 
   /// See AbstractAttribute::getAsStr().
   const std::string getAsStr() const override {
-    return getAssumedAlign() ? ("align<" + std::to_string(getKnownAlign()) +
-                                "-" + std::to_string(getAssumedAlign()) + ">")
-                             : "unknown-align";
+    return "align<" + std::to_string(getKnownAlign().value()) + "-" +
+           std::to_string(getAssumedAlign().value()) + ">";
   }
 };
 
@@ -4726,7 +4725,7 @@ struct AAAlignCallSiteArgument final : AAAlignFloating {
       // so we do not need to track a dependence.
       const auto &ArgAlignAA = A.getAAFor<AAAlign>(
           *this, IRPosition::argument(*Arg), DepClassTy::NONE);
-      takeKnownMaximum(ArgAlignAA.getKnownAlign());
+      takeKnownMaximum(ArgAlignAA.getKnownAlign().value());
     }
     return Changed;
   }
@@ -5375,7 +5374,7 @@ bool ValueSimplifyStateType::unionAssumed(Optional<Value *> Other) {
     return false;
 
   LLVM_DEBUG({
-    if (SimplifiedAssociatedValue.hasValue())
+    if (SimplifiedAssociatedValue)
       dbgs() << "[ValueSimplify] is assumed to be "
              << **SimplifiedAssociatedValue << "\n";
     else
@@ -5536,12 +5535,12 @@ struct AAValueSimplifyImpl : AAValueSimplify {
 
     Optional<Constant *> COpt = AA.getAssumedConstant(A);
 
-    if (!COpt.hasValue()) {
+    if (!COpt) {
       SimplifiedAssociatedValue = llvm::None;
       A.recordDependence(AA, *this, DepClassTy::OPTIONAL);
       return true;
     }
-    if (auto *C = COpt.getValue()) {
+    if (auto *C = *COpt) {
       SimplifiedAssociatedValue = C;
       A.recordDependence(AA, *this, DepClassTy::OPTIONAL);
       return true;
@@ -6229,7 +6228,7 @@ struct AAHeapToStackFunction final : public AAHeapToStack {
       const DataLayout &DL = A.getInfoCache().getDL();
       Value *Size;
       Optional<APInt> SizeAPI = getSize(A, *this, AI);
-      if (SizeAPI.hasValue()) {
+      if (SizeAPI) {
         Size = ConstantInt::get(AI.CB->getContext(), *SizeAPI);
       } else {
         LLVMContext &Ctx = AI.CB->getContext();
@@ -6243,13 +6242,14 @@ struct AAHeapToStackFunction final : public AAHeapToStack {
 
       Align Alignment(1);
       if (MaybeAlign RetAlign = AI.CB->getRetAlign())
-        Alignment = max(Alignment, RetAlign);
+        Alignment = std::max(Alignment, *RetAlign);
       if (Value *Align = getAllocAlignment(AI.CB, TLI)) {
         Optional<APInt> AlignmentAPI = getAPInt(A, *this, *Align);
         assert(AlignmentAPI.hasValue() &&
+               AlignmentAPI.getValue().getZExtValue() > 0 &&
                "Expected an alignment during manifest!");
-        Alignment =
-            max(Alignment, MaybeAlign(AlignmentAPI.getValue().getZExtValue()));
+        Alignment = std::max(
+            Alignment, assumeAligned(AlignmentAPI.getValue().getZExtValue()));
       }
 
       // TODO: Hoist the alloca towards the function entry.
@@ -6736,7 +6736,7 @@ struct AAPrivatizablePtrArgument final : public AAPrivatizablePtrImpl {
 
     // Avoid arguments with padding for now.
     if (!getIRPosition().hasAttr(Attribute::ByVal) &&
-        !ArgumentPromotionPass::isDenselyPacked(PrivatizableType.getValue(),
+        !ArgumentPromotionPass::isDenselyPacked(*PrivatizableType,
                                                 A.getInfoCache().getDL())) {
       LLVM_DEBUG(dbgs() << "[AAPrivatizablePtr] Padding detected\n");
       return indicatePessimisticFixpoint();
@@ -6745,7 +6745,7 @@ struct AAPrivatizablePtrArgument final : public AAPrivatizablePtrImpl {
     // Collect the types that will replace the privatizable type in the function
     // signature.
     SmallVector<Type *, 16> ReplacementTypes;
-    identifyReplacementTypes(PrivatizableType.getValue(), ReplacementTypes);
+    identifyReplacementTypes(*PrivatizableType, ReplacementTypes);
 
     // Verify callee and caller agree on how the promoted argument would be
     // passed.
@@ -7061,8 +7061,7 @@ struct AAPrivatizablePtrArgument final : public AAPrivatizablePtrImpl {
           // When no alignment is specified for the load instruction,
           // natural alignment is assumed.
           createReplacementValues(
-              assumeAligned(AlignAA.getAssumedAlign()),
-              PrivatizableType.getValue(), ACS,
+              AlignAA.getAssumedAlign(), *PrivatizableType, ACS,
               ACS.getCallArgOperand(ARI.getReplacedArg().getArgNo()),
               NewArgOperands);
         };
@@ -7070,7 +7069,7 @@ struct AAPrivatizablePtrArgument final : public AAPrivatizablePtrImpl {
     // Collect the types that will replace the privatizable type in the function
     // signature.
     SmallVector<Type *, 16> ReplacementTypes;
-    identifyReplacementTypes(PrivatizableType.getValue(), ReplacementTypes);
+    identifyReplacementTypes(*PrivatizableType, ReplacementTypes);
 
     // Register a rewrite of the argument.
     if (A.registerFunctionSignatureRewrite(*Arg, ReplacementTypes,
@@ -9577,7 +9576,7 @@ struct AANoUndefImpl : AANoUndef {
     // considered to be dead. We don't manifest noundef in such positions for
     // the same reason above.
     if (!A.getAssumedSimplified(getIRPosition(), *this, UsedAssumedInformation)
-             .hasValue())
+             .has_value())
       return ChangeStatus::UNCHANGED;
     return AANoUndef::manifest(A);
   }

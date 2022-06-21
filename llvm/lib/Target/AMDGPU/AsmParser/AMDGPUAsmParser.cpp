@@ -3464,8 +3464,7 @@ AMDGPUAsmParser::validateConstantBusLimitations(const MCInst &Inst,
           //   flat_scratch_lo, flat_scratch_hi
           // are theoretically valid but they are disabled anyway.
           // Note that this code mimics SIInstrInfo::verifyInstruction
-          if (!SGPRsUsed.count(LastSGPR)) {
-            SGPRsUsed.insert(LastSGPR);
+          if (SGPRsUsed.insert(LastSGPR).second) {
             ++ConstantBusUseCount;
           }
         } else { // Expression or a literal
@@ -4911,9 +4910,8 @@ bool AMDGPUAsmParser::ParseDirectiveAMDHSAKernel() {
     if (ID == ".end_amdhsa_kernel")
       break;
 
-    if (Seen.find(ID) != Seen.end())
+    if (!Seen.insert(ID).second)
       return TokError(".amdhsa_ directives cannot be repeated");
-    Seen.insert(ID);
 
     SMLoc ValStart = getLoc();
     int64_t IVal;
@@ -6291,6 +6289,7 @@ void AMDGPUAsmParser::cvtDSOffset01(MCInst &Inst,
 void AMDGPUAsmParser::cvtDSImpl(MCInst &Inst, const OperandVector &Operands,
                                 bool IsGdsHardcoded) {
   OptionalImmIndexMap OptionalIdx;
+  AMDGPUOperand::ImmTy OffsetType = AMDGPUOperand::ImmTyOffset;
 
   for (unsigned i = 1, e = Operands.size(); i != e; ++i) {
     AMDGPUOperand &Op = ((AMDGPUOperand &)*Operands[i]);
@@ -6308,13 +6307,10 @@ void AMDGPUAsmParser::cvtDSImpl(MCInst &Inst, const OperandVector &Operands,
 
     // Handle optional arguments
     OptionalIdx[Op.getImmTy()] = i;
-  }
 
-  AMDGPUOperand::ImmTy OffsetType =
-    (Inst.getOpcode() == AMDGPU::DS_SWIZZLE_B32_gfx10 ||
-     Inst.getOpcode() == AMDGPU::DS_SWIZZLE_B32_gfx6_gfx7 ||
-     Inst.getOpcode() == AMDGPU::DS_SWIZZLE_B32_vi) ? AMDGPUOperand::ImmTySwizzle :
-                                                      AMDGPUOperand::ImmTyOffset;
+    if (Op.getImmTy() == AMDGPUOperand::ImmTySwizzle)
+      OffsetType = AMDGPUOperand::ImmTySwizzle;
+  }
 
   addOptionalImmOperand(Inst, Operands, OptionalIdx, OffsetType);
 
