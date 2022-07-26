@@ -290,6 +290,9 @@ struct Config {
   bool thinLTOEmitImportsFiles;
   bool thinLTOEmitIndexFiles;
   bool thinLTOIndexOnly;
+  // facebook begin T124883009
+  bool thinLTOFullIndex;
+  // facebook end T124883009
   bool timeTraceEnabled;
   bool tocOptimize;
   bool pcRelOptimize;
@@ -483,6 +486,9 @@ struct Ctx {
   std::atomic<bool> hasTlsIe{false};
   // True if we need to reserve two .got entries for local-dynamic TLS model.
   std::atomic<bool> needsTlsLd{false};
+  // facebook begin T124883009
+  std::unique_ptr<llvm::raw_fd_ostream> fullIndexFile;
+  // facebook end T124883009
 
   void reset();
 
