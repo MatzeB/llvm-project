@@ -307,6 +307,9 @@ struct Config {
   bool thinLTOEmitImportsFiles;
   bool thinLTOEmitIndexFiles;
   bool thinLTOIndexOnly;
+  // facebook begin T124883009
+  bool thinLTOFullIndex;
+  // facebook end T124883009
   bool timeTraceEnabled;
   bool tocOptimize;
   bool pcRelOptimize;
@@ -507,6 +510,9 @@ struct Ctx {
   // True if all native vtable symbols have corresponding type info symbols
   // during LTO.
   bool ltoAllVtablesHaveTypeInfos;
+  // facebook begin T124883009
+  std::unique_ptr<llvm::raw_fd_ostream> fullIndexFile;
+  // facebook end T124883009
 
   // Each symbol assignment and DEFINED(sym) reference is assigned an increasing
   // order. Each DEFINED(sym) evaluation checks whether the reference happens

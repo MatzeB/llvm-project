@@ -1478,6 +1478,9 @@ static void readConfigs(opt::InputArgList &args) {
   config->thinLTOIndexOnly = args.hasArg(OPT_thinlto_index_only) ||
                              args.hasArg(OPT_thinlto_index_only_eq);
   config->thinLTOIndexOnlyArg = args.getLastArgValue(OPT_thinlto_index_only_eq);
+  // facebook begin T124883009
+  config->thinLTOFullIndex = args.hasArg(OPT_thinlto_full_index);
+  // facebook end T124883009
   config->thinLTOObjectSuffixReplace =
       getOldNewOptions(args, OPT_thinlto_object_suffix_replace_eq);
   std::tie(config->thinLTOPrefixReplaceOld, config->thinLTOPrefixReplaceNew,
@@ -2926,7 +2929,32 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
   for (StringRef name : config->undefined)
     symtab.addUnusedUndefined(name); // facebook T77383981
 
+  // facebook begin T124883009
+  if (config->thinLTOFullIndex) {
+    if (config->thinLTOIndexOnlyArg.empty())
+      warn("--thinlto-full-index ignored. Must use with "
+           "--thinlto-index-only=.");
+    else {
+      std::error_code ec;
+      ctx.fullIndexFile = std::make_unique<raw_fd_ostream>(
+          (config->thinLTOIndexOnlyArg + ".full").str(), ec,
+          sys::fs::OpenFlags::OF_None);
+      if (ec) {
+        error("cannot open " + config->thinLTOIndexOnlyArg +
+              ".full: " + ec.message());
+        return;
+      }
+    }
+  }
+  // facebook end T124883009
   parseFiles(files, armCmseImpLib);
+
+  // facebook begin T124883009
+  if (ctx.fullIndexFile) {
+    ctx.fullIndexFile->close();
+    ctx.fullIndexFile.release();
+  }
+  // facebook end T124883009
 
   // Create dynamic sections for dynamic linking and static PIE.
   config->hasDynSymTab = !ctx.sharedFiles.empty() || config->isPic;
