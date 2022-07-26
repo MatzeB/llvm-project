@@ -44,6 +44,9 @@ bool InputFile::isInGroup;
 uint32_t InputFile::nextGroupId;
 
 std::unique_ptr<TarWriter> elf::tar;
+// facebook begin T124883009
+StringSet<> knownArchives;
+// facebook end T124883009
 
 // Returns "<internal>", "foo.a(bar.o)" or "baz.o".
 std::string lld::toString(const InputFile *f) {
@@ -179,6 +182,39 @@ static void updateSupportedARMFeatures(const ARMAttributeParser &attributes) {
   }
 }
 
+// facebook begin T124883009
+static void
+writeFullIndex(const std::unique_ptr<llvm::raw_fd_ostream> &fullIndexFile,
+               const InputFile &file) {
+  if (!fullIndexFile)
+    return;
+
+  // Handle regular archive as input:
+  // If the object is from an archive, emit the name of the archive only once.
+  // This is the latest point where the archive needs to be inserted in the
+  // input list.
+  // This could potentially alter symbol resolution order during final linking,
+  // so make sure that archives are not used at all or for any archives left,
+  // there is no conflict with other inputs.
+  if (!file.archiveName.empty()) {
+    if (!knownArchives.contains(file.archiveName)) {
+      knownArchives.insert(file.archiveName);
+      *fullIndexFile << file.archiveName << "\n";
+    }
+  } else {
+    // For bitcode object, emit the name after prefix and/or suffix replacement.
+    if (auto *f = dyn_cast<BitcodeFile>(&file)) {
+      std::string NewModulePath = lto::getThinLTOOutputFile(
+          std::string(f->obj->getName()),
+          std::string(config->thinLTOPrefixReplace.first),
+          std::string(config->thinLTOPrefixReplace.second));
+      *fullIndexFile << NewModulePath << "\n";
+    } else
+      *fullIndexFile << file.getName() << "\n";
+  }
+}
+// facebook end T124883009
+
 InputFile::InputFile(Kind k, MemoryBufferRef m)
     : mb(m), groupId(nextGroupId), fileKind(k) {
   // All files within the same --{start,end}-group get the same group ID.
@@ -255,6 +291,9 @@ template <class ELFT> static void doParseFile(InputFile *file) {
   // Binary file
   if (auto *f = dyn_cast<BinaryFile>(file)) {
     ctx->binaryFiles.push_back(f);
+    // facebook begin T124883009
+    writeFullIndex(ctx->fullIndexFile, *file);
+    // facebook end T124883009
     f->parse();
     return;
   }
@@ -275,6 +314,9 @@ template <class ELFT> static void doParseFile(InputFile *file) {
 
   // .so file
   if (auto *f = dyn_cast<SharedFile>(file)) {
+    // facebook begin T124883009
+    writeFullIndex(ctx->fullIndexFile, *file);
+    // facebook end T124883009
     f->parse<ELFT>();
     return;
   }
@@ -282,12 +324,18 @@ template <class ELFT> static void doParseFile(InputFile *file) {
   // LLVM bitcode file
   if (auto *f = dyn_cast<BitcodeFile>(file)) {
     ctx->bitcodeFiles.push_back(f);
+    // facebook begin T124883009
+    writeFullIndex(ctx->fullIndexFile, *file);
+    // facebook end T124883009
     f->parse();
     return;
   }
 
   // Regular object file
   ctx->objectFiles.push_back(cast<ELFFileBase>(file));
+  // facebook begin T124883009
+  writeFullIndex(ctx->fullIndexFile, *file);
+  // facebook end T124883009
   cast<ObjFile<ELFT>>(file)->parse();
 }
 

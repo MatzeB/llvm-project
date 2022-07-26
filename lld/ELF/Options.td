@@ -643,6 +643,9 @@ def thinlto_emit_imports_files: FF<"thinlto-emit-imports-files">;
 def thinlto_emit_index_files: FF<"thinlto-emit-index-files">;
 def thinlto_index_only: FF<"thinlto-index-only">;
 def thinlto_index_only_eq: JJ<"thinlto-index-only=">;
+// facebook begin T124883009
+def thinlto_full_index: FF<"thinlto-full-index">, HelpText<"Generate full index for all inputs. Must use with --thinlto-index-only=.">;
+// facebook end T124883009
 def thinlto_jobs: JJ<"thinlto-jobs=">,
   HelpText<"Number of ThinLTO jobs. Default to --threads=">;
 def thinlto_object_suffix_replace_eq: JJ<"thinlto-object-suffix-replace=">;
@@ -708,6 +711,11 @@ def: F<"plugin-opt=thinlto-index-only">,
 def: J<"plugin-opt=thinlto-index-only=">,
   Alias<thinlto_index_only_eq>,
   HelpText<"Alias for --thinlto-index-only=">;
+// facebook begin T124883009
+def: F<"plugin-opt=thinlto-full-index">,
+  Alias<thinlto_full_index>,
+  HelpText<"Alias for --thinlto-full-index">;
+// facebook end T124883009
 def: J<"plugin-opt=thinlto-object-suffix-replace=">,
  Alias<thinlto_object_suffix_replace_eq>,
  HelpText<"Alias for --thinlto-object-suffix-replace=">;
