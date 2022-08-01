@@ -8,7 +8,7 @@ RUN: llvm-bolt %t -o %t.instr --instrument --instrumentation-file=%t.fdata
 RUN: %t.instr
 
 RUN: llvm-bolt %t -o %t.bolt --data %t.fdata --reorder-blocks=ext-tsp \
-RUN:   --split-functions=3 --split-eh --print-after-lowering \
+RUN:   --split-functions --split-eh --print-after-lowering \
 RUN:   --print-only=_Z10throw_testiPPc 2>&1 | FileCheck %s
 
 ## Hot code in the test case gets larger after splitting because of jump

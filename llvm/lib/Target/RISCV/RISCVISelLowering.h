@@ -53,6 +53,9 @@ enum NodeType : unsigned {
   // Selected as PseudoAddTPRel. Used to emit a TP-relative relocation.
   ADD_TPREL,
 
+  // Load address.
+  LA_TLS_GD,
+
   // Multiply high for signedxunsigned.
   MULHSU,
   // RV64I shifts, directly matching the semantics of the named RISC-V
@@ -210,9 +213,8 @@ enum NodeType : unsigned {
   VECREDUCE_FMIN_VL,
   VECREDUCE_FMAX_VL,
 
-  // Vector binary and unary ops with a mask as a third operand, and VL as a
-  // fourth operand.
-  // FIXME: Can we replace these with ISD::VP_*?
+  // Vector binary ops with a merge as a third operand, a mask as a fourth
+  // operand, and VL as a fifth operand.
   ADD_VL,
   AND_VL,
   MUL_VL,
@@ -226,29 +228,30 @@ enum NodeType : unsigned {
   UDIV_VL,
   UREM_VL,
   XOR_VL,
+  SMIN_VL,
+  SMAX_VL,
+  UMIN_VL,
+  UMAX_VL,
 
   SADDSAT_VL,
   UADDSAT_VL,
   SSUBSAT_VL,
   USUBSAT_VL,
 
+  MULHS_VL,
+  MULHU_VL,
   FADD_VL,
   FSUB_VL,
   FMUL_VL,
   FDIV_VL,
+  FMINNUM_VL,
+  FMAXNUM_VL,
+
+  // Vector unary ops with a mask as a second operand and VL as a third operand.
   FNEG_VL,
   FABS_VL,
   FSQRT_VL,
-  FMA_VL,
-  FCOPYSIGN_VL,
-  SMIN_VL,
-  SMAX_VL,
-  UMIN_VL,
-  UMAX_VL,
-  FMINNUM_VL,
-  FMAXNUM_VL,
-  MULHS_VL,
-  MULHU_VL,
+  FCOPYSIGN_VL, // Has a merge operand
   FP_TO_SINT_VL,
   FP_TO_UINT_VL,
   SINT_TO_FP_VL,
@@ -256,7 +259,14 @@ enum NodeType : unsigned {
   FP_ROUND_VL,
   FP_EXTEND_VL,
 
-  // Widening instructions
+  // Vector FMA ops with a mask as a fourth operand and VL as a fifth operand.
+  VFMADD_VL,
+  VFNMADD_VL,
+  VFMSUB_VL,
+  VFNMSUB_VL,
+
+  // Widening instructions with a merge value a third operand, a mask as a
+  // fourth operand, and VL as a fifth operand.
   VWMUL_VL,
   VWMULU_VL,
   VWMULSU_VL,
@@ -290,7 +300,7 @@ enum NodeType : unsigned {
   VMSET_VL,
 
   // Matches the semantics of vrgather.vx and vrgather.vv with extra operands
-  // for passthru and VL. First operand is the passthru operand.
+  // for passthru and VL. Operands are (src, index, mask, passthru, vl).
   VRGATHER_VX_VL,
   VRGATHER_VV_VL,
   VRGATHEREI16_VV_VL,
@@ -326,6 +336,10 @@ enum NodeType : unsigned {
   // WARNING: Do not add anything in the end unless you want the node to
   // have memop! In fact, starting from FIRST_TARGET_MEMORY_OPCODE all
   // opcodes will be thought as target memory ops!
+
+  // Load address.
+  LA = ISD::FIRST_TARGET_MEMORY_OPCODE,
+  LA_TLS_IE,
 };
 } // namespace RISCVISD
 
@@ -366,9 +380,12 @@ public:
       SelectionDAG &DAG) const override;
   bool shouldSinkOperands(Instruction *I,
                           SmallVectorImpl<Use *> &Ops) const override;
+  bool shouldScalarizeBinop(SDValue VecOp) const override;
   bool isOffsetFoldingLegal(const GlobalAddressSDNode *GA) const override;
   bool isFPImmLegal(const APFloat &Imm, EVT VT,
                     bool ForCodeSize) const override;
+
+  bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
 
   bool softPromoteHalfType() const override { return true; }
 
@@ -510,9 +527,7 @@ public:
                     SmallVectorImpl<SDValue> &InVals) const override;
 
   bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
-                                         Type *Ty) const override {
-    return true;
-  }
+                                         Type *Ty) const override;
   bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
   bool shouldConsiderGEPOffsetSplit() const override { return true; }
 
@@ -588,6 +603,8 @@ public:
                                           const MachineBasicBlock *MBB,
                                           unsigned uid,
                                           MCContext &Ctx) const override;
+
+  bool isVScaleKnownToBeAPowerOfTwo() const override;
 
 private:
   /// RISCVCCAssignFn - This target-specific function extends the default
@@ -666,8 +683,9 @@ private:
   SDValue lowerFixedLengthVectorSelectToRVV(SDValue Op,
                                             SelectionDAG &DAG) const;
   SDValue lowerToScalableOp(SDValue Op, SelectionDAG &DAG, unsigned NewOpc,
-                            bool HasMask = true) const;
-  SDValue lowerVPOp(SDValue Op, SelectionDAG &DAG, unsigned RISCVISDOpc) const;
+                            bool HasMergeOp = false, bool HasMask = true) const;
+  SDValue lowerVPOp(SDValue Op, SelectionDAG &DAG, unsigned RISCVISDOpc,
+                    bool HasMergeOp = false) const;
   SDValue lowerLogicVPOp(SDValue Op, SelectionDAG &DAG, unsigned MaskOpc,
                          unsigned VecOpc) const;
   SDValue lowerVPExtMaskOp(SDValue Op, SelectionDAG &DAG) const;

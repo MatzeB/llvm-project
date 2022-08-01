@@ -76,6 +76,7 @@ add_math_entrypoint_object(copysignl)
 
 add_math_entrypoint_object(cos)
 add_math_entrypoint_object(cosf)
+add_math_entrypoint_object(coshf)
 
 add_math_entrypoint_object(expf)
 
@@ -102,6 +103,9 @@ add_math_entrypoint_object(fmaxl)
 add_math_entrypoint_object(fmin)
 add_math_entrypoint_object(fminf)
 add_math_entrypoint_object(fminl)
+
+add_math_entrypoint_object(fmod)
+add_math_entrypoint_object(fmodf)
 
 add_math_entrypoint_object(frexp)
 add_math_entrypoint_object(frexpf)
@@ -178,6 +182,7 @@ add_math_entrypoint_object(sincosf)
 
 add_math_entrypoint_object(sin)
 add_math_entrypoint_object(sinf)
+add_math_entrypoint_object(sinhf)
 
 add_math_entrypoint_object(sqrt)
 add_math_entrypoint_object(sqrtf)

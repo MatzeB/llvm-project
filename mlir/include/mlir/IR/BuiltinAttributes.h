@@ -25,7 +25,6 @@ class IntegerSet;
 class IntegerType;
 class Location;
 class Operation;
-class ShapedType;
 
 //===----------------------------------------------------------------------===//
 // Elements Attributes
@@ -61,13 +60,14 @@ protected:
 };
 
 /// Type trait detector that checks if a given type T is a complex type.
-template <typename T> struct is_complex_t : public std::false_type {};
+template <typename T>
+struct is_complex_t : public std::false_type {};
 template <typename T>
 struct is_complex_t<std::complex<T>> : public std::true_type {};
 } // namespace detail
 
-/// An attribute that represents a reference to a dense vector or tensor object.
-///
+/// An attribute that represents a reference to a dense vector or tensor
+/// object.
 class DenseElementsAttr : public Attribute {
 public:
   using Attribute::Attribute;
@@ -81,7 +81,8 @@ public:
   /// floating point type that can be used to access the underlying element
   /// types of a DenseElementsAttr.
   // TODO: Use std::disjunction when C++17 is supported.
-  template <typename T> struct is_valid_cpp_fp_type {
+  template <typename T>
+  struct is_valid_cpp_fp_type {
     /// The type is a valid floating point type if it is a builtin floating
     /// point type, or is a potentially user defined floating point type. The
     /// latter allows for supporting users that have custom types defined for
@@ -400,7 +401,7 @@ public:
                              std::numeric_limits<T>::is_signed));
     const char *rawData = getRawData().data();
     bool splat = isSplat();
-    return {Attribute::getType(), ElementIterator<T>(rawData, splat, 0),
+    return {getType(), ElementIterator<T>(rawData, splat, 0),
             ElementIterator<T>(rawData, splat, getNumElements())};
   }
   template <typename T, typename = IntFloatValueTemplateCheckT<T>>
@@ -429,7 +430,7 @@ public:
                           std::numeric_limits<ElementT>::is_signed));
     const char *rawData = getRawData().data();
     bool splat = isSplat();
-    return {Attribute::getType(), ElementIterator<T>(rawData, splat, 0),
+    return {getType(), ElementIterator<T>(rawData, splat, 0),
             ElementIterator<T>(rawData, splat, getNumElements())};
   }
   template <typename T, typename ElementT = typename T::value_type,
@@ -456,7 +457,7 @@ public:
     auto stringRefs = getRawStringData();
     const char *ptr = reinterpret_cast<const char *>(stringRefs.data());
     bool splat = isSplat();
-    return {Attribute::getType(), ElementIterator<StringRef>(ptr, splat, 0),
+    return {getType(), ElementIterator<StringRef>(ptr, splat, 0),
             ElementIterator<StringRef>(ptr, splat, getNumElements())};
   }
   template <typename T, typename = StringRefValueTemplateCheckT<T>>
@@ -476,8 +477,7 @@ public:
       typename std::enable_if<std::is_same<T, Attribute>::value>::type;
   template <typename T, typename = AttributeValueTemplateCheckT<T>>
   iterator_range_impl<AttributeElementIterator> getValues() const {
-    return {Attribute::getType(), value_begin<Attribute>(),
-            value_end<Attribute>()};
+    return {getType(), value_begin<Attribute>(), value_end<Attribute>()};
   }
   template <typename T, typename = AttributeValueTemplateCheckT<T>>
   AttributeElementIterator value_begin() const {
@@ -508,7 +508,7 @@ public:
   template <typename T, typename = DerivedAttrValueTemplateCheckT<T>>
   iterator_range_impl<DerivedAttributeElementIterator<T>> getValues() const {
     using DerivedIterT = DerivedAttributeElementIterator<T>;
-    return {Attribute::getType(), DerivedIterT(value_begin<Attribute>()),
+    return {getType(), DerivedIterT(value_begin<Attribute>()),
             DerivedIterT(value_end<Attribute>())};
   }
   template <typename T, typename = DerivedAttrValueTemplateCheckT<T>>
@@ -528,7 +528,7 @@ public:
   template <typename T, typename = BoolValueTemplateCheckT<T>>
   iterator_range_impl<BoolElementIterator> getValues() const {
     assert(isValidBool() && "bool is not the value of this elements attribute");
-    return {Attribute::getType(), BoolElementIterator(*this, 0),
+    return {getType(), BoolElementIterator(*this, 0),
             BoolElementIterator(*this, getNumElements())};
   }
   template <typename T, typename = BoolValueTemplateCheckT<T>>
@@ -550,7 +550,7 @@ public:
   template <typename T, typename = APIntValueTemplateCheckT<T>>
   iterator_range_impl<IntElementIterator> getValues() const {
     assert(getElementType().isIntOrIndex() && "expected integral type");
-    return {Attribute::getType(), raw_int_begin(), raw_int_end()};
+    return {getType(), raw_int_begin(), raw_int_end()};
   }
   template <typename T, typename = APIntValueTemplateCheckT<T>>
   IntElementIterator value_begin() const {
@@ -743,6 +743,58 @@ public:
 //===----------------------------------------------------------------------===//
 
 namespace mlir {
+namespace detail {
+/// Base class for DenseArrayAttr that is instantiated and specialized for each
+/// supported element type below.
+template <typename T>
+class DenseArrayAttr : public DenseArrayBaseAttr {
+public:
+  using DenseArrayBaseAttr::DenseArrayBaseAttr;
+
+  /// Implicit conversion to ArrayRef<T>.
+  operator ArrayRef<T>() const;
+  ArrayRef<T> asArrayRef() const { return ArrayRef<T>{*this}; }
+
+  /// Random access to elements.
+  T operator[](std::size_t index) const { return asArrayRef()[index]; }
+
+  /// Builder from ArrayRef<T>.
+  static DenseArrayAttr get(MLIRContext *context, ArrayRef<T> content);
+
+  /// Print the short form `[42, 100, -1]` without any type prefix.
+  void print(AsmPrinter &printer) const;
+  void print(raw_ostream &os) const;
+  /// Print the short form `42, 100, -1` without any braces or type prefix.
+  void printWithoutBraces(raw_ostream &os) const;
+
+  /// Parse the short form `[42, 100, -1]` without any type prefix.
+  static Attribute parse(AsmParser &parser, Type odsType);
+
+  /// Parse the short form `42, 100, -1` without any type prefix or braces.
+  static Attribute parseWithoutBraces(AsmParser &parser, Type odsType);
+
+  /// Support for isa<>/cast<>.
+  static bool classof(Attribute attr);
+};
+template <>
+void DenseArrayAttr<int8_t>::printWithoutBraces(raw_ostream &os) const;
+
+extern template class DenseArrayAttr<int8_t>;
+extern template class DenseArrayAttr<int16_t>;
+extern template class DenseArrayAttr<int32_t>;
+extern template class DenseArrayAttr<int64_t>;
+extern template class DenseArrayAttr<float>;
+extern template class DenseArrayAttr<double>;
+} // namespace detail
+
+// Public name for all the supported DenseArrayAttr
+using DenseI8ArrayAttr = detail::DenseArrayAttr<int8_t>;
+using DenseI16ArrayAttr = detail::DenseArrayAttr<int16_t>;
+using DenseI32ArrayAttr = detail::DenseArrayAttr<int32_t>;
+using DenseI64ArrayAttr = detail::DenseArrayAttr<int64_t>;
+using DenseF32ArrayAttr = detail::DenseArrayAttr<float>;
+using DenseF64ArrayAttr = detail::DenseArrayAttr<double>;
+
 //===----------------------------------------------------------------------===//
 // BoolAttr
 //===----------------------------------------------------------------------===//
@@ -937,8 +989,6 @@ inline bool operator==(StringRef lhs, StringAttr rhs) {
 }
 inline bool operator!=(StringRef lhs, StringAttr rhs) { return !(lhs == rhs); }
 
-inline Type StringAttr::getType() const { return Attribute::getType(); }
-
 } // namespace mlir
 
 //===----------------------------------------------------------------------===//
@@ -963,6 +1013,14 @@ struct PointerLikeTypeTraits<mlir::StringAttr>
     : public PointerLikeTypeTraits<mlir::Attribute> {
   static inline mlir::StringAttr getFromVoidPointer(void *p) {
     return mlir::StringAttr::getFromOpaquePointer(p);
+  }
+};
+
+template <>
+struct PointerLikeTypeTraits<mlir::IntegerAttr>
+    : public PointerLikeTypeTraits<mlir::Attribute> {
+  static inline mlir::IntegerAttr getFromVoidPointer(void *p) {
+    return mlir::IntegerAttr::getFromOpaquePointer(p);
   }
 };
 

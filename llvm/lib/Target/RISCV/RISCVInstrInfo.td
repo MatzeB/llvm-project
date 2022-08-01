@@ -92,6 +92,12 @@ def riscv_add_tprel : SDNode<"RISCVISD::ADD_TPREL",
                                                   SDTCisSameAs<0, 3>,
                                                   SDTCisInt<0>]>>;
 
+def riscv_la : SDNode<"RISCVISD::LA", SDTLoad,
+                      [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+def riscv_la_tls_ie : SDNode<"RISCVISD::LA_TLS_IE", SDTLoad,
+                             [SDNPHasChain, SDNPMayLoad, SDNPMemOperand]>;
+def riscv_la_tls_gd : SDNode<"RISCVISD::LA_TLS_GD", SDTIntUnaryOp>;
+
 //===----------------------------------------------------------------------===//
 // Operand and SDNode transformation definitions.
 //===----------------------------------------------------------------------===//
@@ -378,7 +384,6 @@ def uimm6gt32 : ImmLeaf<XLenVT, [{
 // Necessary because a frameindex can't be matched directly in a pattern.
 def FrameAddrRegImm : ComplexPattern<iPTR, 2, "SelectFrameAddrRegImm",
                                      [frameindex, or, add]>;
-def BaseAddr : ComplexPattern<iPTR, 1, "SelectBaseAddr">;
 def AddrRegImm : ComplexPattern<iPTR, 2, "SelectAddrRegImm">;
 
 // Return the negation of an immediate value.
@@ -413,7 +418,9 @@ def ImmSubFrom32 : SDNodeXForm<imm, [{
 }]>;
 
 // Check if (add r, imm) can be optimized to (ADDI (ADDI r, imm0), imm1),
-// in which imm = imm0 + imm1 and both imm0 and imm1 are simm12.
+// in which imm = imm0 + imm1 and both imm0 and imm1 are simm12. We make imm0
+// as large as possible and imm1 as small as possible so that we might be able
+// to use c.addi for the small immediate.
 def AddiPair : PatLeaf<(imm), [{
   if (!N->hasOneUse())
     return false;
@@ -422,16 +429,19 @@ def AddiPair : PatLeaf<(imm), [{
   return (-4096 <= Imm && Imm <= -2049) || (2048 <= Imm && Imm <= 4094);
 }]>;
 
-// Return imm/2.
-def AddiPairImmA : SDNodeXForm<imm, [{
-  return CurDAG->getTargetConstant(N->getSExtValue() / 2, SDLoc(N),
+// Return imm - (imm < 0 ? -2048 : 2047).
+def AddiPairImmSmall : SDNodeXForm<imm, [{
+  int64_t Imm = N->getSExtValue();
+  int64_t Adj = N->getSExtValue() < 0 ? -2048 : 2047;
+  return CurDAG->getTargetConstant(Imm - Adj, SDLoc(N),
                                    N->getValueType(0));
 }]>;
 
-// Return imm - imm/2.
-def AddiPairImmB : SDNodeXForm<imm, [{
-  int64_t Imm = N->getSExtValue();
-  return CurDAG->getTargetConstant(Imm - Imm / 2, SDLoc(N),
+// Return -2048 if immediate is negative or 2047 if positive. These are the
+// largest simm12 values.
+def AddiPairImmLarge : SDNodeXForm<imm, [{
+  int64_t Imm = N->getSExtValue() < 0 ? -2048 : 2047;
+  return CurDAG->getTargetConstant(Imm, SDLoc(N),
                                    N->getValueType(0));
 }]>;
 
@@ -1253,10 +1263,14 @@ def : Pat<(seteq GPR:$rs1, 0), (SLTIU GPR:$rs1, 1)>;
 def : Pat<(seteq GPR:$rs1, GPR:$rs2), (SLTIU (XOR GPR:$rs1, GPR:$rs2), 1)>;
 def : Pat<(seteq GPR:$rs1, simm12_plus1:$imm12),
           (SLTIU (ADDI GPR:$rs1, (NegImm simm12_plus1:$imm12)), 1)>;
+def : Pat<(seteq GPR:$rs1, -2048),
+          (SLTIU (XORI GPR:$rs1, -2048), 1)>;
 def : Pat<(setne GPR:$rs1, 0), (SLTU X0, GPR:$rs1)>;
 def : Pat<(setne GPR:$rs1, GPR:$rs2), (SLTU X0, (XOR GPR:$rs1, GPR:$rs2))>;
 def : Pat<(setne GPR:$rs1, simm12_plus1:$imm12),
           (SLTU X0, (ADDI GPR:$rs1, (NegImm simm12_plus1:$imm12)))>;
+def : Pat<(setne GPR:$rs1, -2048),
+          (SLTU X0, (XORI GPR:$rs1, -2048))>;
 def : Pat<(setugt GPR:$rs1, GPR:$rs2), (SLTU GPR:$rs2, GPR:$rs1)>;
 def : Pat<(setuge GPR:$rs1, GPR:$rs2), (XORI (SLTU GPR:$rs1, GPR:$rs2), 1)>;
 def : Pat<(setule GPR:$rs1, GPR:$rs2), (XORI (SLTU GPR:$rs2, GPR:$rs1), 1)>;
@@ -1267,6 +1281,13 @@ def : Pat<(setgt GPR:$rs1, simm12_minus1_nonzero:$imm),
           (XORI (SLTI GPR:$rs1, (ImmPlus1 simm12_minus1_nonzero:$imm)), 1)>;
 def : Pat<(setugt GPR:$rs1, simm12_minus1_nonzero:$imm),
           (XORI (SLTIU GPR:$rs1, (ImmPlus1 simm12_minus1_nonzero:$imm)), 1)>;
+
+// If negating a pattern that requires an XORI above, we can fold the XORI with
+// the NEG. The XORI is equivalent to 1-X and negating gives X-1.
+def : Pat<(ineg (setuge GPR:$rs1, GPR:$rs2)), (ADDI (SLTU GPR:$rs1, GPR:$rs2), -1)>;
+def : Pat<(ineg (setule GPR:$rs1, GPR:$rs2)), (ADDI (SLTU GPR:$rs2, GPR:$rs1), -1)>;
+def : Pat<(ineg (setge GPR:$rs1, GPR:$rs2)), (ADDI (SLT GPR:$rs1, GPR:$rs2), -1)>;
+def : Pat<(ineg (setle GPR:$rs1, GPR:$rs2)), (ADDI (SLT GPR:$rs2, GPR:$rs1), -1)>;
 
 def IntCCtoRISCVCC : SDNodeXForm<riscv_selectcc, [{
   ISD::CondCode CC = cast<CondCodeSDNode>(N->getOperand(2))->get();
@@ -1400,16 +1421,23 @@ let hasSideEffects = 0, mayLoad = 1, mayStore = 0, Size = 8, isCodeGenOnly = 0,
 def PseudoLA : Pseudo<(outs GPR:$dst), (ins bare_symbol:$src), [],
                       "la", "$dst, $src">;
 
+def : Pat<(riscv_la tglobaladdr:$in), (PseudoLA tglobaladdr:$in)>;
+
 let hasSideEffects = 0, mayLoad = 1, mayStore = 0, Size = 8, isCodeGenOnly = 0,
     isAsmParserOnly = 1 in
 def PseudoLA_TLS_IE : Pseudo<(outs GPR:$dst), (ins bare_symbol:$src), [],
                              "la.tls.ie", "$dst, $src">;
+
+def : Pat<(riscv_la_tls_ie tglobaltlsaddr:$in),
+          (PseudoLA_TLS_IE  tglobaltlsaddr:$in)>;
 
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0, Size = 8, isCodeGenOnly = 0,
     isAsmParserOnly = 1 in
 def PseudoLA_TLS_GD : Pseudo<(outs GPR:$dst), (ins bare_symbol:$src), [],
                              "la.tls.gd", "$dst, $src">;
 
+def : Pat<(riscv_la_tls_gd tglobaltlsaddr:$in),
+          (PseudoLA_TLS_GD  tglobaltlsaddr:$in)>;
 
 /// Sign/Zero Extends
 
@@ -1638,14 +1666,14 @@ def : Pat<(debugtrap), (EBREAK)>;
 
 /// Simple optimization
 def : Pat<(add GPR:$rs1, (AddiPair:$rs2)),
-          (ADDI (ADDI GPR:$rs1, (AddiPairImmB AddiPair:$rs2)),
-                (AddiPairImmA GPR:$rs2))>;
+          (ADDI (ADDI GPR:$rs1, (AddiPairImmLarge AddiPair:$rs2)),
+                (AddiPairImmSmall GPR:$rs2))>;
 
 let Predicates = [IsRV64] in {
 // Select W instructions if only the lower 32-bits of the result are used.
 def : Pat<(binop_allwusers<add> GPR:$rs1, (AddiPair:$rs2)),
-          (ADDIW (ADDIW GPR:$rs1, (AddiPairImmB AddiPair:$rs2)),
-                 (AddiPairImmA AddiPair:$rs2))>;
+          (ADDIW (ADDIW GPR:$rs1, (AddiPairImmLarge AddiPair:$rs2)),
+                 (AddiPairImmSmall AddiPair:$rs2))>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1661,3 +1689,4 @@ include "RISCVInstrInfoZb.td"
 include "RISCVInstrInfoZk.td"
 include "RISCVInstrInfoV.td"
 include "RISCVInstrInfoZfh.td"
+include "RISCVInstrInfoZicbo.td"

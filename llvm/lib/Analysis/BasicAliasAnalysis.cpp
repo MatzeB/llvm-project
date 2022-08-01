@@ -103,29 +103,6 @@ bool BasicAAResult::invalidate(Function &Fn, const PreservedAnalyses &PA,
 // Useful predicates
 //===----------------------------------------------------------------------===//
 
-/// Returns true if the pointer is one which would have been considered an
-/// escape by isNonEscapingLocalObject.
-static bool isEscapeSource(const Value *V) {
-  if (isa<CallBase>(V))
-    return true;
-
-  // The load case works because isNonEscapingLocalObject considers all
-  // stores to be escapes (it passes true for the StoreCaptures argument
-  // to PointerMayBeCaptured).
-  if (isa<LoadInst>(V))
-    return true;
-
-  // The inttoptr case works because isNonEscapingLocalObject considers all
-  // means of converting or equating a pointer to an int (ptrtoint, ptr store
-  // which could be followed by an integer load, ptr<->int compare) as
-  // escaping, and objects located at well-known addresses via platform-specific
-  // means cannot be considered non-escaping local objects.
-  if (isa<IntToPtrInst>(V))
-    return true;
-
-  return false;
-}
-
 /// Returns the size of the object specified by V or UnknownSize if unknown.
 static uint64_t getObjectSize(const Value *V, const DataLayout &DL,
                               const TargetLibraryInfo &TLI,
@@ -935,7 +912,6 @@ ModRefInfo BasicAAResult::getModRefInfo(const CallBase *Call,
     // Optimistically assume that call doesn't touch Object and check this
     // assumption in the following loop.
     ModRefInfo Result = ModRefInfo::NoModRef;
-    bool IsMustAlias = true;
 
     unsigned OperandNo = 0;
     for (auto CI = Call->data_operands_begin(), CE = Call->data_operands_end();
@@ -958,8 +934,6 @@ ModRefInfo BasicAAResult::getModRefInfo(const CallBase *Call,
       AliasResult AR = getBestAAResults().alias(
           MemoryLocation::getBeforeOrAfter(*CI),
           MemoryLocation::getBeforeOrAfter(Object), AAQI);
-      if (AR != AliasResult::MustAlias)
-        IsMustAlias = false;
       // Operand doesn't alias 'Object', continue looking for other aliases
       if (AR == AliasResult::NoAlias)
         continue;
@@ -981,17 +955,9 @@ ModRefInfo BasicAAResult::getModRefInfo(const CallBase *Call,
       break;
     }
 
-    // No operand aliases, reset Must bit. Add below if at least one aliases
-    // and all aliases found are MustAlias.
-    if (isNoModRef(Result))
-      IsMustAlias = false;
-
     // Early return if we improved mod ref information
-    if (!isModAndRefSet(Result)) {
-      if (isNoModRef(Result))
-        return ModRefInfo::NoModRef;
-      return IsMustAlias ? setMust(Result) : clearMust(Result);
-    }
+    if (!isModAndRefSet(Result))
+      return Result;
   }
 
   // If the call is malloc/calloc like, we can assume that it doesn't
@@ -1787,7 +1753,7 @@ bool BasicAAResult::isValueEqualInPotentialCycles(const Value *V,
   // Make sure that the visited phis cannot reach the Value. This ensures that
   // the Values cannot come from different iterations of a potential cycle the
   // phi nodes could be involved in.
-  for (auto *P : VisitedPhiBBs)
+  for (const auto *P : VisitedPhiBBs)
     if (isPotentiallyReachable(&P->front(), Inst, nullptr, DT))
       return false;
 
