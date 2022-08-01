@@ -17,6 +17,7 @@
 #include "llvm/MC/MCTargetOptionsCommandFlags.h"
 #include "llvm/Object/Decompressor.h"
 #include "llvm/Object/ELFObjectFile.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <limits>
 
@@ -24,6 +25,15 @@ using namespace llvm;
 using namespace llvm::object;
 
 static mc::RegisterMCTargetOptionsFlags MCTargetOptionsFlags;
+
+// facebook start T127866823
+cl::OptionCategory DwpFBCategory("FB Specific Options");
+static cl::opt<bool> ContinueOnCuIndexOverflow(
+    "continue-on-cu-index-overflow",
+    cl::desc("This turns an error when offset for .debug_info.dwo sections "
+             "overfolws into a warning."),
+    cl::init(false), cl::cat(DwpFBCategory));
+// facebook end T127866823
 
 // Returns the size of debug_str_offsets section headers in bytes.
 static uint64_t debugStrOffsetsHeaderSize(DataExtractor StrOffsetsData,
@@ -667,10 +677,18 @@ Error write(MCStreamer &Out, ArrayRef<std::string> Inputs) {
           C.Offset = InfoSectionOffset;
           C.Length = Header.Length + 4;
 
+          // facebook start T127866823
           if (std::numeric_limits<uint32_t>::max() - InfoSectionOffset <
-              C.Length)
-            return make_error<DWPError>(
-                "debug information section offset is greater than 4GB");
+              C.Length) {
+            if (ContinueOnCuIndexOverflow)
+              errs() << "Warning: Your debug sections grew to more than 4GB. "
+                        "Although DWP file has been created, it is corrupt. "
+                        "This can affect other tools like llvm-profgen\n";
+            else
+              return make_error<DWPError>(
+                  "debug information section offset is greater than 4GB");
+          }
+          // facebook end T127866823
 
           UnitOffset += C.Length;
           if (Header.Version < 5 ||
