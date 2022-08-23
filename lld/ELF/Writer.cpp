@@ -405,6 +405,11 @@ template <class ELFT> void elf::createSyntheticSections() {
       part.armExidx = std::make_unique<ARMExidxSyntheticSection>();
       add(*part.armExidx);
     }
+
+    if (!config->packageMetadata.empty()) {
+      part.packageMetadataNote = std::make_unique<PackageMetadataNote>();
+      add(*part.packageMetadataNote);
+    }
   }
 
   if (partitions.size() != 1) {
@@ -1270,7 +1275,7 @@ static DenseMap<const InputSectionBase *, int> buildSectionOrder() {
 
   // We want both global and local symbols. We get the global ones from the
   // symbol table and iterate the object files for the local ones.
-  for (Symbol *sym : symtab->symbols())
+  for (Symbol *sym : symtab->getSymbols())
     addSym(*sym);
 
   for (ELFFileBase *file : ctx->objectFiles)
@@ -1886,7 +1891,7 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
   }
 
   if (config->hasDynSymTab) {
-    parallelForEach(symtab->symbols(), [](Symbol *sym) {
+    parallelForEach(symtab->getSymbols(), [](Symbol *sym) {
       sym->isPreemptible = computeIsPreemptible(*sym);
     });
   }
@@ -1958,7 +1963,7 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
     llvm::TimeTraceScope timeScope("Add symbols to symtabs");
     // Now that we have defined all possible global symbols including linker-
     // synthesized ones. Visit all symbols to give the finishing touches.
-    for (Symbol *sym : symtab->symbols()) {
+    for (Symbol *sym : symtab->getSymbols()) {
       if (!sym->isUsedInRegularObj || !includeInSymtab(*sym))
         continue;
       if (!config->relocatable)

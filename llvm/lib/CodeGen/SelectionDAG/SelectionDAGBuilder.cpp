@@ -1344,6 +1344,13 @@ bool SelectionDAGBuilder::handleDebugValue(ArrayRef<const Value *> Values,
       continue;
     }
 
+    // Look through IntToPtr constants.
+    if (auto *CE = dyn_cast<ConstantExpr>(V))
+      if (CE->getOpcode() == Instruction::IntToPtr) {
+        LocationOps.emplace_back(SDDbgOperand::fromConst(CE->getOperand(0)));
+        continue;
+      }
+
     // If the Value is a frame index, we can create a FrameIndex debug value
     // without relying on the DAG at all.
     if (const AllocaInst *AI = dyn_cast<AllocaInst>(V)) {
@@ -3000,7 +3007,8 @@ void SelectionDAGBuilder::visitCallBr(const CallBrInst &I) {
     BasicBlock *Dest = I.getIndirectDest(i);
     MachineBasicBlock *Target = FuncInfo.MBBMap[Dest];
     Target->setIsInlineAsmBrIndirectTarget();
-    Target->setHasAddressTaken();
+    Target->setMachineBlockAddressTaken();
+    Target->setLabelMustBeEmitted();
     // Don't add duplicate machine successors.
     if (Dests.insert(Dest).second)
       addSuccessorWithProb(CallBrMBB, Target, BranchProbability::getZero());
@@ -3339,7 +3347,7 @@ void SelectionDAGBuilder::visitSelect(const User &I) {
       break;
     case SPF_NABS:
       Negate = true;
-      LLVM_FALLTHROUGH;
+      [[fallthrough]];
     case SPF_ABS:
       IsUnaryAbs = true;
       Opc = ISD::ABS;
@@ -3716,7 +3724,7 @@ void SelectionDAGBuilder::visitShuffleVector(const User &I) {
       }
 
       // Calculate new mask.
-      SmallVector<int, 8> MappedOps(Mask.begin(), Mask.end());
+      SmallVector<int, 8> MappedOps(Mask);
       for (int &Idx : MappedOps) {
         if (Idx >= (int)SrcNumElts)
           Idx -= SrcNumElts + StartIdx[1] - MaskNumElts;
@@ -4726,7 +4734,8 @@ void SelectionDAGBuilder::visitAtomicStore(const StoreInst &I) {
   EVT MemVT =
       TLI.getMemValueType(DAG.getDataLayout(), I.getValueOperand()->getType());
 
-  if (I.getAlign().value() < MemVT.getSizeInBits() / 8)
+  if (!TLI.supportsUnalignedAtomics() &&
+      I.getAlign().value() < MemVT.getSizeInBits() / 8)
     report_fatal_error("Cannot generate unaligned atomic store");
 
   auto Flags = TLI.getStoreMemOperandFlags(I, DAG.getDataLayout());
@@ -7290,7 +7299,7 @@ void SelectionDAGBuilder::visitConstrainedFPIntrinsic(
       // The only reason why ebIgnore nodes still need to be chained is that
       // they might depend on the current rounding mode, and therefore must
       // not be moved across instruction that may change that mode.
-      LLVM_FALLTHROUGH;
+      [[fallthrough]];
     case fp::ExceptionBehavior::ebMayTrap:
       // These must not be moved across calls or instructions that may change
       // floating-point exception masks.
@@ -10480,7 +10489,7 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
                     ValueVTs);
     MVT VT = ValueVTs[0].getSimpleVT();
     MVT RegVT = TLI->getRegisterType(*CurDAG->getContext(), VT);
-    Optional<ISD::NodeType> AssertOp = None;
+    Optional<ISD::NodeType> AssertOp;
     SDValue ArgValue = getCopyFromParts(DAG, dl, &InVals[0], 1, RegVT, VT,
                                         nullptr, F.getCallingConv(), AssertOp);
 

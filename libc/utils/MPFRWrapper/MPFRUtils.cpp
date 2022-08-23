@@ -8,7 +8,7 @@
 
 #include "MPFRUtils.h"
 
-#include "src/__support/CPP/StringView.h"
+#include "src/__support/CPP/string_view.h"
 #include "src/__support/FPUtil/FPBits.h"
 #include "src/__support/FPUtil/PlatformDefs.h"
 #include "utils/UnitTest/FPMatcher.h"
@@ -355,6 +355,12 @@ public:
     return result;
   }
 
+  MPFRNumber tanh() const {
+    MPFRNumber result(*this);
+    mpfr_tanh(result.value, value, mpfr_rounding);
+    return result;
+  }
+
   MPFRNumber trunc() const {
     MPFRNumber result(*this);
     mpfr_trunc(result.value, value);
@@ -373,7 +379,7 @@ public:
     constexpr size_t printBufSize = 200;
     char buffer[printBufSize];
     mpfr_snprintf(buffer, printBufSize, "%100.50Rf", value);
-    cpp::StringView view(buffer);
+    cpp::string_view view(buffer);
     view = view.trim(' ');
     return std::string(view.data());
   }
@@ -527,6 +533,8 @@ unary_operation(Operation op, InputType input, unsigned int precision,
     return mpfrInput.sqrt();
   case Operation::Tan:
     return mpfrInput.tan();
+  case Operation::Tanh:
+    return mpfrInput.tanh();
   case Operation::Trunc:
     return mpfrInput.trunc();
   default:

@@ -282,12 +282,15 @@ class CodeGenModule : public CodeGenTypeCache {
 
 public:
   struct Structor {
-    Structor() : Priority(0), Initializer(nullptr), AssociatedData(nullptr) {}
-    Structor(int Priority, llvm::Constant *Initializer,
+    Structor()
+        : Priority(0), LexOrder(~0u), Initializer(nullptr),
+          AssociatedData(nullptr) {}
+    Structor(int Priority, unsigned LexOrder, llvm::Constant *Initializer,
              llvm::Constant *AssociatedData)
-        : Priority(Priority), Initializer(Initializer),
+        : Priority(Priority), LexOrder(LexOrder), Initializer(Initializer),
           AssociatedData(AssociatedData) {}
     int Priority;
+    unsigned LexOrder;
     llvm::Constant *Initializer;
     llvm::Constant *AssociatedData;
   };
@@ -1351,13 +1354,14 @@ public:
 
   /// \returns true if \p Fn at \p Loc should be excluded from profile
   /// instrumentation by the SCL passed by \p -fprofile-list.
-  bool isFunctionBlockedByProfileList(llvm::Function *Fn,
-                                      SourceLocation Loc) const;
+  ProfileList::ExclusionType
+  isFunctionBlockedByProfileList(llvm::Function *Fn, SourceLocation Loc) const;
 
   /// \returns true if \p Fn at \p Loc should be excluded from profile
   /// instrumentation.
-  bool isFunctionBlockedFromProfileInstr(llvm::Function *Fn,
-                                         SourceLocation Loc) const;
+  ProfileList::ExclusionType
+  isFunctionBlockedFromProfileInstr(llvm::Function *Fn,
+                                    SourceLocation Loc) const;
 
   SanitizerMetadata *getSanitizerMetadata() {
     return SanitizerMD.get();
@@ -1601,6 +1605,7 @@ private:
 
   // FIXME: Hardcoding priority here is gross.
   void AddGlobalCtor(llvm::Function *Ctor, int Priority = 65535,
+                     unsigned LexOrder = ~0U,
                      llvm::Constant *AssociatedData = nullptr);
   void AddGlobalDtor(llvm::Function *Dtor, int Priority = 65535,
                      bool IsDtorAttrFunc = false);

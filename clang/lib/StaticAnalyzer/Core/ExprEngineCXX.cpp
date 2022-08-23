@@ -263,7 +263,7 @@ SVal ExprEngine::computeObjectUnderConstruction(
       // a simple temporary.
       CallOpts = PreElideCallOpts;
       CallOpts.IsElidableCtorThatHasNotBeenElided = true;
-      LLVM_FALLTHROUGH;
+      [[fallthrough]];
     }
     case ConstructionContext::SimpleTemporaryObjectKind: {
       const auto *TCC = cast<TemporaryObjectConstructionContext>(CC);
@@ -455,7 +455,7 @@ ProgramStateRef ExprEngine::updateObjectsUnderConstruction(
       }
       // If we decided not to elide the constructor, proceed as if
       // it's a simple temporary.
-      LLVM_FALLTHROUGH;
+      [[fallthrough]];
     }
     case ConstructionContext::SimpleTemporaryObjectKind: {
       const auto *TCC = cast<TemporaryObjectConstructionContext>(CC);
@@ -524,16 +524,32 @@ bindRequiredArrayElementToEnvironment(ProgramStateRef State,
   //       |     `-DeclRefExpr
   //       `-ArrayInitIndexExpr
   //
+  // The resulting expression for a multidimensional array.
+  // ArrayInitLoopExpr                  <-- we're here
+  // |-OpaqueValueExpr
+  // | `-DeclRefExpr                    <-- match this
+  // `-ArrayInitLoopExpr
+  //   |-OpaqueValueExpr
+  //   | `-ArraySubscriptExpr
+  //   |   |-ImplicitCastExpr
+  //   |   | `-OpaqueValueExpr
+  //   |   |   `-DeclRefExpr
+  //   |   `-ArrayInitIndexExpr
+  //   `-CXXConstructExpr             <-- extract this
+  //     ` ...
+
+  const auto *OVESrc = AILE->getCommonExpr()->getSourceExpr();
+
   // HACK: There is no way we can put the index of the array element into the
   // CFG unless we unroll the loop, so we manually select and bind the required
   // parameter to the environment.
-  const auto *CE = cast<CXXConstructExpr>(AILE->getSubExpr());
-  const auto *OVESrc = AILE->getCommonExpr()->getSourceExpr();
+  const auto *CE =
+      cast<CXXConstructExpr>(extractElementInitializerFromNestedAILE(AILE));
 
   SVal Base = UnknownVal();
   if (const auto *ME = dyn_cast<MemberExpr>(OVESrc))
     Base = State->getSVal(ME, LCtx);
-  else if (const auto *DRE = cast<DeclRefExpr>(OVESrc))
+  else if (const auto *DRE = dyn_cast<DeclRefExpr>(OVESrc))
     Base = State->getLValue(cast<VarDecl>(DRE->getDecl()), LCtx);
   else
     llvm_unreachable("ArrayInitLoopExpr contains unexpected source expression");
@@ -596,8 +612,9 @@ void ExprEngine::handleConstructor(const Expr *E,
     if (AILE) {
       // Only set this once even though we loop through it multiple times.
       if (!getPendingInitLoop(State, CE, LCtx))
-        State = setPendingInitLoop(State, CE, LCtx,
-                                   AILE->getArraySize().getLimitedValue());
+        State = setPendingInitLoop(
+            State, CE, LCtx,
+            getContext().getArrayInitLoopExprElementCount(AILE));
 
       State = bindRequiredArrayElementToEnvironment(
           State, AILE, LCtx, svalBuilder.makeArrayIndex(Idx));
@@ -620,7 +637,7 @@ void ExprEngine::handleConstructor(const Expr *E,
         ("This virtual base should have already been initialized by "
          "the most derived class!"));
     (void)OuterCtor;
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   }
   case CXXConstructExpr::CK_NonVirtualBase:
     // In C++17, classes with non-virtual bases may be aggregates, so they would
@@ -640,7 +657,7 @@ void ExprEngine::handleConstructor(const Expr *E,
       CallOpts.IsCtorOrDtorWithImproperlyModeledTargetRegion = true;
       break;
     }
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case CXXConstructExpr::CK_Delegating: {
     const CXXMethodDecl *CurCtor = cast<CXXMethodDecl>(LCtx->getDecl());
     Loc ThisPtr = getSValBuilder().getCXXThis(CurCtor,
@@ -1143,20 +1160,16 @@ void ExprEngine::VisitLambdaExpr(const LambdaExpr *LE, ExplodedNode *Pred,
 
     SVal InitVal;
     if (!FieldForCapture->hasCapturedVLAType()) {
-      Expr *InitExpr = *i;
-
-      if (const auto AILE = dyn_cast<ArrayInitLoopExpr>(InitExpr)) {
-        // If the AILE initializes a POD array, we need to keep it as the
-        // InitExpr.
-        if (dyn_cast<CXXConstructExpr>(AILE->getSubExpr()))
-          InitExpr = AILE->getSubExpr();
-      }
+      const Expr *InitExpr = *i;
 
       assert(InitExpr && "Capture missing initialization expression");
 
-      if (dyn_cast<CXXConstructExpr>(InitExpr)) {
-        InitVal = *getObjectUnderConstruction(State, {LE, Idx}, LocCtxt);
-        InitVal = State->getSVal(InitVal.getAsRegion());
+      // With C++17 copy elision the InitExpr can be anything, so instead of
+      // pattern matching all cases, we simple check if the current field is
+      // under construction or not, regardless what it's InitExpr is.
+      if (const auto OUC =
+              getObjectUnderConstruction(State, {LE, Idx}, LocCtxt)) {
+        InitVal = State->getSVal(OUC->getAsRegion());
 
         State = finishObjectConstruction(State, {LE, Idx}, LocCtxt);
       } else
