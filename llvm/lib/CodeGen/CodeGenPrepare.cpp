@@ -274,6 +274,9 @@ static cl::opt<bool>
     DisableDeletePHIs("disable-cgp-delete-phis", cl::Hidden, cl::init(false),
                       cl::desc("Disable elimination of dead PHI nodes."));
 
+static cl::opt<bool> OrderBlocks("cgp-order-blocks", cl::Hidden, cl::init(true),
+    cl::desc("Order blocks frquency sorted reverse post order"));
+
 namespace {
 
 enum ExtType {
@@ -541,6 +544,42 @@ FunctionPass *llvm::createCodeGenPrepareLegacyPass() {
   return new CodeGenPrepareLegacyPass();
 }
 
+static void visit(SmallPtrSetImpl<BasicBlock*>& Visited,
+                  SmallVectorImpl<BasicBlock*>& PO,
+                  const BlockFrequencyInfo &BFI, BasicBlock& BB) {
+  if (Visited.contains(&BB))
+    return;
+  Visited.insert(&BB);
+
+  SmallVector<BasicBlock*, 2> Succs;
+  for (BasicBlock* Succ : reverse(successors(&BB))) {
+    Succs.push_back(Succ);
+  }
+  stable_sort(Succs, [&BFI](BasicBlock* B0, BasicBlock* B1) -> bool {
+    return BFI.getBlockFreq(B0) < BFI.getBlockFreq(B1);
+  });
+
+  for (BasicBlock* Succ : Succs) {
+    visit(Visited, PO, BFI, *Succ);
+  }
+  PO.push_back(&BB);
+}
+
+static void orderBlocks(Function &F, const BlockFrequencyInfo &BFI) {
+  SmallPtrSet<BasicBlock*, 8> Visited;
+
+  SmallVector<BasicBlock*, 8> PO;
+  visit(Visited, PO, BFI, F.getEntryBlock());
+
+  // Rearrange blocks in function
+  for (BasicBlock *BB : PO) {
+    BB->removeFromParent();
+  }
+  for (BasicBlock *BB : reverse(PO)) {
+    BB->insertInto(&F);
+  }
+}
+
 PreservedAnalyses CodeGenPreparePass::run(Function &F,
                                           FunctionAnalysisManager &AM) {
   CodeGenPrepare CGP(TM);
@@ -577,6 +616,10 @@ bool CodeGenPrepare::_run(Function &F) {
   bool EverMadeChange = false;
 
   OptSize = F.hasOptSize();
+
+  if (OrderBlocks)
+    orderBlocks(F, *BFI);
+
   // Use the basic-block-sections profile to promote hot functions to .text.hot
   // if requested.
   if (BBSectionsGuidedSectionPrefix && BBSectionsProfileReader &&
