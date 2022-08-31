@@ -39,6 +39,13 @@ using namespace llvm;
 #define GET_REGINFO_TARGET_DESC
 #include "AArch64GenRegisterInfo.inc"
 
+// facebook begin T130465181
+static cl::opt<bool> FrameRecordOnTop(
+    "aarch64-frame-record-top",
+    cl::desc("Place frame record (saved LR+FR) on top of callee save area"),
+    cl::Hidden);
+// facebook end
+
 AArch64RegisterInfo::AArch64RegisterInfo(const Triple &TT)
     : AArch64GenRegisterInfo(AArch64::LR), TT(TT) {
   AArch64_MC::initLLVMToCVRegMapping(this);
@@ -82,6 +89,21 @@ AArch64RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   // lists depending on that will need to have their Darwin variant as well.
   if (MF->getSubtarget<AArch64Subtarget>().isTargetDarwin())
     return getDarwinCalleeSavedRegs(MF);
+
+  // facebook begin T130465181
+  if (FrameRecordOnTop) {
+    CallingConv::ID CC = MF->getFunction().getCallingConv();
+    if (CC == CallingConv::C)
+      return CSR_AArch64_AAPCS_FRTop_SaveList;
+    if (CC == CallingConv::AArch64_VectorCall)
+      return CSR_AArch64_AAVPCS_FRTop_SaveList;
+    if (CC == CallingConv::PreserveMost)
+      return CSR_AArch64_RT_MostRegs_FRTop_SaveList;
+    report_fatal_error(
+        Twine("frame-record-on-top not supported for calling convention ") +
+        Twine(CC));
+  }
+  // facebook end
 
   if (MF->getFunction().getCallingConv() == CallingConv::CFGuard_Check)
     return CSR_Win_AArch64_CFGuard_Check_SaveList;

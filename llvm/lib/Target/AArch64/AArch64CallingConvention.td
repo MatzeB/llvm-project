@@ -408,6 +408,13 @@ def CSR_AArch64_AAPCS : CalleeSavedRegs<(add X19, X20, X21, X22, X23, X24,
 // code that needs X18 to be preserved.
 def CSR_AArch64_AAPCS_X18 : CalleeSavedRegs<(add X18, CSR_AArch64_AAPCS)>;
 
+// facebook begin T130465181
+// The same as CSR_AArch64_APPCS but with the frame record (LR+FP reg) saved
+// on top of the callee-saved area.
+def CSR_AArch64_AAPCS_FRTop
+    : CalleeSavedRegs<(add LR, FP, (sub CSR_AArch64_AAPCS, LR, FP))>;
+// facebook end
+
 // Win64 has unwinding codes for an (FP,LR) pair, save_fplr and save_fplr_x.
 // We put FP before LR, so that frame lowering logic generates (FP,LR) pairs,
 // and not (LR,FP) pairs.
@@ -427,6 +434,13 @@ def CSR_Win_AArch64_CFGuard_Check : CalleeSavedRegs<(add CSR_Win_AArch64_AAPCS,
 def CSR_AArch64_AAVPCS : CalleeSavedRegs<(add X19, X20, X21, X22, X23, X24,
                                           X25, X26, X27, X28, LR, FP,
                                           (sequence "Q%u", 8, 23))>;
+
+// facebook begin T130465181
+// The same as CSR_AArch64_AVPSCS but with the frame record (LR+FP reg) saved
+// on top of the callee-saved area.
+def CSR_AArch64_AAVPCS_FRTop
+    : CalleeSavedRegs<(add LR, FP, (sub CSR_AArch64_AAVPCS, LR, FP))>;
+// facebook end
 
 // Functions taking SVE arguments or returning an SVE type
 // must (additionally) preserve full Z8-Z23 and predicate registers P4-P15
@@ -488,6 +502,13 @@ def CSR_AArch64_NoRegs : CalleeSavedRegs<(add)>;
 
 def CSR_AArch64_RT_MostRegs :  CalleeSavedRegs<(add CSR_AArch64_AAPCS,
                                                 (sequence "X%u", 9, 15))>;
+
+// facebook begin T130465181
+// The same as CSR_AArch64_RT_MostRegs but with the frame record (LR+FP reg)
+// saved on top of the callee-saved area.
+def CSR_AArch64_RT_MostRegs_FRTop
+    : CalleeSavedRegs<(add LR, FP, (sub CSR_AArch64_RT_MostRegs, LR, FP))>;
+// facebook end
 
 def CSR_AArch64_StackProbe_Windows
     : CalleeSavedRegs<(add (sequence "X%u", 0, 15),
