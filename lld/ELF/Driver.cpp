@@ -311,8 +311,10 @@ void LinkerDriver::addFile(StringRef path, bool withLOption) {
     // the directory part is ignored. Note that path may be a temporary and
     // cannot be stored into SharedFile::soName.
     path = mbref.getBufferIdentifier();
+    // facebook begin T124883009
     auto *f =
-        make<SharedFile>(mbref, withLOption ? path::filename(path) : path);
+        make<SharedFile>(mbref, withLOption ? path::filename(path) : path, withLOption);
+    // facebook end T124883009
     f->init();
     files.push_back(f);
     return;

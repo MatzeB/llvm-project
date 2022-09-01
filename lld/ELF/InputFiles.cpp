@@ -218,6 +218,11 @@ writeFullIndex(const std::unique_ptr<llvm::raw_fd_ostream> &fullIndexFile,
           std::string(config->thinLTOPrefixReplaceOld),
           std::string(config->thinLTOPrefixReplaceNew));
       *fullIndexFile << NewModulePath << "\n";
+    } else if (auto *f = dyn_cast<SharedFile>(&file)) {
+      if (f->withLOption)
+        *fullIndexFile << "-l:" << f->soName << "\n";
+      else
+        *fullIndexFile << f->soName << "\n";
     } else
       *fullIndexFile << file.getName() << "\n";
   }
@@ -1345,9 +1350,11 @@ static bool isNonCommonDef(MemoryBufferRef mb, StringRef symName,
 
 unsigned SharedFile::vernauxNum;
 
-SharedFile::SharedFile(MemoryBufferRef m, StringRef defaultSoName)
+// facebook begin T124883009
+SharedFile::SharedFile(MemoryBufferRef m, StringRef defaultSoName, bool withLOption)
     : ELFFileBase(SharedKind, getELFKind(m, ""), m), soName(defaultSoName),
-      isNeeded(!config->asNeeded) {}
+      isNeeded(!config->asNeeded), withLOption(withLOption) {}
+// facebook end T124883009
 
 // Parse the version definitions in the object file if present, and return a
 // vector whose nth element contains a pointer to the Elf_Verdef for version
