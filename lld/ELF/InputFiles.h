@@ -327,9 +327,11 @@ public:
 // .so file.
 class SharedFile : public ELFFileBase {
 public:
-  SharedFile(MemoryBufferRef m, StringRef defaultSoName)
+  // facebook begin T124883009
+  SharedFile(MemoryBufferRef m, StringRef defaultSoName, bool withLOption)
       : ELFFileBase(SharedKind, m), soName(defaultSoName),
-        isNeeded(!config->asNeeded) {}
+        isNeeded(!config->asNeeded), withLOption(withLOption) {}
+  // facebook end T124883009
 
   // This is actually a vector of Elf_Verdef pointers.
   SmallVector<const void *, 0> verdefs;
@@ -354,6 +356,10 @@ public:
   // Non-weak undefined symbols which are not yet resolved when the SO is
   // parsed. Only filled for `--no-allow-shlib-undefined`.
   SmallVector<Symbol *, 0> requiredSymbols;
+
+  // facebook begin T124883009
+  bool withLOption;
+  // facebook end T124883009
 
 private:
   template <typename ELFT>

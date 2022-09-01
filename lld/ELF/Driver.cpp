@@ -276,8 +276,10 @@ void LinkerDriver::addFile(StringRef path, bool withLOption) {
     // the directory part is ignored. Note that path may be a temporary and
     // cannot be stored into SharedFile::soName.
     path = mbref.getBufferIdentifier();
-    files.push_back(
-        make<SharedFile>(mbref, withLOption ? path::filename(path) : path));
+    // facebook begin T124883009
+    files.push_back(make<SharedFile>(
+        mbref, withLOption ? path::filename(path) : path, withLOption));
+    // facebook end T124883009
     return;
   case file_magic::bitcode:
     files.push_back(make<BitcodeFile>(mbref, "", 0, inLib));

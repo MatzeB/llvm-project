@@ -209,6 +209,11 @@ writeFullIndex(const std::unique_ptr<llvm::raw_fd_ostream> &fullIndexFile,
           std::string(config->thinLTOPrefixReplace.first),
           std::string(config->thinLTOPrefixReplace.second));
       *fullIndexFile << NewModulePath << "\n";
+    } else if (auto *f = dyn_cast<SharedFile>(&file)) {
+      if (f->withLOption)
+        *fullIndexFile << "-l:" << f->soName << "\n";
+      else
+        *fullIndexFile << f->soName << "\n";
     } else
       *fullIndexFile << file.getName() << "\n";
   }
