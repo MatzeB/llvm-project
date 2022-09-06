@@ -202,6 +202,7 @@ slippers:
 
 shoes:
   %moo = trunc i64 %foo to i16
+  store i16 %moo, i16 *@glob16, !dbg !32
   br label %slippers
 }
 

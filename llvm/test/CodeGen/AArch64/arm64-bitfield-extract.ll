@@ -1007,9 +1007,9 @@ define void @sameOperandBFI(i64 %src, i64 %src2, i16 *%ptr) {
 ; OPT-LABEL: @sameOperandBFI(
 ; OPT-NEXT:  entry:
 ; OPT-NEXT:    [[SHR47:%.*]] = lshr i64 [[SRC:%.*]], 47
-; OPT-NEXT:    [[SRC2_TRUNC:%.*]] = trunc i64 [[SRC2:%.*]] to i32
 ; OPT-NEXT:    br i1 undef, label [[END:%.*]], label [[IF_ELSE:%.*]]
 ; OPT:       if.else:
+; OPT-NEXT:    [[SRC2_TRUNC:%.*]] = trunc i64 [[SRC2:%.*]] to i32
 ; OPT-NEXT:    [[AND3:%.*]] = and i32 [[SRC2_TRUNC]], 3
 ; OPT-NEXT:    [[SHL2:%.*]] = shl nuw nsw i64 [[SHR47]], 2
 ; OPT-NEXT:    [[SHL2_TRUNC:%.*]] = trunc i64 [[SHL2]] to i32

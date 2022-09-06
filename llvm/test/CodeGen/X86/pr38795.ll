@@ -52,15 +52,14 @@ define dso_local void @fn() {
 ; CHECK-NEXT:    cltd
 ; CHECK-NEXT:    idivl a
 ; CHECK-NEXT:    movzbl {{[-0-9]+}}(%e{{[sb]}}p), %edx # 1-byte Folded Reload
-; CHECK-NEXT:    movb %cl, %dh
 ; CHECK-NEXT:    movl $0, h
 ; CHECK-NEXT:    cmpb $8, %dl
 ; CHECK-NEXT:    jg .LBB0_8
 ; CHECK-NEXT:  # %bb.5: # %if.then13
 ; CHECK-NEXT:    # in Loop: Header=BB0_1 Depth=1
 ; CHECK-NEXT:    movl %eax, %esi
+; CHECK-NEXT:    movb %cl, {{[-0-9]+}}(%e{{[sb]}}p) # 1-byte Spill
 ; CHECK-NEXT:    movl $.str, (%esp)
-; CHECK-NEXT:    movb %dh, {{[-0-9]+}}(%e{{[sb]}}p) # 1-byte Spill
 ; CHECK-NEXT:    calll printf
 ; CHECK-NEXT:    movb {{[-0-9]+}}(%e{{[sb]}}p), %dh # 1-byte Reload
 ; CHECK-NEXT:    testb %bl, %bl
@@ -105,6 +104,7 @@ define dso_local void @fn() {
 ; CHECK-NEXT:    .p2align 4, 0x90
 ; CHECK-NEXT:  .LBB0_8: # %if.end21
 ; CHECK-NEXT:    # in Loop: Header=BB0_1 Depth=1
+; CHECK-NEXT:    movb %cl, %dh
 ; CHECK-NEXT:    # implicit-def: $ebp
 ; CHECK-NEXT:    jmp .LBB0_9
 ; CHECK-NEXT:    .p2align 4, 0x90

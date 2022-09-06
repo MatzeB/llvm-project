@@ -120,15 +120,15 @@ ret:
 ; GCN-LABEL: {{^}}sink_ubfe_i16:
 ; GCN-NOT: lshr
 ; VI: s_load_dword [[ARG:s[0-9]+]], s[0:1], 0x2c
-; VI: s_bfe_u32 [[BFE:s[0-9]+]], [[ARG]], 0xc0004
+; VI: s_and_b32 [[AND:s[0-9]+]], [[ARG]], 0xffff
 ; GCN: s_cbranch_scc{{[0-1]}}
 
 ; SI: s_bfe_u32 s{{[0-9]+}}, s{{[0-9]+}}, 0x70004
-; VI: v_mov_b32_e32 v{{[0-9]+}}, 0x7f
+; VI: v_lshrrev_b16_e64 v{{[0-9]+}}, 4, [[AND]]
 
 ; GCN: .LBB2_3:
 ; SI: s_bfe_u32 s{{[0-9]+}}, s{{[0-9]+}}, 0x80004
-; VI: v_mov_b32_e32 v{{[0-9]+}}, 0xff
+; VI: v_lshrrev_b16_e64 v{{[0-9]+}}, 4, [[AND]]
 
 ; GCN: buffer_store_short
 ; GCN: s_endpgm

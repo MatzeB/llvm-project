@@ -15,7 +15,6 @@ define void @copy_if_shared_r() {
 ; CHECK-NEXT:    ja .LBB0_2
 ; CHECK-NEXT:  # %bb.1: # %cond_true
 ; CHECK-NEXT:    shrl $31, %eax
-; CHECK-NEXT:    testb %al, %al
 ; CHECK-NEXT:  .LBB0_2: # %cond_true17
 ; CHECK-NEXT:    retl
 	%tmp = load i32, ptr null		; <i32> [#uses=1]

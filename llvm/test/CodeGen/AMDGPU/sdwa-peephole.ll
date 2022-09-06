@@ -487,10 +487,11 @@ entry:
 ; GCN-LABEL: {{^}}add_bb_v2i16:
 ; NOSDWA-NOT: v_add_{{(_co)?}}_u32_sdwa
 
-; VI: v_readfirstlane_b32 [[LO:s[0-9]+]]
-; VI: v_readfirstlane_b32 [[HI:s[0-9]+]]
-; VI: s_lshr_b32 [[LOSH:s[0-9]+]], [[LO]], 16
-; VI: s_lshr_b32 [[HISH:s[0-9]+]], [[HI]], 16
+; VI: flat_load_dword [[LO:v[0-9]+]], v[0:1]
+; VI: flat_load_dword [[HI:v[0-9]+]], v[2:3]
+; VI: v_add_u32_sdwa [[LOSH:v[0-9]+]], vcc, [[LO]], [[HI]] dst_sel:WORD_1 dst_unused:UNUSED_PAD src0_sel:WORD_1 src1_sel:WORD_1
+; VI: v_add_u32_e32 [[HI]], vcc, [[LO]], [[HI]]
+; VI: v_or_b32_sdwa [[HI]], [[HI]], [[LOSH]] dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_0 src1_sel:DWORD
 
 ; GFX9_10: v_pk_add_u16 v{{[0-9]+}}, v{{[0-9]+}}, v{{[0-9]+}}
 

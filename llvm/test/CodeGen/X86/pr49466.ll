@@ -18,7 +18,6 @@ define dso_local i32 @m() {
 ; CHECK-NEXT:    [[TMP1:%.*]] = load i64, ptr @c, align 8
 ; CHECK-NEXT:    [[CONV18:%.*]] = trunc i64 [[TMP1]] to i32
 ; CHECK-NEXT:    [[TMP2:%.*]] = load i64, ptr @d, align 8
-; CHECK-NEXT:    [[CONV43:%.*]] = trunc i64 [[TMP2]] to i8
 ; CHECK-NEXT:    br label [[FOR_COND:%.*]]
 ; CHECK:       for.cond:
 ; CHECK-NEXT:    [[J_0:%.*]] = phi i32 [ undef, [[ENTRY:%.*]] ], [ [[J_1_LCSSA:%.*]], [[FOR_COND39_PREHEADER:%.*]] ]
@@ -33,8 +32,9 @@ define dso_local i32 @m() {
 ; CHECK-NEXT:    [[J_1_LCSSA]] = phi i32 [ [[J_0]], [[FOR_COND]] ], [ [[CONV18]], [[FOR_COND1_LOOPEXIT:%.*]] ]
 ; CHECK-NEXT:    [[P_1_LCSSA]] = phi i64 [ [[P_0]], [[FOR_COND]] ], [ 0, [[FOR_COND1_LOOPEXIT]] ]
 ; CHECK-NEXT:    [[I_1_LCSSA]] = phi i32 [ [[I_0]], [[FOR_COND]] ], [ [[CONV18]], [[FOR_COND1_LOOPEXIT]] ]
-; CHECK-NEXT:    [[TMP4:%.*]] = icmp eq i8 [[CONV43]], 0
-; CHECK-NEXT:    br i1 [[TMP4]], label [[FOR_COND]], label [[FOR_INC42:%.*]]
+; CHECK-NEXT:    [[TMP4:%.*]] = trunc i64 [[TMP2]] to i8
+; CHECK-NEXT:    [[TMP5:%.*]] = icmp eq i8 [[TMP4]], 0
+; CHECK-NEXT:    br i1 [[TMP5]], label [[FOR_COND]], label [[FOR_INC42:%.*]]
 ; CHECK:       for.body:
 ; CHECK-NEXT:    [[L_176:%.*]] = phi i8 [ [[SUB:%.*]], [[FOR_COND1_LOOPEXIT]] ], [ 0, [[FOR_COND]] ]
 ; CHECK-NEXT:    [[P_175:%.*]] = phi i64 [ 0, [[FOR_COND1_LOOPEXIT]] ], [ [[P_0]], [[FOR_COND]] ]
@@ -54,21 +54,21 @@ define dso_local i32 @m() {
 ; CHECK-NEXT:    i64 0, label [[FOR_END12]]
 ; CHECK-NEXT:    ]
 ; CHECK:       for.body4.preheader6:
-; CHECK-NEXT:    [[TMP5:%.*]] = sub i64 0, [[P_175]]
-; CHECK-NEXT:    [[XTRAITER:%.*]] = and i64 [[TMP5]], 7
-; CHECK-NEXT:    [[TMP6:%.*]] = add i64 [[P_175]], [[XTRAITER]]
+; CHECK-NEXT:    [[TMP6:%.*]] = sub i64 0, [[P_175]]
+; CHECK-NEXT:    [[XTRAITER:%.*]] = and i64 [[TMP6]], 7
+; CHECK-NEXT:    [[TMP7:%.*]] = add i64 [[P_175]], [[XTRAITER]]
 ; CHECK-NEXT:    br label [[FOR_BODY4:%.*]]
 ; CHECK:       for.body4:
-; CHECK-NEXT:    [[P_270:%.*]] = phi i64 [ [[INC11_7:%.*]], [[FOR_BODY4]] ], [ [[TMP6]], [[FOR_BODY4_PREHEADER6]] ]
+; CHECK-NEXT:    [[P_270:%.*]] = phi i64 [ [[INC11_7:%.*]], [[FOR_BODY4]] ], [ [[TMP7]], [[FOR_BODY4_PREHEADER6]] ]
 ; CHECK-NEXT:    [[INC11_7]] = add i64 [[P_270]], 8
 ; CHECK-NEXT:    [[TOBOOL3_NOT_7:%.*]] = icmp eq i64 [[INC11_7]], 0
 ; CHECK-NEXT:    br i1 [[TOBOOL3_NOT_7]], label [[FOR_END12]], label [[FOR_BODY4]]
 ; CHECK:       for.end12:
-; CHECK-NEXT:    [[TMP7:%.*]] = inttoptr i64 [[TMP0]] to ptr
-; CHECK-NEXT:    [[TMP8:%.*]] = load i32, ptr [[TMP7]], align 4
-; CHECK-NEXT:    [[CONV23:%.*]] = zext i32 [[TMP8]] to i64
-; CHECK-NEXT:    [[TMP9:%.*]] = load i64, ptr @b, align 8
-; CHECK-NEXT:    [[DIV24:%.*]] = udiv i64 [[TMP9]], [[CONV23]]
+; CHECK-NEXT:    [[TMP8:%.*]] = inttoptr i64 [[TMP0]] to ptr
+; CHECK-NEXT:    [[TMP9:%.*]] = load i32, ptr [[TMP8]], align 4
+; CHECK-NEXT:    [[CONV23:%.*]] = zext i32 [[TMP9]] to i64
+; CHECK-NEXT:    [[TMP10:%.*]] = load i64, ptr @b, align 8
+; CHECK-NEXT:    [[DIV24:%.*]] = udiv i64 [[TMP10]], [[CONV23]]
 ; CHECK-NEXT:    store i64 [[DIV24]], ptr @b, align 8
 ; CHECK-NEXT:    [[SUB]] = add i8 [[L_176]], -1
 ; CHECK-NEXT:    [[TOBOOL32_NOT72:%.*]] = icmp eq i64 [[DOTPR_PRE]], 0

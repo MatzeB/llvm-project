@@ -111,6 +111,7 @@ STATISTIC(NumPHIsElim,   "Number of trivial PHIs eliminated");
 STATISTIC(NumGEPsElim,   "Number of GEPs converted to casts");
 STATISTIC(NumCmpUses, "Number of uses of Cmp expressions replaced with uses of "
                       "sunken Cmps");
+STATISTIC(NumTruncSunk, "Number of new sunken Trunc instructions created");
 STATISTIC(NumCastUses, "Number of uses of Cast expressions replaced with uses "
                        "of sunken Casts");
 STATISTIC(NumMemoryInsts, "Number of memory instructions whose address "
@@ -414,6 +415,7 @@ class TypePromotionTransaction;
     bool optimizeSwitchType(SwitchInst *SI);
     bool optimizeSwitchPhiConstants(SwitchInst *SI);
     bool optimizeSwitchInst(SwitchInst *SI);
+    bool optimizeTrunc(TruncInst *Trunc);
     bool optimizeExtractElementInst(Instruction *Inst);
     bool dupRetToEnableTailCallOpts(BasicBlock *BB, bool &ModifiedDT);
     bool fixupDbgValue(Instruction *I);
@@ -6196,6 +6198,78 @@ bool CodeGenPrepare::canFormExtLd(
   return TLI->isExtLoad(LI, Inst, *DL);
 }
 
+bool CodeGenPrepare::optimizeTrunc(TruncInst *Trunc) {
+  // Attempt to duplicate and sink trunc instruction if they are expected to be
+  // free. This counteracts the tendency of earlier optimizations to hoist
+  // truncations out of loops where possible.
+
+  Type *SrcTy = Trunc->getSrcTy();
+  Type *DestTy = Trunc->getDestTy();
+  if (!TLI->isTruncateFree(SrcTy, DestTy))
+    return false;
+
+  for (const Use &U : Trunc->uses()) {
+    Instruction *User = cast<Instruction>(U.getUser());
+    // Figure out which BB this tunc is used in.
+    BasicBlock *UserBB = User->getParent();
+    if (PHINode *PHI = dyn_cast<PHINode>(User)) {
+      UserBB = PHI->getIncomingBlock(U);
+    }
+
+    // For now be conservative and don't duplicate the trunc if we cannot remove
+    // the original afterwards.
+    if (UserBB == Trunc->getParent())
+      return false;
+  }
+
+  LLVM_DEBUG(dbgs() << "Sinking/duplicating " << *Trunc << '\n');
+
+  // Only insert a trunc in each block once.
+  SmallDenseMap<BasicBlock *, TruncInst *, 8> InsertedTruncs;
+  bool MadeChange = false;
+  for (Use &U : make_early_inc_range(Trunc->uses())) {
+    Instruction *User = cast<Instruction>(U.getUser());
+
+    // Figure out which BB this tunc is used in.
+    BasicBlock *UserBB = User->getParent();
+    if (PHINode *PHI = dyn_cast<PHINode>(User)) {
+      UserBB = PHI->getIncomingBlock(U);
+    }
+
+    // If we have already inserted a trunc into this block, use it.
+    TruncInst *InsertedTrunc = InsertedTruncs[UserBB];
+
+    if (!InsertedTrunc) {
+      BasicBlock::iterator InsertPt = UserBB->getFirstInsertionPt();
+      assert(InsertPt != UserBB->end());
+      InsertedTrunc = cast<TruncInst>(CastInst::CreateTruncOrBitCast(
+          Trunc->getOperand(0), DestTy, "", &*InsertPt));
+      // Propagate the debug info.
+      InsertedTrunc->setDebugLoc(Trunc->getDebugLoc());
+      InsertedTruncs[UserBB] = InsertedTrunc;
+
+      LLVM_DEBUG(dbgs() << "  ... created " << *InsertedTrunc << " in "
+                        << UserBB->getName() << '\n');
+    }
+
+    // Replace a use of the trunc with a use of the new trunc.
+    LLVM_DEBUG(dbgs() << "  ... replace use in " << *User << "  with  "
+                      << *InsertedTrunc << '\n');
+    U.set(InsertedTrunc);
+    MadeChange = true;
+    ++NumTruncSunk;
+  }
+  if (!MadeChange)
+    return false;
+
+  // If we removed all uses, nuke the trunc.
+  if (Trunc->use_empty()) {
+    LLVM_DEBUG(dbgs() << "  ... removing unused " << *Trunc << '\n');
+    Trunc->eraseFromParent();
+  }
+  return true;
+}
+
 /// Move a zext or sext fed by a load into the same basic block as the load,
 /// unless conditions are unfavorable. This allows SelectionDAG to fold the
 /// extend into the load.
@@ -7937,6 +8011,10 @@ bool CodeGenPrepare::optimizeInst(Instruction *I, bool &ModifiedDT) {
         bool MadeChange = optimizeExt(I);
         return MadeChange | optimizeExtUses(I);
       }
+    }
+
+    if (TruncInst *Trunc = dyn_cast<TruncInst>(I)) {
+      return optimizeTrunc(Trunc);
     }
     return false;
   }
