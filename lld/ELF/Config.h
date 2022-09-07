@@ -293,6 +293,9 @@ struct Config {
   // facebook begin T124883009
   bool thinLTOFullIndex;
   // facebook end T124883009
+  // facebook begin T131255003
+  bool errorThinLTOIndexWithArchive;
+  // facebook end T131255003
   bool timeTraceEnabled;
   bool tocOptimize;
   bool pcRelOptimize;
