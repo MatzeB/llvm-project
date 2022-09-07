@@ -223,6 +223,11 @@ void LinkerDriver::addFile(StringRef path, bool withLOption) {
     readLinkerScript(mbref);
     return;
   case file_magic::archive: {
+    // facebook begin T131255003
+    if (config->errorThinLTOIndexWithArchive && config->thinLTOIndexOnly)
+      error("archive found in input during distributed thinlto thinlink: " +
+            path);
+    // facebook end T131255003
     if (inWholeArchive) {
       for (const auto &p : getArchiveMembers(mbref)) {
         if (isBitcode(p.first))
@@ -1268,6 +1273,13 @@ static void readConfigs(opt::InputArgList &args) {
   // facebook begin T124883009
   config->thinLTOFullIndex = args.hasArg(OPT_thinlto_full_index);
   // facebook end T124883009
+  // facebook begin T131255003
+  config->errorThinLTOIndexWithArchive =
+      args.hasArg(OPT_error_thinlto_index_with_archive);
+  if (config->errorThinLTOIndexWithArchive && !config->thinLTOIndexOnly)
+    warn("--error-thinlto-index-with-archive ignored. Must use with "
+         "--thinlto-index-only=.");
+  // facebook end T131255003
   config->thinLTOObjectSuffixReplace =
       getOldNewOptions(args, OPT_thinlto_object_suffix_replace_eq);
   config->thinLTOPrefixReplace =
