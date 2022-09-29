@@ -2726,8 +2726,8 @@ static void emitAttributes(RecordKeeper &Records, raw_ostream &OS,
 
     // Emit constructors that takes no arguments if none already exists.
     // This is used for delaying arguments.
-    bool HasRequiredArgs = std::count_if(
-        Args.begin(), Args.end(), [=](const std::unique_ptr<Argument> &arg) {
+    bool HasRequiredArgs =
+        llvm::count_if(Args, [=](const std::unique_ptr<Argument> &arg) {
           return !arg->isFake() && !arg->isOptional();
         });
     if (DelayedArgs && HasRequiredArgs)
@@ -2897,7 +2897,8 @@ static const AttrClassDescriptor AttrClassDescriptors[] = {
   { "INHERITABLE_ATTR", "InheritableAttr" },
   { "DECL_OR_TYPE_ATTR", "DeclOrTypeAttr" },
   { "INHERITABLE_PARAM_ATTR", "InheritableParamAttr" },
-  { "PARAMETER_ABI_ATTR", "ParameterABIAttr" }
+  { "PARAMETER_ABI_ATTR", "ParameterABIAttr" },
+  { "HLSL_ANNOTATION_ATTR", "HLSLAnnotationAttr"}
 };
 
 static void emitDefaultDefine(raw_ostream &OS, StringRef name,

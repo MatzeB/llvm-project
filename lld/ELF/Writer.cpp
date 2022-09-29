@@ -317,6 +317,7 @@ template <class ELFT> void elf::createSyntheticSections() {
 
   StringRef relaDynName = config->isRela ? ".rela.dyn" : ".rel.dyn";
 
+  const unsigned threadCount = config->threadCount;
   for (Partition &part : partitions) {
     auto add = [&](SyntheticSection &sec) {
       sec.partition = part.getNumber();
@@ -350,11 +351,11 @@ template <class ELFT> void elf::createSyntheticSections() {
     }
 
     if (config->androidPackDynRelocs)
-      part.relaDyn =
-          std::make_unique<AndroidPackedRelocationSection<ELFT>>(relaDynName);
+      part.relaDyn = std::make_unique<AndroidPackedRelocationSection<ELFT>>(
+          relaDynName, threadCount);
     else
       part.relaDyn = std::make_unique<RelocationSection<ELFT>>(
-          relaDynName, config->zCombreloc);
+          relaDynName, config->zCombreloc, threadCount);
 
     if (config->hasDynSymTab) {
       add(*part.dynSymTab);
@@ -386,7 +387,7 @@ template <class ELFT> void elf::createSyntheticSections() {
     }
 
     if (config->relrPackDynRelocs) {
-      part.relrDyn = std::make_unique<RelrSection<ELFT>>();
+      part.relrDyn = std::make_unique<RelrSection<ELFT>>(threadCount);
       add(*part.relrDyn);
     }
 
@@ -468,7 +469,8 @@ template <class ELFT> void elf::createSyntheticSections() {
   // We always need to add rel[a].plt to output if it has entries.
   // Even for static linking it can contain R_[*]_IRELATIVE relocations.
   in.relaPlt = std::make_unique<RelocationSection<ELFT>>(
-      config->isRela ? ".rela.plt" : ".rel.plt", /*sort=*/false);
+      config->isRela ? ".rela.plt" : ".rel.plt", /*sort=*/false,
+      /*threadCount=*/1);
   add(*in.relaPlt);
 
   // The relaIplt immediately follows .rel[a].dyn to ensure that the IRelative
@@ -479,7 +481,7 @@ template <class ELFT> void elf::createSyntheticSections() {
   // behaviour by placing the iplt section in .rel.plt.
   in.relaIplt = std::make_unique<RelocationSection<ELFT>>(
       config->androidPackDynRelocs ? in.relaPlt->name : relaDynName,
-      /*sort=*/false);
+      /*sort=*/false, /*threadCount=*/1);
   add(*in.relaIplt);
 
   if ((config->emachine == EM_386 || config->emachine == EM_X86_64) &&
@@ -587,7 +589,8 @@ template <class ELFT> void Writer<ELFT>::run() {
       return;
 
     if (auto e = buffer->commit())
-      error("failed to write to the output file: " + toString(std::move(e)));
+      fatal("failed to write output '" + buffer->getPath() +
+            "': " + toString(std::move(e)));
   }
 }
 
@@ -1908,21 +1911,7 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
     // a linker-script-defined symbol is absolute.
     ppc64noTocRelax.clear();
     if (!config->relocatable) {
-      // Scan all relocations. Each relocation goes through a series of tests to
-      // determine if it needs special treatment, such as creating GOT, PLT,
-      // copy relocations, etc. Note that relocations for non-alloc sections are
-      // directly processed by InputSection::relocateNonAlloc.
-      for (InputSectionBase *sec : inputSections)
-        if (sec->isLive() && (sec->flags & SHF_ALLOC))
-          scanRelocations<ELFT>(*sec);
-      for (Partition &part : partitions) {
-        for (EhInputSection *sec : part.ehFrame->sections)
-          scanRelocations<ELFT>(*sec);
-        if (part.armExidx && part.armExidx->isLive())
-          for (InputSection *sec : part.armExidx->exidxSections)
-            scanRelocations<ELFT>(*sec);
-      }
-
+      scanRelocations<ELFT>();
       reportUndefinedSymbols();
       postScanRelocations();
     }
@@ -2088,16 +2077,20 @@ template <class ELFT> void Writer<ELFT>::finalizeSections() {
     // symbol table section (dynSymTab) must be the first one.
     for (Partition &part : partitions) {
       if (part.relaDyn) {
+        part.relaDyn->mergeRels();
         // Compute DT_RELACOUNT to be used by part.dynamic.
         part.relaDyn->partitionRels();
         finalizeSynthetic(part.relaDyn.get());
+      }
+      if (part.relrDyn) {
+        part.relrDyn->mergeRels();
+        finalizeSynthetic(part.relrDyn.get());
       }
 
       finalizeSynthetic(part.dynSymTab.get());
       finalizeSynthetic(part.gnuHashTab.get());
       finalizeSynthetic(part.hashTab.get());
       finalizeSynthetic(part.verDef.get());
-      finalizeSynthetic(part.relrDyn.get());
       finalizeSynthetic(part.ehFrameHdr.get());
       finalizeSynthetic(part.verSym.get());
       finalizeSynthetic(part.verNeed.get());
@@ -2839,9 +2832,10 @@ template <class ELFT> void Writer<ELFT>::openFile() {
 }
 
 template <class ELFT> void Writer<ELFT>::writeSectionsBinary() {
+  parallel::TaskGroup tg;
   for (OutputSection *sec : outputSections)
     if (sec->flags & SHF_ALLOC)
-      sec->writeTo<ELFT>(Out::bufferStart + sec->offset);
+      sec->writeTo<ELFT>(Out::bufferStart + sec->offset, tg);
 }
 
 static void fillTrap(uint8_t *i, uint8_t *end) {
@@ -2884,16 +2878,21 @@ template <class ELFT> void Writer<ELFT>::writeTrapInstr() {
 template <class ELFT> void Writer<ELFT>::writeSections() {
   llvm::TimeTraceScope timeScope("Write sections");
 
-  // In -r or --emit-relocs mode, write the relocation sections first as in
-  // ELf_Rel targets we might find out that we need to modify the relocated
-  // section while doing it.
-  for (OutputSection *sec : outputSections)
-    if (sec->type == SHT_REL || sec->type == SHT_RELA)
-      sec->writeTo<ELFT>(Out::bufferStart + sec->offset);
-
-  for (OutputSection *sec : outputSections)
-    if (sec->type != SHT_REL && sec->type != SHT_RELA)
-      sec->writeTo<ELFT>(Out::bufferStart + sec->offset);
+  {
+    // In -r or --emit-relocs mode, write the relocation sections first as in
+    // ELf_Rel targets we might find out that we need to modify the relocated
+    // section while doing it.
+    parallel::TaskGroup tg;
+    for (OutputSection *sec : outputSections)
+      if (sec->type == SHT_REL || sec->type == SHT_RELA)
+        sec->writeTo<ELFT>(Out::bufferStart + sec->offset, tg);
+  }
+  {
+    parallel::TaskGroup tg;
+    for (OutputSection *sec : outputSections)
+      if (sec->type != SHT_REL && sec->type != SHT_RELA)
+        sec->writeTo<ELFT>(Out::bufferStart + sec->offset, tg);
+  }
 
   // Finally, check that all dynamic relocation addends were written correctly.
   if (config->checkDynamicRelocs && config->writeAddends) {

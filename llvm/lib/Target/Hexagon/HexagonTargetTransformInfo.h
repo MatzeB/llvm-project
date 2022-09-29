@@ -43,6 +43,7 @@ class HexagonTTIImpl : public BasicTTIImplBase<HexagonTTIImpl> {
   const HexagonTargetLowering *getTLI() const { return &TLI; }
 
   bool useHVX() const;
+  bool isHVXVectorType(Type *Ty) const;
 
   // Returns the number of vector elements of Ty, if Ty is a vector type,
   // or 1 if Ty is a scalar type. It is incorrect to call this function
@@ -119,7 +120,7 @@ public:
   InstructionCost
   getMemoryOpCost(unsigned Opcode, Type *Src, MaybeAlign Alignment,
                   unsigned AddressSpace, TTI::TargetCostKind CostKind,
-                  TTI::OperandValueKind OpdInfo = TTI::OK_AnyValue,
+                  TTI::OperandValueInfo OpInfo = {TTI::OK_AnyValue, TTI::OP_None},
                   const Instruction *I = nullptr);
   InstructionCost getMaskedMemoryOpCost(unsigned Opcode, Type *Src,
                                         Align Alignment, unsigned AddressSpace,

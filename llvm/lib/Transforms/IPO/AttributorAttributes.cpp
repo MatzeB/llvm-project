@@ -60,6 +60,7 @@
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <cassert>
+#include <numeric>
 
 using namespace llvm;
 
@@ -1279,29 +1280,20 @@ struct AAPointerInfoFloating : public AAPointerInfoImpl {
         UsrOI = PtrOI;
 
         // TODO: Use range information.
+        APInt GEPOffset(DL.getIndexTypeSizeInBits(GEP->getType()), 0);
         if (PtrOI.Offset == OffsetAndSize::Unknown ||
-            !GEP->hasAllConstantIndices()) {
+            !GEP->accumulateConstantOffset(DL, GEPOffset)) {
           UsrOI.Offset = OffsetAndSize::Unknown;
           Follow = true;
           return true;
         }
 
-        SmallVector<Value *, 8> Indices;
-        for (Use &Idx : GEP->indices()) {
-          if (auto *CIdx = dyn_cast<ConstantInt>(Idx)) {
-            Indices.push_back(CIdx);
-            continue;
-          }
-
-          LLVM_DEBUG(dbgs() << "[AAPointerInfo] Non constant GEP index " << *GEP
-                            << " : " << *Idx << "\n");
-          return false;
-        }
-        UsrOI.Offset = PtrOI.Offset + DL.getIndexedOffsetInType(
-                                          GEP->getSourceElementType(), Indices);
+        UsrOI.Offset = PtrOI.Offset + GEPOffset.getZExtValue();
         Follow = true;
         return true;
       }
+      if (isa<PtrToIntInst>(Usr))
+        return false;
       if (isa<CastInst>(Usr) || isa<SelectInst>(Usr) || isa<ReturnInst>(Usr))
         return HandlePassthroughUser(Usr, OffsetInfoMap[CurPtr], Follow);
 
@@ -3511,11 +3503,21 @@ struct AAIsDeadFloating : public AAIsDeadValueImpl {
     bool UsedAssumedInformation = false;
     SmallSetVector<Value *, 4> PotentialCopies;
     if (!AA::getPotentialCopiesOfStoredValue(A, SI, PotentialCopies, *this,
-                                             UsedAssumedInformation))
+                                             UsedAssumedInformation)) {
+      LLVM_DEBUG(
+          dbgs()
+          << "[AAIsDead] Could not determine potential copies of store!\n");
       return false;
+    }
+    LLVM_DEBUG(dbgs() << "[AAIsDead] Store has " << PotentialCopies.size()
+                      << " potential copies.\n");
     return llvm::all_of(PotentialCopies, [&](Value *V) {
-      return A.isAssumedDead(IRPosition::value(*V), this, nullptr,
-                             UsedAssumedInformation);
+      if (A.isAssumedDead(IRPosition::value(*V), this, nullptr,
+                          UsedAssumedInformation))
+        return true;
+      LLVM_DEBUG(dbgs() << "[AAIsDead] Potential copy " << *V
+                        << " is assumed live!\n");
+      return false;
     });
   }
 
@@ -4427,8 +4429,7 @@ static unsigned getKnownAlignForUse(Attributor &A, AAAlign &QueryingAA,
       // So we can say that the maximum power of two which is a divisor of
       // gcd(Offset, Alignment) is an alignment.
 
-      uint32_t gcd =
-          greatestCommonDivisor(uint32_t(abs((int32_t)Offset)), Alignment);
+      uint32_t gcd = std::gcd(uint32_t(abs((int32_t)Offset)), Alignment);
       Alignment = llvm::PowerOf2Floor(gcd);
     }
   }
@@ -4563,8 +4564,8 @@ struct AAAlignFloating : AAAlignImpl {
           // So we can say that the maximum power of two which is a divisor of
           // gcd(Offset, Alignment) is an alignment.
 
-          uint32_t gcd = greatestCommonDivisor(uint32_t(abs((int32_t)Offset)),
-                                               uint32_t(PA.value()));
+          uint32_t gcd =
+              std::gcd(uint32_t(abs((int32_t)Offset)), uint32_t(PA.value()));
           Alignment = llvm::PowerOf2Floor(gcd);
         } else {
           Alignment = V.getPointerAlignment(DL).value();
@@ -6354,9 +6355,14 @@ ChangeStatus AAHeapToStackFunction::updateImpl(Attributor &A) {
       llvm_unreachable("Invalid allocations should never reach this point!");
     };
 
-    // Check if we still think we can move it into the entry block.
+    // Check if we still think we can move it into the entry block. If the
+    // alloca comes from a converted __kmpc_alloc_shared then we can usually
+    // ignore the potential compilations associated with loops.
+    bool IsGlobalizedLocal =
+        AI.LibraryFunctionId == LibFunc___kmpc_alloc_shared;
     if (AI.MoveAllocaIntoEntry &&
-        (!Size.has_value() || IsInLoop(*AI.CB->getParent())))
+        (!Size.has_value() ||
+         (!IsGlobalizedLocal && IsInLoop(*AI.CB->getParent()))))
       AI.MoveAllocaIntoEntry = false;
   }
 

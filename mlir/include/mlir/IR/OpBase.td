@@ -359,7 +359,7 @@ class AllOfType<list<Type> allowedTypes, string summary = "",
 
 // A type that satisfies additional predicates.
 class ConfinedType<Type type, list<Pred> predicates, string summary = "",
-                   string cppClassName = "::mlir::Type"> : Type<
+                   string cppClassName = type.cppClassName> : Type<
     And<!listconcat([type.predicate], !foreach(pred, predicates, pred))>,
     summary, cppClassName>;
 
@@ -2432,7 +2432,7 @@ class TCOpIsBroadcastableToRes<int opId, int resId> : And<[
 // 1) all operands involved are of shaped type and
 // 2) the indices are not out of range.
 class TCopVTEtAreSameAt<list<int> indices> : CPred<
-  "::llvm::is_splat(::llvm::map_range("
+  "::llvm::all_equal(::llvm::map_range("
       "::mlir::ArrayRef<unsigned>({" # !interleave(indices, ", ") # "}), "
       "[this](unsigned i) { return getElementTypeOrSelf(this->getOperand(i)); "
       "}))">;

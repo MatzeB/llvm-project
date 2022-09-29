@@ -158,7 +158,7 @@ public:
   InstructionCost
   getMemoryOpCost(unsigned Opcode, Type *Src, MaybeAlign Alignment,
                   unsigned AddressSpace, TTI::TargetCostKind CostKind,
-                  TTI::OperandValueKind OpdInfo = TTI::OK_AnyValue,
+                  TTI::OperandValueInfo OpInfo = {TTI::OK_AnyValue, TTI::OP_None},
                   const Instruction *I = nullptr);
   InstructionCost getMaskedMemoryOpCost(unsigned Opcode, Type *Src,
                                         Align Alignment, unsigned AddressSpace,
@@ -185,9 +185,6 @@ public:
 
   unsigned getAtomicMemIntrinsicMaxElementSize() const;
 
-  InstructionCost
-  getTypeBasedIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
-                                 TTI::TargetCostKind CostKind);
   InstructionCost getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
                                         TTI::TargetCostKind CostKind);
 
@@ -254,6 +251,7 @@ public:
   bool isLegalAltInstr(VectorType *VecTy, unsigned Opcode0, unsigned Opcode1,
                        const SmallBitVector &OpcodeMask) const;
   bool hasDivRemOp(Type *DataType, bool IsSigned);
+  bool isExpensiveToSpeculativelyExecute(const Instruction *I);
   bool isFCmpOrdCheaperThanFCmpZero(Type *Ty);
   bool areInlineCompatible(const Function *Caller,
                            const Function *Callee) const;

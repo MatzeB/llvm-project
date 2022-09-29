@@ -126,7 +126,7 @@ add_mlir_library(mlir_c_runner_utils
 
   EXCLUDE_FROM_LIBMLIR
   )
-set_property(TARGET mlir_c_runner_utils PROPERTY CXX_STANDARD 11)
+set_property(TARGET mlir_c_runner_utils PROPERTY CXX_STANDARD 17)
 target_compile_definitions(mlir_c_runner_utils PRIVATE mlir_c_runner_utils_EXPORTS)
 
 add_mlir_library(mlir_runner_utils
@@ -189,8 +189,8 @@ if(MLIR_ENABLE_ROCM_RUNNER)
     else()
       set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Path to which ROCm has been installed")
     endif()
-    set(HIP_PATH "${ROCM_PATH}/hip" CACHE PATH "Path to which HIP has been installed")
   endif()
+  set(HIP_PATH "${ROCM_PATH}/hip" CACHE PATH "Path to which HIP has been installed")
   set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
   find_package(HIP)
   if (NOT HIP_FOUND)

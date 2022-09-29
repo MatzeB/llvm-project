@@ -295,7 +295,7 @@ void LoopVectorizeHints::setHint(StringRef Name, Metadata *Arg) {
 
   Hint *Hints[] = {&Width,        &Interleave, &Force,
                    &IsVectorized, &Predicate,  &Scalable};
-  for (auto H : Hints) {
+  for (auto *H : Hints) {
     if (Name == H->Name) {
       if (H->validate(Val))
         H->Value = Val;
@@ -456,7 +456,7 @@ int LoopVectorizationLegality::isConsecutivePtr(Type *AccessTy,
                                                 PGSOQueryType::IRPass);
   bool CanAddPredicate = !OptForSize;
   int Stride = getPtrStride(PSE, AccessTy, Ptr, TheLoop, Strides,
-                            CanAddPredicate, false);
+                            CanAddPredicate, false).value_or(0);
   if (Stride == 1 || Stride == -1)
     return Stride;
   return 0;
@@ -700,11 +700,11 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
           continue;
         }
 
-        // TODO: Instead of recording the AllowedExit, it would be good to record the
-        // complementary set: NotAllowedExit. These include (but may not be
-        // limited to):
+        // TODO: Instead of recording the AllowedExit, it would be good to
+        // record the complementary set: NotAllowedExit. These include (but may
+        // not be limited to):
         // 1. Reduction phis as they represent the one-before-last value, which
-        // is not available when vectorized 
+        // is not available when vectorized
         // 2. Induction phis and increment when SCEV predicates cannot be used
         // outside the loop - see addInductionPhi
         // 3. Non-Phis with outside uses when SCEV predicates cannot be used
@@ -713,7 +713,7 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
         // 4. FixedOrderRecurrence phis that can possibly be handled by
         // extraction.
         // By recording these, we can then reason about ways to vectorize each
-        // of these NotAllowedExit. 
+        // of these NotAllowedExit.
         InductionDescriptor ID;
         if (InductionDescriptor::isInductionPHI(Phi, TheLoop, PSE, ID)) {
           addInductionPhi(Phi, ID, AllowedExit);
@@ -1167,7 +1167,7 @@ bool LoopVectorizationLegality::canVectorizeWithIfConvert() {
     for (Instruction &I : *BB) {
       LoadInst *LI = dyn_cast<LoadInst>(&I);
       if (LI && !LI->getType()->isVectorTy() && !mustSuppressSpeculation(*LI) &&
-          isDereferenceableAndAlignedInLoop(LI, TheLoop, SE, *DT))
+          isDereferenceableAndAlignedInLoop(LI, TheLoop, SE, *DT, AC))
         SafePointers.insert(LI->getPointerOperand());
     }
   }

@@ -692,12 +692,11 @@ bool AMDGPUTargetLowering::isLoadBitCastBeneficial(EVT LoadTy, EVT CastTy,
 // SI+ has instructions for cttz / ctlz for 32-bit values. This is probably also
 // profitable with the expansion for 64-bit since it's generally good to
 // speculate things.
-// FIXME: These should really have the size as a parameter.
-bool AMDGPUTargetLowering::isCheapToSpeculateCttz() const {
+bool AMDGPUTargetLowering::isCheapToSpeculateCttz(Type *Ty) const {
   return true;
 }
 
-bool AMDGPUTargetLowering::isCheapToSpeculateCtlz() const {
+bool AMDGPUTargetLowering::isCheapToSpeculateCtlz(Type *Ty) const {
   return true;
 }
 
@@ -4815,8 +4814,15 @@ AMDGPUTargetLowering::shouldExpandAtomicRMWInIR(AtomicRMWInst *RMW) const {
   case AtomicRMWInst::FMax:
   case AtomicRMWInst::FMin:
     return AtomicExpansionKind::CmpXChg;
-  default:
-    return AtomicExpansionKind::None;
+  default: {
+    if (auto *IntTy = dyn_cast<IntegerType>(RMW->getType())) {
+      unsigned Size = IntTy->getBitWidth();
+      if (Size == 32 || Size == 64)
+        return AtomicExpansionKind::None;
+    }
+
+    return AtomicExpansionKind::CmpXChg;
+  }
   }
 }
 

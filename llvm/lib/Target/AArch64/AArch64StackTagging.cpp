@@ -586,25 +586,25 @@ bool AArch64StackTagging::runOnFunction(Function &Fn) {
       uint64_t Size = *Info.AI->getAllocationSizeInBits(*DL) / 8;
       Value *Ptr = IRB.CreatePointerCast(TagPCall, IRB.getInt8PtrTy());
       tagAlloca(AI, &*IRB.GetInsertPoint(), Ptr, Size);
-      for (auto &RI : SInfo.RetVec) {
+      for (auto *RI : SInfo.RetVec) {
         untagAlloca(AI, RI, Size);
       }
       // We may have inserted tag/untag outside of any lifetime interval.
       // Remove all lifetime intrinsics for this alloca.
-      for (auto &II : Info.LifetimeStart)
+      for (auto *II : Info.LifetimeStart)
         II->eraseFromParent();
-      for (auto &II : Info.LifetimeEnd)
+      for (auto *II : Info.LifetimeEnd)
         II->eraseFromParent();
     }
 
     // Fixup debug intrinsics to point to the new alloca.
-    for (auto DVI : Info.DbgVariableIntrinsics)
+    for (auto *DVI : Info.DbgVariableIntrinsics)
       DVI->replaceVariableLocationOp(OldAI, Info.AI);
   }
 
   // If we have instrumented at least one alloca, all unrecognized lifetime
   // intrinsics have to go.
-  for (auto &I : SInfo.UnrecognizedLifetimes)
+  for (auto *I : SInfo.UnrecognizedLifetimes)
     I->eraseFromParent();
 
   return true;

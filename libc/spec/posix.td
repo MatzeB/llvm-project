@@ -14,8 +14,24 @@ def PThreadStartT : NamedType<"__pthread_start_t">;
 def PThreadTSSDtorT : NamedType<"__pthread_tss_dtor_t">;
 def PThreadKeyT : NamedType<"pthread_key_t">;
 def PThreadKeyTPtr : PtrType<PThreadKeyT>;
+def PThreadOnceT : NamedType<"pthread_once_t">;
+def PThreadOnceTPtr : PtrType<PThreadOnceT>;
+def PThreadOnceCallback : NamedType<"__pthread_once_func_t">;
 
 def InoT : NamedType<"ino_t">;
+def UidT : NamedType<"uid_t">;
+def GidT : NamedType<"gid_t">;
+def DevT : NamedType<"dev_t">;
+def BlkSizeT : NamedType<"blksize_t">;
+def BlkCntT : NamedType<"blkcnt_t">;
+def NLinkT : NamedType<"nlink_t">;
+def TimeSpec : NamedType<"struct timespec">;
+def PidT : NamedType<"pid_t">;
+
+def StatType : NamedType<"struct stat">;
+def StatTypePtr : PtrType<StatType>;
+def RestrictedStatTypePtr : RestrictedPtrType<StatType>;
+
 def DIR : NamedType<"DIR">;
 def DIRPtr : PtrType<DIR>;
 def DIRRestrictedPtr : RestrictedPtrType<DIR>;
@@ -23,6 +39,9 @@ def StructDirent : NamedType<"struct dirent">;
 def StructDirentPtr : PtrType<StructDirent>;
 def StructDirentPtrPtr : PtrType<StructDirentPtr>;
 def ConstStructDirentPtrPtr : ConstType<StructDirentPtrPtr>;
+
+def StructTimeSpec : NamedType<"struct timespec">;
+def StructTimeSpecPtr : PtrType<StructTimeSpec>;
 
 def POSIX : StandardSpec<"POSIX"> {
   PtrType CharPtr = PtrType<CharType>;
@@ -32,8 +51,6 @@ def POSIX : StandardSpec<"POSIX"> {
   ConstType ConstRestrictedCharPtr = ConstType<RestrictedCharPtr>;
 
   NamedType ModeTType = NamedType<"mode_t">;
-  NamedType OffTType = NamedType<"off_t">;
-  NamedType SSizeTType = NamedType<"ssize_t">;
 
   NamedType PThreadAttrTType = NamedType<"pthread_attr_t">;
   PtrType PThreadAttrTPtr = PtrType<PThreadAttrTType>;
@@ -190,6 +207,13 @@ def POSIX : StandardSpec<"POSIX"> {
       [], // Enumerations
       [
         FunctionSpec<
+            "madvise",
+            RetValSpec<IntType>,
+            [ArgSpec<VoidPtr>,
+             ArgSpec<SizeTType>,
+             ArgSpec<IntType>]
+        >,
+        FunctionSpec<
             "mmap",
             RetValSpec<VoidPtr>,
             [ArgSpec<VoidPtr>,
@@ -200,9 +224,23 @@ def POSIX : StandardSpec<"POSIX"> {
              ArgSpec<OffTType>]
         >,
         FunctionSpec<
+            "mprotect",
+            RetValSpec<IntType>,
+            [ArgSpec<VoidPtr>,
+             ArgSpec<SizeTType>,
+             ArgSpec<IntType>]
+        >,
+        FunctionSpec<
             "munmap",
             RetValSpec<IntType>,
             [ArgSpec<VoidPtr>, ArgSpec<SizeTType>]
+        >,
+        FunctionSpec<
+            "posix_madvise",
+            RetValSpec<IntType>,
+            [ArgSpec<VoidPtr>,
+             ArgSpec<SizeTType>,
+             ArgSpec<IntType>]
         >,
       ]
   >;
@@ -260,9 +298,41 @@ def POSIX : StandardSpec<"POSIX"> {
       OffTType,
       SSizeTType,
       SizeTType,
+      PidT,
+      UidT,
     ],
     [], // Enumerations
     [
+        FunctionSpec<
+          "access",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
+          "chdir",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "dup",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>]
+        >,
+        FunctionSpec<
+          "dup2",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
+          "dup3",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<IntType>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
+          "fchdir",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>]
+        >,
         FunctionSpec<
           "close",
           RetValSpec<IntType>,
@@ -274,9 +344,54 @@ def POSIX : StandardSpec<"POSIX"> {
           [ArgSpec<IntType>]
         >,
         FunctionSpec<
+          "ftruncate",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>, ArgSpec<OffTType>]
+        >,
+        FunctionSpec<
+          "geteuid",
+          RetValSpec<UidT>,
+          [ArgSpec<VoidType>]
+        >,
+        FunctionSpec<
+          "getpid",
+          RetValSpec<PidT>,
+          [ArgSpec<VoidType>]
+        >,
+        FunctionSpec<
+          "getppid",
+          RetValSpec<PidT>,
+          [ArgSpec<VoidType>]
+        >,
+        FunctionSpec<
+          "getuid",
+          RetValSpec<UidT>,
+          [ArgSpec<VoidType>]
+        >,
+        FunctionSpec<
+          "link",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>, ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "linkat",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
           "lseek",
           RetValSpec<OffTType>,
           [ArgSpec<IntType>, ArgSpec<OffTType>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
+          "pread",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<IntType>, ArgSpec<VoidPtr>, ArgSpec<SizeTType>, ArgSpec<OffTType>]
+        >,
+        FunctionSpec<
+          "pwrite",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<IntType>, ArgSpec<ConstVoidPtr>, ArgSpec<SizeTType>, ArgSpec<OffTType>]
         >,
         FunctionSpec<
           "read",
@@ -284,9 +399,89 @@ def POSIX : StandardSpec<"POSIX"> {
           [ArgSpec<IntType>, ArgSpec<VoidPtr>, ArgSpec<SizeTType>]
         >,
         FunctionSpec<
+          "readlink",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<ConstCharRestrictedPtr>, ArgSpec<CharRestrictedPtr>, ArgSpec<SizeTType>]
+        >,
+        FunctionSpec<
+          "readlinkat",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<ConstCharRestrictedPtr>, ArgSpec<CharRestrictedPtr>, ArgSpec<SizeTType>]
+        >,
+        FunctionSpec<
           "rmdir",
           RetValSpec<IntType>,
           [ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "getpid",
+          RetValSpec<IntType>,
+          [ArgSpec<VoidType>]
+        >,
+        FunctionSpec<
+          "getppid",
+          RetValSpec<IntType>,
+          [ArgSpec<VoidType>]
+        >,
+        FunctionSpec<
+          "link",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>, ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "linkat",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
+          "lseek",
+          RetValSpec<OffTType>,
+          [ArgSpec<IntType>, ArgSpec<OffTType>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
+          "pread",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<IntType>, ArgSpec<VoidPtr>, ArgSpec<SizeTType>, ArgSpec<OffTType>]
+        >,
+        FunctionSpec<
+          "pwrite",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<IntType>, ArgSpec<ConstVoidPtr>, ArgSpec<SizeTType>, ArgSpec<OffTType>]
+        >,
+        FunctionSpec<
+          "read",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<IntType>, ArgSpec<VoidPtr>, ArgSpec<SizeTType>]
+        >,
+        FunctionSpec<
+          "readlink",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<ConstCharRestrictedPtr>, ArgSpec<CharRestrictedPtr>, ArgSpec<SizeTType>]
+        >,
+        FunctionSpec<
+          "readlinkat",
+          RetValSpec<SSizeTType>,
+          [ArgSpec<ConstCharRestrictedPtr>, ArgSpec<CharRestrictedPtr>, ArgSpec<SizeTType>]
+        >,
+        FunctionSpec<
+          "rmdir",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "symlink",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>, ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "symlinkat",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<IntType>, ArgSpec<ConstCharPtr>]
+        >,
+        FunctionSpec<
+          "truncate",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<OffTType>]
         >,
         FunctionSpec<
           "unlink",
@@ -305,7 +500,7 @@ def POSIX : StandardSpec<"POSIX"> {
         >,
     ]
   >;
-  
+
   HeaderSpec StdLib = HeaderSpec<
     "stdlib.h",
     [], // Macros
@@ -387,12 +582,60 @@ def POSIX : StandardSpec<"POSIX"> {
     ]
   >;
 
+  NamedType RLimTType = NamedType<"rlim_t">;
+  NamedType StructRLimitType = NamedType<"struct rlimit">;
+  PtrType StructRLimitPtr = PtrType<StructRLimitType>;
+  ConstType ConstStructRLimitPtr = ConstType<StructRLimitType>;
+  HeaderSpec SysResource = HeaderSpec<
+    "sys/resource.h",
+    [], // Macros
+    [RLimTType, StructRLimitType], // Types
+    [], // Enumerations
+    [
+        FunctionSpec<
+          "getrlimit",
+          RetValSpec<IntType>,
+          [ArgSpec<StructRLimitPtr>]
+        >,
+        FunctionSpec<
+          "setrlimit",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstStructRLimitPtr>]
+        >,
+    ]
+  >;
+
   HeaderSpec SysStat = HeaderSpec<
     "sys/stat.h",
     [], // Macros
-    [ModeTType], // Types
+    [ModeTType, DevT, InoT, UidT, GidT, TimeSpec, BlkSizeT, BlkCntT, OffTType, NLinkT, StatType], // Types
     [], // Enumerations
     [
+        FunctionSpec<
+          "chmod",
+          RetValSpec<IntType>,
+          [ArgSpec<ConstCharPtr>, ArgSpec<ModeTType>]
+        >,
+        FunctionSpec<
+          "fchmod",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<ModeTType>]
+        >,
+        FunctionSpec<
+          "fchmodat",
+          RetValSpec<IntType>,
+          [ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<ModeTType>, ArgSpec<IntType>]
+        >,
+        FunctionSpec<
+            "fstat",
+            RetValSpec<IntType>,
+            [ArgSpec<IntType>, ArgSpec<StatTypePtr>]
+        >,
+        FunctionSpec<
+            "lstat",
+            RetValSpec<IntType>,
+            [ArgSpec<ConstRestrictedCharPtr>, ArgSpec<RestrictedStatTypePtr>]
+        >,
         FunctionSpec<
             "mkdir",
             RetValSpec<IntType>,
@@ -402,6 +645,27 @@ def POSIX : StandardSpec<"POSIX"> {
             "mkdirat",
             RetValSpec<IntType>,
             [ArgSpec<IntType>, ArgSpec<ConstCharPtr>, ArgSpec<ModeTType>]
+        >,
+        FunctionSpec<
+            "stat",
+            RetValSpec<IntType>,
+            [ArgSpec<ConstRestrictedCharPtr>, ArgSpec<RestrictedStatTypePtr>]
+        >,
+    ]
+  >;
+
+  NamedType StructUtsName = NamedType<"struct utsname">;
+  PtrType StructUtsNamePtr = PtrType<StructUtsName>;
+  HeaderSpec SysUtsName = HeaderSpec<
+    "sys/utsname.h",
+    [], // Macros
+    [StructUtsName], // Types
+    [], // Enumerations
+    [
+        FunctionSpec<
+            "uname",
+            RetValSpec<IntType>,
+            [ArgSpec<StructUtsNamePtr>]
         >,
     ]
   >;
@@ -414,6 +678,8 @@ def POSIX : StandardSpec<"POSIX"> {
         PThreadKeyT,
         PThreadMutexAttrTType,
         PThreadMutexTType,
+        PThreadOnceCallback,
+        PThreadOnceT,
         PThreadStartT,
         PThreadTSSDtorT,
         PThreadTType,
@@ -600,6 +866,11 @@ def POSIX : StandardSpec<"POSIX"> {
           RetValSpec<VoidPtr>,
           [ArgSpec<PThreadKeyT>, ArgSpec<ConstVoidPtr>]
       >,
+      FunctionSpec<
+          "pthread_once",
+          RetValSpec<IntType>,
+          [ArgSpec<PThreadOnceTPtr>, ArgSpec<PThreadOnceCallback>]
+      >,
     ]
   >;
 
@@ -661,6 +932,23 @@ def POSIX : StandardSpec<"POSIX"> {
       ]
   >;
 
+  HeaderSpec Time = HeaderSpec<
+      "time.h",
+      [], // Macros
+      [StructTimeSpec], // Types
+      [], // Enumerations
+      [
+          FunctionSpec<
+              "nanosleep",
+              RetValSpec<IntType>,
+              [
+	      	      ArgSpec<StructTimeSpecPtr>,
+	      	      ArgSpec<StructTimeSpecPtr>,
+	            ]
+          >,
+      ]
+  >;
+
   let Headers = [
     CType,
     Dirent,
@@ -671,7 +959,10 @@ def POSIX : StandardSpec<"POSIX"> {
     StdIO,
     StdLib,
     SysMMan,
+    SysResource,
     SysStat,
+    SysUtsName,
+    Time,
     UniStd,
     String
   ];
