@@ -1020,3 +1020,41 @@ bool X86RegisterInfo::getRegAllocationHints(Register VirtReg,
 
   return true;
 }
+
+bool X86RegisterInfo::hasCheaperEncodings(
+    MCRegister Reg, SmallVectorImpl<MCPhysReg> &Cheaper) const {
+  if (X86::XMM8 <= Reg && Reg <= X86::XMM15) {
+    for (unsigned R = X86::XMM0; R <= X86::XMM7; R++) {
+      Cheaper.push_back(R);
+    }
+  } else if (X86::XMM16 <= Reg && Reg <= X86::XMM31) {
+    for (unsigned R = X86::XMM0; R <= X86::XMM15; R++) {
+      Cheaper.push_back(R);
+    }
+  } else if (X86::R8 <= Reg && Reg <= X86::R15) {
+    Cheaper.push_back(X86::RAX);
+    Cheaper.push_back(X86::RBP);
+    Cheaper.push_back(X86::RBX);
+    Cheaper.push_back(X86::RCX);
+    Cheaper.push_back(X86::RDX);
+    Cheaper.push_back(X86::RDI);
+    Cheaper.push_back(X86::RSI);
+  } else if (X86::R8D <= Reg && Reg <= X86::R15D) {
+    Cheaper.push_back(X86::EAX);
+    Cheaper.push_back(X86::EBP);
+    Cheaper.push_back(X86::EBX);
+    Cheaper.push_back(X86::ECX);
+    Cheaper.push_back(X86::EDX);
+    Cheaper.push_back(X86::EDI);
+    Cheaper.push_back(X86::ESI);
+  } else if (X86::R8W <= Reg && Reg <= X86::R15W) {
+    Cheaper.push_back(X86::AX);
+    Cheaper.push_back(X86::BP);
+    Cheaper.push_back(X86::BX);
+    Cheaper.push_back(X86::CX);
+    Cheaper.push_back(X86::DX);
+    Cheaper.push_back(X86::DI);
+    Cheaper.push_back(X86::SI);
+  }
+  return !Cheaper.empty();
+}

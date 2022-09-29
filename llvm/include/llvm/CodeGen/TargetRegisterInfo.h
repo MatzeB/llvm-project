@@ -1141,6 +1141,11 @@ public:
   virtual bool isNonallocatableRegisterCalleeSave(MCRegister Reg) const {
     return false;
   }
+
+  virtual bool hasCheaperEncodings(MCRegister Reg,
+                                   SmallVectorImpl<MCPhysReg> &Regs) const {
+    return false;
+  }
 };
 
 //===----------------------------------------------------------------------===//

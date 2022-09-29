@@ -161,6 +161,9 @@ public:
                              SmallVectorImpl<MCPhysReg> &Hints,
                              const MachineFunction &MF, const VirtRegMap *VRM,
                              const LiveRegMatrix *Matrix) const override;
+
+  bool hasCheaperEncodings(MCRegister Reg,
+                           SmallVectorImpl<MCPhysReg> &Regs) const override;
 };
 
 } // End llvm namespace

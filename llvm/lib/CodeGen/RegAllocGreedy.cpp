@@ -96,6 +96,10 @@ LastChanceRecoloringMaxDepth("lcr-max-depth", cl::Hidden,
                              cl::desc("Last chance recoloring max depth"),
                              cl::init(5));
 
+static cl::opt<bool>
+    RecolorForSize("size-recolor", cl::Hidden,
+                   cl::desc("Swap register assignments to optimize for size"));
+
 static cl::opt<unsigned> LastChanceRecoloringMaxInterference(
     "lcr-max-interf", cl::Hidden,
     cl::desc("Last chance recoloring maximum number of considered"
@@ -2306,6 +2310,224 @@ void RAGreedy::tryHintsRecoloring() {
   }
 }
 
+bool RAGreedy::tryLevel1(const BitVector &Fixed,
+                         SmallVectorImpl<const LiveInterval *> &LIs,
+                         MCRegister ToFree, MCRegister Other) {
+  LLVM_DEBUG(dbgs() << "  depth 1: trying to free " << printReg(ToFree, TRI)
+                    << " for:\n");
+  SmallVector<const LiveInterval *, 8> Intfs;
+  for (const LiveInterval *LI : LIs) {
+    LLVM_DEBUG(dbgs() << "    " << *LI << '\n');
+    if (Matrix->checkRegMaskInterference(*LI, ToFree)) {
+      LLVM_DEBUG(dbgs() << "  1: regmask interference\n");
+      return false;
+    }
+
+    for (MCRegUnitIterator Unit(ToFree, TRI); Unit.isValid(); ++Unit) {
+      LiveIntervalUnion::Query &Q = Matrix->query(*LI, *Unit);
+      // We usually have the interfering VRegs cached so
+      // collectInterferingVRegs() should be fast, we may need to recalculate if
+      // when different physregs overlap the same register unit so we had
+      // different SubRanges queried against it.
+      ArrayRef<const LiveInterval *> IVR = Q.interferingVRegs();
+      for (const LiveInterval *LI : IVR) {
+        if (Fixed.test(LI->reg().virtRegIndex())) {
+          LLVM_DEBUG(dbgs() << "  1: won't re-assign " << *LI << '\n');
+          return false;
+        }
+        if (LI->reg() != ToFree) {
+          LLVM_DEBUG(dbgs() << "  1: no support for super-reg/sub-reg"
+                     << *LI << '\n');
+          return false;
+        }
+      }
+      Intfs.append(IVR.begin(), IVR.end());
+    }
+  }
+
+  for (const LiveInterval *IntfLI : Intfs) {
+    LiveRegMatrix::InterferenceKind IK =
+        Matrix->checkInterference(*IntfLI, Other);
+    if (IK != LiveRegMatrix::IK_Free) {
+      LLVM_DEBUG(dbgs() << "  1: interference with " << *IntfLI
+                        << "... giving up\n");
+      return false;
+    }
+    const TargetRegisterClass &RC = *MRI->getRegClass(IntfLI->reg());
+    if (!RC.contains(Other)) {
+      LLVM_DEBUG(dbgs() << "  1: register class not allowed for interference\n");
+      return false;
+    }
+
+    LLVM_DEBUG(dbgs() << "Interference " << *IntfLI << " can be reassigned to "
+                      << printReg(Other, TRI) << '\n');
+  }
+
+  bool Works = true;
+  for (const LiveInterval *IntfLI : Intfs) {
+    // The same VirtReg may be present in multiple RegUnits. Skip duplicates.
+    if (!VRM->hasPhys(IntfLI->reg()))
+      continue;
+    Matrix->unassign(*IntfLI);
+  }
+
+  for (const LiveInterval *LI : LIs) {
+    if (Matrix->checkInterference(*LI, ToFree) != LiveRegMatrix::IK_Free) {
+      Works = false;
+    }
+  }
+
+  for (const LiveInterval *IntfLI : Intfs) {
+    if (VRM->hasPhys(IntfLI->reg()))
+      continue;
+    Matrix->assign(*IntfLI, Works ? ToFree : Other);
+  }
+  return Works;
+}
+
+bool RAGreedy::tryLevel0(const BitVector &Fixed, LiveInterval &LI,
+                         MCRegister ToFree, MCRegister Other) {
+  if (MRI->isReserved(Other)) {
+    return false;
+  }
+  assert(!MRI->isReserved(ToFree));
+  LLVM_DEBUG(dbgs() << " depth 0: trying to free " << printReg(ToFree, TRI)
+                    << " for " << LI << '\n');
+
+  if (Matrix->checkRegMaskInterference(LI, ToFree)) {
+    LLVM_DEBUG(dbgs() << " 0: regmask interference\n");
+    return false;
+  }
+
+  SmallVector<const LiveInterval *, 8> Intfs;
+  for (MCRegUnitIterator Unit(ToFree, TRI); Unit.isValid(); ++Unit) {
+    LiveIntervalUnion::Query &Q = Matrix->query(LI, *Unit);
+    // We usually have the interfering VRegs cached so
+    // collectInterferingVRegs() should be fast, we may need to recalculate if
+    // when different physregs overlap the same register unit so we had
+    // different SubRanges queried against it.
+    ArrayRef<const LiveInterval *> IVR = Q.interferingVRegs();
+    for (const LiveInterval *LI : IVR) {
+      if (Fixed.test(LI->reg().virtRegIndex())) {
+        LLVM_DEBUG(dbgs() << " 0: won't re-assign " << *LI << '\n');
+        return false;
+      }
+    }
+    Intfs.append(IVR.begin(), IVR.end());
+  }
+
+  // TODO: Possibly some duplicates in Intfs, can we dedup?
+  bool VRegInterference = false;
+  for (const LiveInterval *IntfLI : Intfs) {
+    LiveRegMatrix::InterferenceKind IK =
+        Matrix->checkInterference(*IntfLI, Other);
+    if (IK == LiveRegMatrix::IK_RegMask || IK == LiveRegMatrix::IK_RegUnit)
+      return false;
+    if (IK == LiveRegMatrix::IK_VirtReg) {
+      VRegInterference = true;
+    } else {
+      assert(IK == LiveRegMatrix::IK_Free);
+    }
+    const TargetRegisterClass &RC = *MRI->getRegClass(IntfLI->reg());
+    if (!RC.contains(Other))
+      return false;
+  }
+
+  for (const LiveInterval *IntfLI : Intfs) {
+    if (!VRM->hasPhys(IntfLI->reg()))
+      continue;
+    Matrix->unassign(*IntfLI);
+  }
+  bool Works = true;
+  if (VRegInterference) {
+    // Recurse one level deeper...
+    if (!tryLevel1(Fixed, Intfs, Other, ToFree)) {
+      Works = false;
+    }
+  } else {
+    LLVM_DEBUG(dbgs() << " .. no interference, recolor\n");
+  }
+  if (Matrix->checkInterference(LI, ToFree) != LiveRegMatrix::IK_Free) {
+    Works = false;
+  }
+
+  for (const LiveInterval *IntfLI : Intfs) {
+    if (VRM->hasPhys(IntfLI->reg()))
+      continue;
+    Matrix->assign(*IntfLI, Works ? Other : ToFree);
+  }
+  return Works;
+}
+
+void RAGreedy::tryRecolor(BitVector &Fixed, Register VirtReg) {
+  LLVM_DEBUG(dbgs() << "tryRecolor " << printReg(VirtReg, TRI) << '\n');
+  MCRegister Assigned = VRM->getPhys(VirtReg);
+  if (!Assigned.isValid())
+    return;
+  SmallVector<MCPhysReg, 16> Cheaper;
+  if (!TRI->hasCheaperEncodings(Assigned, Cheaper)) {
+    LLVM_DEBUG(dbgs() << "No cheaper candidates\n");
+    return;
+  }
+
+  // Unassign current vreg
+  LiveInterval &LI = LIS->getInterval(VirtReg);
+  Matrix->unassign(LI);
+
+  const TargetRegisterClass &RC = *MRI->getRegClass(VirtReg);
+  for (MCPhysReg Candidate : Cheaper) {
+    if (!RC.contains(Candidate) || MRI->isReserved(Candidate))
+      continue;
+    LLVM_DEBUG(dbgs() << " candidate " << printReg(Candidate, TRI) << '\n');
+    if (tryLevel0(Fixed, LI, Candidate, Assigned)) {
+      Matrix->assign(LI, Candidate);
+      LLVM_DEBUG(dbgs() << "swap worked\n");
+      return;
+    }
+  }
+
+  LLVM_DEBUG(dbgs() << ".. give up\n");
+  Matrix->assign(LI, Assigned);
+}
+
+void RAGreedy::tryShrinkEncodings() {
+  // Sort VRegs by number of defs/uses.
+  std::vector<unsigned> RegUseCounts;
+  unsigned NumVirtRegs = MRI->getNumVirtRegs();
+  RegUseCounts.reserve(NumVirtRegs);
+
+  for (unsigned I = 0; I != NumVirtRegs; I++) {
+    unsigned Count = 0;
+    Register Reg = Register::index2VirtReg(I);
+    for (MachineOperand &MO : MRI->reg_nodbg_operands(Reg)) {
+      if (MO.isImplicit())
+        continue;
+      // TODO: should we skip !readsReg() ?
+      // TODO: Record use/def of same-color copies. Or better treat copy-webs
+      // as a unit?
+      Count++;
+    }
+    RegUseCounts.push_back(Count);
+  }
+
+  std::vector<unsigned> Priority;
+  Priority.reserve(NumVirtRegs);
+  for (unsigned I = 0; I != NumVirtRegs; I++) {
+    Priority.push_back(I);
+  }
+  llvm::stable_sort(Priority,
+                    [&RegUseCounts](unsigned I0, unsigned I1) -> bool {
+                      return RegUseCounts[I0] > RegUseCounts[I1];
+                    });
+
+  BitVector Fixed(NumVirtRegs);
+  for (unsigned I : Priority) {
+    Fixed.set(I);
+    Register Reg = Register::index2VirtReg(I);
+    tryRecolor(Fixed, Reg);
+  }
+}
+
 MCRegister RAGreedy::selectOrSplitImpl(const LiveInterval &VirtReg,
                                        SmallVectorImpl<Register> &NewVRegs,
                                        SmallVirtRegSet &FixedRegisters,
@@ -2662,6 +2884,10 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
 
   allocatePhysRegs();
   tryHintsRecoloring();
+
+  if (RecolorForSize) {
+    tryShrinkEncodings();
+  }
 
   if (VerifyEnabled)
     MF->verify(this, "Before post optimization");

@@ -380,6 +380,14 @@ private:
   void tryHintRecoloring(const LiveInterval &);
   void tryHintsRecoloring();
 
+  void tryShrinkEncodings();
+  void tryRecolor(BitVector &Fixed, Register VirtReg);
+  bool tryLevel0(const BitVector &Fixed, LiveInterval &LI, MCRegister Candidate,
+                 MCRegister Outer);
+  bool tryLevel1(const BitVector &Fixed,
+                 SmallVectorImpl<const LiveInterval *> &LIs,
+                 MCRegister Candidate, MCRegister Reg);
+
   /// Model the information carried by one end of a copy.
   struct HintInfo {
     /// The frequency of the copy.
