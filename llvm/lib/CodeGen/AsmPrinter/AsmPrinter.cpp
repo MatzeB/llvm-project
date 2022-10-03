@@ -126,6 +126,7 @@
 using namespace llvm;
 
 #define DEBUG_TYPE "asm-printer"
+#define INSTRUCTION_MIX_TYPE "instruction-mix"
 
 const char DWARFGroupName[] = "dwarf";
 const char DWARFGroupDescription[] = "DWARF Emission";
@@ -1575,7 +1576,7 @@ void AsmPrinter::emitFunctionBody() {
   bool HasAnyRealCode = false;
   int NumInstsInFunction = 0;
 
-  bool CanDoExtraAnalysis = ORE->allowExtraAnalysis(DEBUG_TYPE);
+  bool CanDoExtraAnalysis = ORE->allowExtraAnalysis(INSTRUCTION_MIX_TYPE);
   for (auto &MBB : *MF) {
     // Print a label for the basic block.
     emitBasicBlockStart(MBB);
@@ -1708,7 +1709,7 @@ void AsmPrinter::emitFunctionBody() {
       if (MBB.empty())
         continue;
 
-      MachineOptimizationRemarkAnalysis R(DEBUG_TYPE, "InstructionMix",
+      MachineOptimizationRemarkAnalysis R(INSTRUCTION_MIX_TYPE, "InstructionMix",
                                           MBB.begin()->getDebugLoc(), &MBB);
 
       // Generate instruction mix remark. First, sort counts in descending order
@@ -1725,10 +1726,11 @@ void AsmPrinter::emitFunctionBody() {
           return StringRef(A.first) < StringRef(B.first);
         return false;
       });
-      R << "BasicBlock: " << ore::NV("BasicBlock", MBB.getName()) << "\n";
+      R << "BasicBlock: " << ore::NV("BasicBlock", MBB.getName());
       for (auto &KV : MnemonicVec) {
         auto Name = (Twine("INST_") + getToken(KV.first.trim()).first).str();
-        R << KV.first << ": " << ore::NV(Name, KV.second) << "\n";
+        auto Delimiter = (Twine("\n") + KV.first + ": ").str();
+        R << Delimiter << ore::NV(Name, KV.second);
       }
       ORE->emit(R);
     }
