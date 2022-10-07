@@ -207,9 +207,7 @@ template <> void CFG::populateCFG<Function>(const Function *F) {
       }
       BranchProbability Prob = BPI->getEdgeProbability(BB, SI);
       double Percent =
-          rint(((double)Prob.getNumerator() / Prob.getDenominator()) * 100.0 *
-               100.0) /
-          100.0;
+          double(Prob.getNumerator()) / Prob.getDenominator() * 100;
       Outgoings.emplace_back(static_cast<const void *>(*SI), W, Percent);
     }
     this->Nodes.insert(Node(static_cast<const void *>(BB), rso.str(),
@@ -249,8 +247,7 @@ template <> void CFG::populateCFG<MachineFunction>(const MachineFunction *MF) {
       // We don't have raw branch weight metadata for MIR, so just use numerator
       // of BranchProbability.
       int64_t N = Prob.getNumerator();
-      double Percent =
-          rint(((double)N / Prob.getDenominator()) * 100.0 * 100.0) / 100.0;
+      double Percent = double(N) / Prob.getDenominator() * 100;
       Outgoings.emplace_back(static_cast<const void *>(*SI), N, Percent);
     }
 
