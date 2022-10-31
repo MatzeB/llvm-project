@@ -2254,6 +2254,12 @@ defm jmc : BoolFOption<"jmc",
   NegFlag<SetFalse>>;
 def fglobal_isel : Flag<["-"], "fglobal-isel">, Group<f_clang_Group>,
   HelpText<"Enables the global instruction selector">;
+// facebook begin T136667937
+def fno_legacy_pass_manager : Flag<["-"], "fno-legacy-pass-manager">,
+  Group<f_clang_Group>, Flags<[CC1Option, NoArgumentUnused]>;
+def fexperimental_new_pass_manager : Flag<["-"], "fexperimental-new-pass-manager">,
+  Group<f_clang_Group>, Flags<[CC1Option]>, Alias<fno_legacy_pass_manager>;
+// facebook end T136667937
 def fexperimental_isel : Flag<["-"], "fexperimental-isel">, Group<f_clang_Group>,
   Alias<fglobal_isel>;
 def fexperimental_strict_floating_point : Flag<["-"], "fexperimental-strict-floating-point">,
