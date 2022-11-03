@@ -1719,8 +1719,8 @@ public:
     // It is necessary to limit this to rvalue reference to avoid calling this
     // function with a bitfield lvalue argument since non-const reference to
     // bitfield is not allowed.
-    template <typename T, typename = typename std::enable_if<
-                              !std::is_lvalue_reference<T>::value>::type>
+    template <typename T,
+              typename = std::enable_if_t<!std::is_lvalue_reference<T>::value>>
     const ImmediateDiagBuilder &operator<<(T &&V) const {
       const DiagnosticBuilder &BaseDiag = *this;
       BaseDiag << std::move(V);
@@ -1793,8 +1793,8 @@ public:
     // It is necessary to limit this to rvalue reference to avoid calling this
     // function with a bitfield lvalue argument since non-const reference to
     // bitfield is not allowed.
-    template <typename T, typename = typename std::enable_if<
-                              !std::is_lvalue_reference<T>::value>::type>
+    template <typename T,
+              typename = std::enable_if_t<!std::is_lvalue_reference<T>::value>>
     const SemaDiagnosticBuilder &operator<<(T &&V) const {
       if (ImmediateDiag)
         *ImmediateDiag << std::move(V);
@@ -2523,7 +2523,7 @@ public:
   // Returns the underlying type of a decltype with the given expression.
   QualType getDecltypeForExpr(Expr *E);
 
-  QualType BuildTypeofExprType(Expr *E);
+  QualType BuildTypeofExprType(Expr *E, TypeOfKind Kind);
   /// If AsUnevaluated is false, E is treated as though it were an evaluated
   /// context, such as when building a type for decltype(auto).
   QualType BuildDecltypeType(Expr *E, bool AsUnevaluated = true);
@@ -2573,6 +2573,8 @@ public:
                          bool IsCtorOrDtorName = false,
                          bool WantNontrivialTypeSourceInfo = false,
                          bool IsClassTemplateDeductionContext = true,
+                         ImplicitTypenameContext AllowImplicitTypename =
+                             ImplicitTypenameContext::No,
                          IdentifierInfo **CorrectedII = nullptr);
   TypeSpecifierType isTagName(IdentifierInfo &II, Scope *S);
   bool isMicrosoftMissingTypename(const CXXScopeSpec *SS, Scope *S);
@@ -3072,6 +3074,10 @@ public:
   /// order to parse the rest of the program (for instance, if it is
   /// \c constexpr in C++11 or has an 'auto' return type in C++14).
   bool canSkipFunctionBody(Decl *D);
+
+  /// Determine whether \param D is function like (function or function
+  /// template) for parsing.
+  bool isDeclaratorFunctionLike(Declarator &D);
 
   void computeNRVO(Stmt *Body, sema::FunctionScopeInfo *Scope);
   Decl *ActOnFinishFunctionBody(Decl *Decl, Stmt *Body);
@@ -3680,8 +3686,10 @@ public:
   // template, or just the current friend function. A 'lower' TemplateDepth in
   // the AST refers to a 'containing' template. As the constraint is
   // uninstantiated, this is relative to the 'top' of the TU.
-  bool ConstraintExpressionDependsOnEnclosingTemplate(unsigned TemplateDepth,
-                                                      const Expr *Constraint);
+  bool
+  ConstraintExpressionDependsOnEnclosingTemplate(const FunctionDecl *Friend,
+                                                 unsigned TemplateDepth,
+                                                 const Expr *Constraint);
 
   // Calculates whether the friend function depends on an enclosing template for
   // the purposes of [temp.friend] p9.
@@ -5213,15 +5221,21 @@ public:
   /// of it.
   void MarkUnusedFileScopedDecl(const DeclaratorDecl *D);
 
+  typedef llvm::function_ref<void(SourceLocation Loc, PartialDiagnostic PD)>
+      DiagReceiverTy;
+
   /// DiagnoseUnusedExprResult - If the statement passed in is an expression
   /// whose result is unused, warn.
   void DiagnoseUnusedExprResult(const Stmt *S, unsigned DiagID);
   void DiagnoseUnusedNestedTypedefs(const RecordDecl *D);
+  void DiagnoseUnusedNestedTypedefs(const RecordDecl *D,
+                                    DiagReceiverTy DiagReceiver);
   void DiagnoseUnusedDecl(const NamedDecl *ND);
+  void DiagnoseUnusedDecl(const NamedDecl *ND, DiagReceiverTy DiagReceiver);
 
   /// If VD is set but not otherwise used, diagnose, for a parameter or a
   /// variable.
-  void DiagnoseUnusedButSetDecl(const VarDecl *VD);
+  void DiagnoseUnusedButSetDecl(const VarDecl *VD, DiagReceiverTy DiagReceiver);
 
   /// Emit \p DiagID if statement located on \p StmtLoc has a suspicious null
   /// statement as a \p Body, and it is located on the same line.
@@ -5290,11 +5304,22 @@ public:
   // Expression Parsing Callbacks: SemaExpr.cpp.
 
   bool CanUseDecl(NamedDecl *D, bool TreatUnavailableAsInvalid);
+  // A version of DiagnoseUseOfDecl that should be used if overload resolution
+  // has been used to find this declaration, which means we don't have to bother
+  // checking the trailing requires clause.
+  bool DiagnoseUseOfOverloadedDecl(NamedDecl *D, SourceLocation Loc) {
+    return DiagnoseUseOfDecl(
+        D, Loc, /*UnknownObjCClass=*/nullptr, /*ObjCPropertyAccess=*/false,
+        /*AvoidPartialAvailabilityChecks=*/false, /*ClassReceiver=*/nullptr,
+        /*SkipTrailingRequiresClause=*/true);
+  }
+
   bool DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
                          const ObjCInterfaceDecl *UnknownObjCClass = nullptr,
                          bool ObjCPropertyAccess = false,
                          bool AvoidPartialAvailabilityChecks = false,
-                         ObjCInterfaceDecl *ClassReciever = nullptr);
+                         ObjCInterfaceDecl *ClassReciever = nullptr,
+                         bool SkipTrailingRequiresClause = false);
   void NoteDeletedFunction(FunctionDecl *FD);
   void NoteDeletedInheritingConstructor(CXXConstructorDecl *CD);
   bool DiagnosePropertyAccessorMismatch(ObjCPropertyDecl *PD,
@@ -6105,7 +6130,8 @@ public:
   NamedDecl *BuildUsingEnumDeclaration(Scope *S, AccessSpecifier AS,
                                        SourceLocation UsingLoc,
                                        SourceLocation EnumLoc,
-                                       SourceLocation NameLoc, EnumDecl *ED);
+                                       SourceLocation NameLoc,
+                                       TypeSourceInfo *EnumType, EnumDecl *ED);
   NamedDecl *BuildUsingPackDecl(NamedDecl *InstantiatedFrom,
                                 ArrayRef<NamedDecl *> Expansions);
 
@@ -6125,7 +6151,9 @@ public:
                               const ParsedAttributesView &AttrList);
   Decl *ActOnUsingEnumDeclaration(Scope *CurScope, AccessSpecifier AS,
                                   SourceLocation UsingLoc,
-                                  SourceLocation EnumLoc, const DeclSpec &);
+                                  SourceLocation EnumLoc,
+                                  SourceLocation IdentLoc, IdentifierInfo &II,
+                                  CXXScopeSpec *SS = nullptr);
   Decl *ActOnAliasDeclaration(Scope *CurScope, AccessSpecifier AS,
                               MultiTemplateParamsArg TemplateParams,
                               SourceLocation UsingLoc, UnqualifiedId &Name,
@@ -7005,13 +7033,12 @@ public:
                                          LambdaCaptureDefault CaptureDefault);
 
   /// Start the definition of a lambda expression.
-  CXXMethodDecl *startLambdaDefinition(CXXRecordDecl *Class,
-                                       SourceRange IntroducerRange,
-                                       TypeSourceInfo *MethodType,
-                                       SourceLocation EndLoc,
-                                       ArrayRef<ParmVarDecl *> Params,
-                                       ConstexprSpecKind ConstexprKind,
-                                       Expr *TrailingRequiresClause);
+  CXXMethodDecl *
+  startLambdaDefinition(CXXRecordDecl *Class, SourceRange IntroducerRange,
+                        TypeSourceInfo *MethodType, SourceLocation EndLoc,
+                        ArrayRef<ParmVarDecl *> Params,
+                        ConstexprSpecKind ConstexprKind, StorageClass SC,
+                        Expr *TrailingRequiresClause);
 
   /// Number lambda for linkage purposes if necessary.
   void handleLambdaNumbering(
@@ -7184,7 +7211,7 @@ private:
       FunctionDecl *FD, llvm::Optional<ArrayRef<TemplateArgument>> TemplateArgs,
       MultiLevelTemplateArgumentList MLTAL, LocalInstantiationScope &Scope);
 
-  /// Used during constraint checking, sets up the constraint template arguemnt
+  /// Used during constraint checking, sets up the constraint template argument
   /// lists, and calls SetupConstraintScope to set up the
   /// LocalInstantiationScope to have the proper set of ParVarDecls configured.
   llvm::Optional<MultiLevelTemplateArgumentList>
@@ -7624,7 +7651,8 @@ public:
   void CheckExplicitlyDefaultedFunction(Scope *S, FunctionDecl *MD);
 
   bool CheckExplicitlyDefaultedSpecialMember(CXXMethodDecl *MD,
-                                             CXXSpecialMember CSM);
+                                             CXXSpecialMember CSM,
+                                             SourceLocation DefaultLoc);
   void CheckDelayedMemberExceptionSpecs();
 
   bool CheckExplicitlyDefaultedComparison(Scope *S, FunctionDecl *MD,
@@ -8050,7 +8078,9 @@ public:
                       TemplateTy Template, IdentifierInfo *TemplateII,
                       SourceLocation TemplateIILoc, SourceLocation LAngleLoc,
                       ASTTemplateArgsPtr TemplateArgs, SourceLocation RAngleLoc,
-                      bool IsCtorOrDtorName = false, bool IsClassName = false);
+                      bool IsCtorOrDtorName = false, bool IsClassName = false,
+                      ImplicitTypenameContext AllowImplicitTypename =
+                          ImplicitTypenameContext::No);
 
   /// Parsed an elaborated-type-specifier that refers to a template-id,
   /// such as \c class T::template apply<U>.
@@ -8169,14 +8199,11 @@ public:
                                         SourceLocation TemplateLoc,
                                         Declarator &D);
 
-  TemplateArgumentLoc
-  SubstDefaultTemplateArgumentIfAvailable(TemplateDecl *Template,
-                                          SourceLocation TemplateLoc,
-                                          SourceLocation RAngleLoc,
-                                          Decl *Param,
-                                          SmallVectorImpl<TemplateArgument>
-                                            &Converted,
-                                          bool &HasDefaultArg);
+  TemplateArgumentLoc SubstDefaultTemplateArgumentIfAvailable(
+      TemplateDecl *Template, SourceLocation TemplateLoc,
+      SourceLocation RAngleLoc, Decl *Param,
+      ArrayRef<TemplateArgument> SugaredConverted,
+      ArrayRef<TemplateArgument> CanonicalConverted, bool &HasDefaultArg);
 
   /// Specifies the context in which a particular template
   /// argument is being checked.
@@ -8194,14 +8221,13 @@ public:
     CTAK_DeducedFromArrayBound
   };
 
-  bool CheckTemplateArgument(NamedDecl *Param,
-                             TemplateArgumentLoc &Arg,
-                             NamedDecl *Template,
-                             SourceLocation TemplateLoc,
-                             SourceLocation RAngleLoc,
-                             unsigned ArgumentPackIndex,
-                           SmallVectorImpl<TemplateArgument> &Converted,
-                             CheckTemplateArgumentKind CTAK = CTAK_Specified);
+  bool
+  CheckTemplateArgument(NamedDecl *Param, TemplateArgumentLoc &Arg,
+                        NamedDecl *Template, SourceLocation TemplateLoc,
+                        SourceLocation RAngleLoc, unsigned ArgumentPackIndex,
+                        SmallVectorImpl<TemplateArgument> &SugaredConverted,
+                        SmallVectorImpl<TemplateArgument> &CanonicalConverted,
+                        CheckTemplateArgumentKind CTAK);
 
   /// Check that the given template arguments can be be provided to
   /// the given template, converting the arguments along the way.
@@ -8232,23 +8258,25 @@ public:
   /// the template not being satisfied by the template arguments.
   ///
   /// \returns true if an error occurred, false otherwise.
-  bool CheckTemplateArgumentList(TemplateDecl *Template,
-                                 SourceLocation TemplateLoc,
-                                 TemplateArgumentListInfo &TemplateArgs,
-                                 bool PartialTemplateArgs,
-                                 SmallVectorImpl<TemplateArgument> &Converted,
-                                 bool UpdateArgsWithConversions = true,
-                                 bool *ConstraintsNotSatisfied = nullptr);
+  bool CheckTemplateArgumentList(
+      TemplateDecl *Template, SourceLocation TemplateLoc,
+      TemplateArgumentListInfo &TemplateArgs, bool PartialTemplateArgs,
+      SmallVectorImpl<TemplateArgument> &SugaredConverted,
+      SmallVectorImpl<TemplateArgument> &CanonicalConverted,
+      bool UpdateArgsWithConversions = true,
+      bool *ConstraintsNotSatisfied = nullptr);
 
-  bool CheckTemplateTypeArgument(TemplateTypeParmDecl *Param,
-                                 TemplateArgumentLoc &Arg,
-                           SmallVectorImpl<TemplateArgument> &Converted);
+  bool CheckTemplateTypeArgument(
+      TemplateTypeParmDecl *Param, TemplateArgumentLoc &Arg,
+      SmallVectorImpl<TemplateArgument> &SugaredConverted,
+      SmallVectorImpl<TemplateArgument> &CanonicalConverted);
 
   bool CheckTemplateArgument(TypeSourceInfo *Arg);
   ExprResult CheckTemplateArgument(NonTypeTemplateParmDecl *Param,
                                    QualType InstantiatedParamType, Expr *Arg,
-                                   TemplateArgument &Converted,
-                               CheckTemplateArgumentKind CTAK = CTAK_Specified);
+                                   TemplateArgument &SugaredConverted,
+                                   TemplateArgument &CanonicalConverted,
+                                   CheckTemplateArgumentKind CTAK);
   bool CheckTemplateTemplateArgument(TemplateTemplateParmDecl *Param,
                                      TemplateParameterList *Params,
                                      TemplateArgumentLoc &Arg);
@@ -8299,14 +8327,17 @@ public:
       const NamedDecl *NewInstFrom, TemplateParameterList *New,
       const NamedDecl *OldInstFrom, TemplateParameterList *Old, bool Complain,
       TemplateParameterListEqualKind Kind,
-      SourceLocation TemplateArgLoc = SourceLocation());
+      SourceLocation TemplateArgLoc = SourceLocation(),
+      bool PartialOrdering = false);
 
   bool TemplateParameterListsAreEqual(
       TemplateParameterList *New, TemplateParameterList *Old, bool Complain,
       TemplateParameterListEqualKind Kind,
-      SourceLocation TemplateArgLoc = SourceLocation()) {
+      SourceLocation TemplateArgLoc = SourceLocation(),
+      bool PartialOrdering = false) {
     return TemplateParameterListsAreEqual(nullptr, New, nullptr, Old, Complain,
-                                          Kind, TemplateArgLoc);
+                                          Kind, TemplateArgLoc,
+                                          PartialOrdering);
   }
 
   bool CheckTemplateDeclScope(Scope *S, TemplateParameterList *TemplateParams);
@@ -8319,10 +8350,11 @@ public:
   /// \param SS the nested-name-specifier following the typename (e.g., 'T::').
   /// \param II the identifier we're retrieving (e.g., 'type' in the example).
   /// \param IdLoc the location of the identifier.
-  TypeResult
-  ActOnTypenameType(Scope *S, SourceLocation TypenameLoc,
-                    const CXXScopeSpec &SS, const IdentifierInfo &II,
-                    SourceLocation IdLoc);
+  /// \param IsImplicitTypename context where T::type refers to a type.
+  TypeResult ActOnTypenameType(
+      Scope *S, SourceLocation TypenameLoc, const CXXScopeSpec &SS,
+      const IdentifierInfo &II, SourceLocation IdLoc,
+      ImplicitTypenameContext IsImplicitTypename = ImplicitTypenameContext::No);
 
   /// Called when the parser has parsed a C++ typename
   /// specifier that ends in a template-id, e.g.,
@@ -8990,8 +9022,7 @@ public:
   FunctionTemplateDecl *getMoreSpecializedTemplate(
       FunctionTemplateDecl *FT1, FunctionTemplateDecl *FT2, SourceLocation Loc,
       TemplatePartialOrderingContext TPOC, unsigned NumCallArguments1,
-      unsigned NumCallArguments2, bool Reversed = false,
-      bool AllowOrderingByConstraints = true);
+      unsigned NumCallArguments2, bool Reversed = false);
   UnresolvedSetIterator
   getMostSpecialized(UnresolvedSetIterator SBegin, UnresolvedSetIterator SEnd,
                      TemplateSpecCandidateSet &FailedCandidates,
@@ -9040,10 +9071,12 @@ public:
   // C++ Template Instantiation
   //
 
-  MultiLevelTemplateArgumentList getTemplateInstantiationArgs(
-      const NamedDecl *D, const TemplateArgumentList *Innermost = nullptr,
-      bool RelativeToPrimary = false, const FunctionDecl *Pattern = nullptr,
-      bool LookBeyondLambda = false, bool IncludeContainingStruct = false);
+  MultiLevelTemplateArgumentList
+  getTemplateInstantiationArgs(const NamedDecl *D, bool Final = false,
+                               const TemplateArgumentList *Innermost = nullptr,
+                               bool RelativeToPrimary = false,
+                               const FunctionDecl *Pattern = nullptr,
+                               bool ForConstraintInstantiation = false);
 
   /// A context in which code is being synthesized (where a source location
   /// alone is not sufficient to identify the context). This covers template
@@ -9124,6 +9157,9 @@ public:
 
       // We are normalizing a constraint expression.
       ConstraintNormalization,
+
+      // Instantiating a Requires Expression parameter clause.
+      RequirementParameterInstantiation,
 
       // We are substituting into the parameter mapping of an atomic constraint
       // during normalization.
@@ -9454,6 +9490,11 @@ public:
                           concepts::NestedRequirement *Req, ConstraintsCheck,
                           SourceRange InstantiationRange = SourceRange());
 
+    /// \brief Note that we are checking a requires clause.
+    InstantiatingTemplate(Sema &SemaRef, SourceLocation PointOfInstantiation,
+                          const RequiresExpr *E,
+                          sema::TemplateDeductionInfo &DeductionInfo,
+                          SourceRange InstantiationRange);
     /// Note that we have finished instantiating this template.
     void Clear();
 
@@ -9772,6 +9813,9 @@ public:
                       SmallVectorImpl<QualType> &ParamTypes,
                       SmallVectorImpl<ParmVarDecl *> *OutParams,
                       ExtParameterInfoBuilder &ParamInfos);
+  bool SubstDefaultArgument(SourceLocation Loc, ParmVarDecl *Param,
+                            const MultiLevelTemplateArgumentList &TemplateArgs,
+                            bool ForCallExpr = false);
   ExprResult SubstExpr(Expr *E,
                        const MultiLevelTemplateArgumentList &TemplateArgs);
 
@@ -10126,16 +10170,12 @@ public:
                                   bool FailOnError = false);
 
   /// Build an Objective-C object pointer type.
-  QualType BuildObjCObjectType(QualType BaseType,
-                               SourceLocation Loc,
-                               SourceLocation TypeArgsLAngleLoc,
-                               ArrayRef<TypeSourceInfo *> TypeArgs,
-                               SourceLocation TypeArgsRAngleLoc,
-                               SourceLocation ProtocolLAngleLoc,
-                               ArrayRef<ObjCProtocolDecl *> Protocols,
-                               ArrayRef<SourceLocation> ProtocolLocs,
-                               SourceLocation ProtocolRAngleLoc,
-                               bool FailOnError = false);
+  QualType BuildObjCObjectType(
+      QualType BaseType, SourceLocation Loc, SourceLocation TypeArgsLAngleLoc,
+      ArrayRef<TypeSourceInfo *> TypeArgs, SourceLocation TypeArgsRAngleLoc,
+      SourceLocation ProtocolLAngleLoc, ArrayRef<ObjCProtocolDecl *> Protocols,
+      ArrayRef<SourceLocation> ProtocolLocs, SourceLocation ProtocolRAngleLoc,
+      bool FailOnError, bool Rebuilding);
 
   /// Ensure attributes are consistent with type.
   /// \param [in, out] Attributes The attributes to check; they will

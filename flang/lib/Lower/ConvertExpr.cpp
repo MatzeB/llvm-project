@@ -1063,10 +1063,15 @@ public:
     for (const auto &value : ctor.values()) {
       const Fortran::semantics::Symbol &sym = *value.first;
       const Fortran::lower::SomeExpr &expr = value.second.value();
-      // Parent components need more work because they do not appear in the
-      // fir.rec type.
-      if (sym.test(Fortran::semantics::Symbol::Flag::ParentComp))
-        TODO(loc, "parent component in structure constructor");
+      if (sym.test(Fortran::semantics::Symbol::Flag::ParentComp)) {
+        ExtValue from = gen(expr);
+        mlir::Type fromTy = fir::unwrapPassByRefType(
+            fir::unwrapRefType(fir::getBase(from).getType()));
+        mlir::Value resCast =
+            builder.createConvert(loc, builder.getRefType(fromTy), res);
+        fir::factory::genRecordAssignment(builder, loc, resCast, from);
+        continue;
+      }
 
       if (isDerivedTypeWithLenParameters(sym))
         TODO(loc, "component with length parameters in structure constructor");
@@ -1625,6 +1630,9 @@ public:
     mlir::IndexType idxTy = builder.getIndexType();
     Fortran::evaluate::ConstantSubscript size =
         Fortran::evaluate::GetSize(con.shape());
+    if (size > std::numeric_limits<std::uint32_t>::max())
+      // llvm::SmallVector has limited size
+      TODO(getLoc(), "Creation of very large array constants");
     fir::SequenceType::Shape shape(con.shape().begin(), con.shape().end());
     mlir::Type eleTy;
     if constexpr (TC == Fortran::common::TypeCategory::Character)
@@ -1990,8 +1998,10 @@ public:
     }
 
     mlir::Value base = fir::getBase(array);
-    auto seqTy =
-        fir::dyn_cast_ptrOrBoxEleTy(base.getType()).cast<fir::SequenceType>();
+    mlir::Type eleTy = fir::dyn_cast_ptrOrBoxEleTy(base.getType());
+    if (auto classTy = eleTy.dyn_cast<fir::ClassType>())
+      eleTy = classTy.getEleTy();
+    auto seqTy = eleTy.cast<fir::SequenceType>();
     assert(args.size() == seqTy.getDimension());
     mlir::Type ty = builder.getRefType(seqTy.getEleTy());
     auto addr = builder.create<fir::CoordinateOp>(loc, ty, base, args);
@@ -2390,10 +2400,10 @@ public:
                                   llvm::ArrayRef<mlir::Value> extents,
                                   llvm::ArrayRef<mlir::Value> lengths) {
     mlir::Type type = base.getType();
-    if (type.isa<fir::BoxType>())
+    if (type.isa<fir::BaseBoxType>())
       return fir::BoxValue(base, /*lbounds=*/{}, lengths, extents);
     type = fir::unwrapRefType(type);
-    if (type.isa<fir::BoxType>())
+    if (type.isa<fir::BaseBoxType>())
       return fir::MutableBoxValue(base, lengths, /*mutableProperties*/ {});
     if (auto seqTy = type.dyn_cast<fir::SequenceType>()) {
       if (seqTy.getDimension() != extents.size())
@@ -2724,11 +2734,53 @@ public:
     if (addHostAssociations)
       operands.push_back(converter.hostAssocTupleValue());
 
-    auto call = builder.create<fir::CallOp>(loc, funcType.getResults(),
-                                            funcSymbolAttr, operands);
+    mlir::Value callResult;
+    unsigned callNumResults;
+    if (caller.requireDispatchCall()) {
+      // Procedure call requiring a dynamic dispatch. Call is created with
+      // fir.dispatch.
+
+      // Get the raw procedure name. The procedure name is not mangled in the
+      // binding table.
+      const auto &ultimateSymbol =
+          caller.getCallDescription().proc().GetSymbol()->GetUltimate();
+      auto procName = toStringRef(ultimateSymbol.name());
+
+      fir::DispatchOp dispatch;
+      if (std::optional<unsigned> passArg = caller.getPassArgIndex()) {
+        // PASS, PASS(arg-name)
+        dispatch = builder.create<fir::DispatchOp>(
+            loc, funcType.getResults(), builder.getStringAttr(procName),
+            operands[*passArg], operands, builder.getI32IntegerAttr(*passArg));
+      } else {
+        // NOPASS
+        const Fortran::evaluate::Component *component =
+            caller.getCallDescription().proc().GetComponent();
+        assert(component && "expect component for type-bound procedure call.");
+        fir::ExtendedValue pass =
+            symMap.lookupSymbol(component->GetFirstSymbol()).toExtendedValue();
+        mlir::Value passObject = fir::getBase(pass);
+        if (fir::isa_ref_type(passObject.getType()))
+          passObject = builder.create<fir::ConvertOp>(
+              loc,
+              passObject.getType().dyn_cast<fir::ReferenceType>().getEleTy(),
+              passObject);
+        dispatch = builder.create<fir::DispatchOp>(
+            loc, funcType.getResults(), builder.getStringAttr(procName),
+            passObject, operands, nullptr);
+      }
+      callResult = dispatch.getResult(0);
+      callNumResults = dispatch.getNumResults();
+    } else {
+      // Standard procedure call with fir.call.
+      auto call = builder.create<fir::CallOp>(loc, funcType.getResults(),
+                                              funcSymbolAttr, operands);
+      callResult = call.getResult(0);
+      callNumResults = call.getNumResults();
+    }
 
     if (caller.mustSaveResult())
-      builder.create<fir::SaveResultOp>(loc, call.getResult(0),
+      builder.create<fir::SaveResultOp>(loc, callResult,
                                         fir::getBase(allocatedResult.value()),
                                         arrayResultShape, resultLengths);
 
@@ -2751,8 +2803,9 @@ public:
       return mlir::Value{}; // subroutine call
     // For now, Fortran return values are implemented with a single MLIR
     // function return value.
-    assert(call.getNumResults() == 1 &&
+    assert(callNumResults == 1 &&
            "Expected exactly one result in FUNCTION call");
+    (void)callNumResults;
 
     // Call a BIND(C) function that return a char.
     if (caller.characterize().IsBindC() &&
@@ -2761,10 +2814,10 @@ public:
           funcType.getResults()[0].dyn_cast<fir::CharacterType>();
       mlir::Value len = builder.createIntegerConstant(
           loc, builder.getCharacterLengthType(), charTy.getLen());
-      return fir::CharBoxValue{call.getResult(0), len};
+      return fir::CharBoxValue{callResult, len};
     }
 
-    return call.getResult(0);
+    return callResult;
   }
 
   /// Like genExtAddr, but ensure the address returned is a temporary even if \p
@@ -3369,8 +3422,10 @@ public:
           // actually a variable.
           mlir::Value box =
               Fortran::evaluate::IsVariable(*expr)
-                  ? builder.createBox(loc, genBoxArg(*expr))
-                  : builder.createBox(getLoc(), genTempExtAddr(*expr));
+                  ? builder.createBox(loc, genBoxArg(*expr),
+                                      fir::isPolymorphicType(argTy))
+                  : builder.createBox(getLoc(), genTempExtAddr(*expr),
+                                      fir::isPolymorphicType(argTy));
           caller.placeInput(arg, box);
         }
       } else if (arg.passBy == PassBy::AddressAndLength) {
@@ -6009,7 +6064,7 @@ private:
   }
 
   static mlir::Type unwrapBoxEleTy(mlir::Type ty) {
-    if (auto boxTy = ty.dyn_cast<fir::BoxType>())
+    if (auto boxTy = ty.dyn_cast<fir::BaseBoxType>())
       return fir::unwrapRefType(boxTy.getEleTy());
     return ty;
   }
@@ -7147,7 +7202,7 @@ private:
                     // Need an intermediate  dereference if the boxed value
                     // appears in the middle of the component path or if it is
                     // on the right and this is not a pointer assignment.
-                    if (auto boxTy = ty.dyn_cast<fir::BoxType>()) {
+                    if (auto boxTy = ty.dyn_cast<fir::BaseBoxType>()) {
                       auto currentFunc = components.getExtendCoorRef();
                       auto loc = getLoc();
                       auto *bldr = &converter.getFirOpBuilder();
@@ -7158,7 +7213,7 @@ private:
                       deref = true;
                     }
                   }
-                } else if (auto boxTy = ty.dyn_cast<fir::BoxType>()) {
+                } else if (auto boxTy = ty.dyn_cast<fir::BaseBoxType>()) {
                   ty = fir::unwrapRefType(boxTy.getEleTy());
                   auto recTy = ty.cast<fir::RecordType>();
                   ty = recTy.getType(name);
@@ -7244,7 +7299,7 @@ private:
           // assignment, then insert the dereference of the box before any
           // conversion and store.
           if (!isPointerAssignment()) {
-            if (auto boxTy = eleTy.dyn_cast<fir::BoxType>()) {
+            if (auto boxTy = eleTy.dyn_cast<fir::BaseBoxType>()) {
               eleTy = fir::boxMemRefType(boxTy);
               addr = builder.create<fir::BoxAddrOp>(loc, eleTy, addr);
               eleTy = fir::unwrapRefType(eleTy);

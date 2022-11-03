@@ -130,12 +130,12 @@ public:
   }
 };
 
+} // namespace
+
 static PluginProperties &GetGlobalPluginProperties() {
   static PluginProperties g_settings;
   return g_settings;
 }
-
-} // namespace
 
 static const llvm::DWARFDebugLine::LineTable *
 ParseLLVMLineTable(lldb_private::DWARFContext &context,
@@ -702,9 +702,9 @@ lldb::CompUnitSP SymbolFileDWARF::ParseCompileUnit(DWARFCompileUnit &dwarf_cu) {
     // We already parsed this compile unit, had out a shared pointer to it
     cu_sp = comp_unit->shared_from_this();
   } else {
-    if (dwarf_cu.GetOffset() == 0 && GetDebugMapSymfile()) {
+    if (GetDebugMapSymfile()) {
       // Let the debug map create the compile unit
-      cu_sp = m_debug_map_symfile->GetCompileUnit(this);
+      cu_sp = m_debug_map_symfile->GetCompileUnit(this, dwarf_cu);
       dwarf_cu.SetUserData(cu_sp.get());
     } else {
       ModuleSP module_sp(m_objfile_sp->GetModule());
@@ -2355,8 +2355,6 @@ void SymbolFileDWARF::FindFunctions(const Module::LookupInfo &lookup_info,
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
   ConstString name = lookup_info.GetLookupName();
   FunctionNameType name_type_mask = lookup_info.GetNameTypeMask();
-  LLDB_SCOPED_TIMERF("SymbolFileDWARF::FindFunctions (name = '%s')",
-                     name.AsCString());
 
   // eFunctionNameTypeAuto should be pre-resolved by a call to
   // Module::LookupInfo::LookupInfo()
@@ -2962,8 +2960,6 @@ TypeSP SymbolFileDWARF::FindDefinitionTypeForDWARFDeclContext(
 
         if (!try_resolving_type) {
           if (log) {
-            std::string qualified_name;
-            type_die.GetQualifiedName(qualified_name);
             GetObjectFile()->GetModule()->LogMessage(
                 log,
                 "SymbolFileDWARF::"
@@ -2971,7 +2967,7 @@ TypeSP SymbolFileDWARF::FindDefinitionTypeForDWARFDeclContext(
                 "qualified-name='%s') ignoring die=0x%8.8x (%s)",
                 DW_TAG_value_to_name(dwarf_decl_ctx[0].tag),
                 dwarf_decl_ctx.GetQualifiedName(), type_die.GetOffset(),
-                qualified_name.c_str());
+                type_die.GetName());
           }
           return true;
         }
@@ -4141,7 +4137,7 @@ StatsDuration::Duration SymbolFileDWARF::GetDebugInfoIndexTime() {
   return {};
 }
 
-Status SymbolFileDWARF::GetFrameVariableError(StackFrame &frame) {
+Status SymbolFileDWARF::CalculateFrameVariableError(StackFrame &frame) {
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
   CompileUnit *cu = frame.GetSymbolContext(eSymbolContextCompUnit).comp_unit;
   if (!cu)

@@ -1075,7 +1075,7 @@ public:
     C.ScaleCost = 0;
   }
 
-  bool isLess(const Cost &Other);
+  bool isLess(const Cost &Other) const;
 
   void Lose();
 
@@ -1474,7 +1474,7 @@ void Cost::Lose() {
 }
 
 /// Choose the lower cost.
-bool Cost::isLess(const Cost &Other) {
+bool Cost::isLess(const Cost &Other) const {
   if (InsnsCost.getNumOccurrences() > 0 && InsnsCost &&
       C.Insns != Other.C.Insns)
     return C.Insns < Other.C.Insns;
@@ -5947,7 +5947,7 @@ struct SCEVDbgValueBuilder {
   /// in the set of values referenced by the expression.
   void pushLocation(llvm::Value *V) {
     Expr.push_back(llvm::dwarf::DW_OP_LLVM_arg);
-    auto *It = std::find(LocationOps.begin(), LocationOps.end(), V);
+    auto *It = llvm::find(LocationOps, V);
     unsigned ArgIndex = 0;
     if (It != LocationOps.end()) {
       ArgIndex = std::distance(LocationOps.begin(), It);

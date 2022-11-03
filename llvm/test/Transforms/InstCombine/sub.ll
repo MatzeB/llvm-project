@@ -16,10 +16,10 @@ define i32 @sub_constant(i32 %x) {
 
 define i32 @sub_constant_expression(i32 %x) {
 ; CHECK-LABEL: @sub_constant_expression(
-; CHECK-NEXT:    [[R:%.*]] = sub i32 [[X:%.*]], ptrtoint (i32* @g to i32)
+; CHECK-NEXT:    [[R:%.*]] = sub i32 [[X:%.*]], ptrtoint (ptr @g to i32)
 ; CHECK-NEXT:    ret i32 [[R]]
 ;
-  %r = sub i32 %x, ptrtoint (i32* @g to i32)
+  %r = sub i32 %x, ptrtoint (ptr @g to i32)
   ret i32 %r
 }
 
@@ -43,10 +43,10 @@ define <3 x i33> @sub_constant_vec_weird_type(<3 x i33> %x) {
 
 define <4 x i32> @sub_constant_expression_vec(<4 x i32> %x) {
 ; CHECK-LABEL: @sub_constant_expression_vec(
-; CHECK-NEXT:    [[R:%.*]] = sub <4 x i32> [[X:%.*]], bitcast (i128 ptrtoint (i32* @g to i128) to <4 x i32>)
+; CHECK-NEXT:    [[R:%.*]] = sub <4 x i32> [[X:%.*]], bitcast (i128 ptrtoint (ptr @g to i128) to <4 x i32>)
 ; CHECK-NEXT:    ret <4 x i32> [[R]]
 ;
-  %r = sub <4 x i32> %x, bitcast (i128 ptrtoint (i32* @g to i128) to <4 x i32>)
+  %r = sub <4 x i32> %x, bitcast (i128 ptrtoint (ptr @g to i128) to <4 x i32>)
   ret <4 x i32> %r
 }
 
@@ -436,31 +436,31 @@ define i64 @test_neg_shl_sub(i64 %a, i64 %b) {
   ret i64 %neg
 }
 
-define i64 @test_neg_shl_sub_extra_use1(i64 %a, i64 %b, i64* %p) {
+define i64 @test_neg_shl_sub_extra_use1(i64 %a, i64 %b, ptr %p) {
 ; CHECK-LABEL: @test_neg_shl_sub_extra_use1(
 ; CHECK-NEXT:    [[SUB:%.*]] = sub i64 [[A:%.*]], [[B:%.*]]
-; CHECK-NEXT:    store i64 [[SUB]], i64* [[P:%.*]], align 8
+; CHECK-NEXT:    store i64 [[SUB]], ptr [[P:%.*]], align 8
 ; CHECK-NEXT:    [[MUL_NEG:%.*]] = mul i64 [[SUB]], -4
 ; CHECK-NEXT:    ret i64 [[MUL_NEG]]
 ;
   %sub = sub i64 %a, %b
-  store i64 %sub, i64* %p
+  store i64 %sub, ptr %p
   %mul = shl i64 %sub, 2
   %neg = sub i64 0, %mul
   ret i64 %neg
 }
 
-define i64 @test_neg_shl_sub_extra_use2(i64 %a, i64 %b, i64* %p) {
+define i64 @test_neg_shl_sub_extra_use2(i64 %a, i64 %b, ptr %p) {
 ; CHECK-LABEL: @test_neg_shl_sub_extra_use2(
 ; CHECK-NEXT:    [[SUB:%.*]] = sub i64 [[A:%.*]], [[B:%.*]]
 ; CHECK-NEXT:    [[MUL:%.*]] = shl i64 [[SUB]], 2
-; CHECK-NEXT:    store i64 [[MUL]], i64* [[P:%.*]], align 8
+; CHECK-NEXT:    store i64 [[MUL]], ptr [[P:%.*]], align 8
 ; CHECK-NEXT:    [[NEG:%.*]] = sub i64 0, [[MUL]]
 ; CHECK-NEXT:    ret i64 [[NEG]]
 ;
   %sub = sub i64 %a, %b
   %mul = shl i64 %sub, 2
-  store i64 %mul, i64* %p
+  store i64 %mul, ptr %p
   %neg = sub i64 0, %mul
   ret i64 %neg
 }
@@ -501,29 +501,29 @@ define i64 @test_neg_shl_sext_i1(i1 %a, i64 %b) {
   ret i64 %neg
 }
 
-define i64 @test_neg_zext_i1_extra_use(i1 %a, i64 %b, i64* %p) {
+define i64 @test_neg_zext_i1_extra_use(i1 %a, i64 %b, ptr %p) {
 ; CHECK-LABEL: @test_neg_zext_i1_extra_use(
 ; CHECK-NEXT:    [[EXT_NEG:%.*]] = sext i1 [[A:%.*]] to i64
 ; CHECK-NEXT:    [[EXT:%.*]] = zext i1 [[A]] to i64
-; CHECK-NEXT:    store i64 [[EXT]], i64* [[P:%.*]], align 8
+; CHECK-NEXT:    store i64 [[EXT]], ptr [[P:%.*]], align 8
 ; CHECK-NEXT:    ret i64 [[EXT_NEG]]
 ;
   %ext = zext i1 %a to i64
   %neg = sub i64 0, %ext
-  store i64 %ext, i64* %p
+  store i64 %ext, ptr %p
   ret i64 %neg
 }
 
-define i64 @test_neg_sext_i1_extra_use(i1 %a, i64 %b, i64* %p) {
+define i64 @test_neg_sext_i1_extra_use(i1 %a, i64 %b, ptr %p) {
 ; CHECK-LABEL: @test_neg_sext_i1_extra_use(
 ; CHECK-NEXT:    [[EXT_NEG:%.*]] = zext i1 [[A:%.*]] to i64
 ; CHECK-NEXT:    [[EXT:%.*]] = sext i1 [[A]] to i64
-; CHECK-NEXT:    store i64 [[EXT]], i64* [[P:%.*]], align 8
+; CHECK-NEXT:    store i64 [[EXT]], ptr [[P:%.*]], align 8
 ; CHECK-NEXT:    ret i64 [[EXT_NEG]]
 ;
   %ext = sext i1 %a to i64
   %neg = sub i64 0, %ext
-  store i64 %ext, i64* %p
+  store i64 %ext, ptr %p
   ret i64 %neg
 }
 
@@ -1105,78 +1105,78 @@ define i32 @test57(i32 %A, i32 %B) {
   ret i32 %Y
 }
 
-@dummy_global1 = external global i8*
-@dummy_global2 = external global i8*
+@dummy_global1 = external global ptr
+@dummy_global2 = external global ptr
 
-define i64 @test58([100 x [100 x i8]]* %foo, i64 %i, i64 %j) {
+define i64 @test58(ptr %foo, i64 %i, i64 %j) {
 ; CHECK-LABEL: @test58(
 ; CHECK-NEXT:    [[TMP1:%.*]] = sub i64 [[I:%.*]], [[J:%.*]]
 ; CHECK-NEXT:    ret i64 [[TMP1]]
 ;
-  %gep1 = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* %foo, i64 0, i64 42, i64 %i
-  %gep2 = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* %foo, i64 0, i64 42, i64 %j
-  %cast1 = ptrtoint i8* %gep1 to i64
-  %cast2 = ptrtoint i8* %gep2 to i64
+  %gep1 = getelementptr inbounds [100 x [100 x i8]], ptr %foo, i64 0, i64 42, i64 %i
+  %gep2 = getelementptr inbounds [100 x [100 x i8]], ptr %foo, i64 0, i64 42, i64 %j
+  %cast1 = ptrtoint ptr %gep1 to i64
+  %cast2 = ptrtoint ptr %gep2 to i64
   %sub = sub i64 %cast1, %cast2
   ret i64 %sub
 }
 
-define i64 @test59([100 x [100 x i8]]* %foo, i64 %i) {
+define i64 @test59(ptr %foo, i64 %i) {
 ; CHECK-LABEL: @test59(
-; CHECK-NEXT:    [[GEP1:%.*]] = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* [[FOO:%.*]], i64 0, i64 42, i64 [[I:%.*]]
-; CHECK-NEXT:    [[GEP2:%.*]] = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* [[FOO]], i64 0, i64 42, i64 0
-; CHECK-NEXT:    store i8* [[GEP1]], i8** @dummy_global1, align 8
-; CHECK-NEXT:    store i8* [[GEP2]], i8** @dummy_global2, align 8
+; CHECK-NEXT:    [[GEP1:%.*]] = getelementptr inbounds [100 x [100 x i8]], ptr [[FOO:%.*]], i64 0, i64 42, i64 [[I:%.*]]
+; CHECK-NEXT:    [[GEP2:%.*]] = getelementptr inbounds [100 x [100 x i8]], ptr [[FOO]], i64 0, i64 42, i64 0
+; CHECK-NEXT:    store ptr [[GEP1]], ptr @dummy_global1, align 8
+; CHECK-NEXT:    store ptr [[GEP2]], ptr @dummy_global2, align 8
 ; CHECK-NEXT:    ret i64 [[I]]
 ;
 ; gep1 and gep2 have more than one uses
-  %gep1 = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* %foo, i64 0, i64 42, i64 %i
-  %gep2 = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* %foo, i64 0, i64 42, i64 0
-  %cast1 = ptrtoint i8* %gep1 to i64
-  %cast2 = ptrtoint i8* %gep2 to i64
+  %gep1 = getelementptr inbounds [100 x [100 x i8]], ptr %foo, i64 0, i64 42, i64 %i
+  %gep2 = getelementptr inbounds [100 x [100 x i8]], ptr %foo, i64 0, i64 42, i64 0
+  %cast1 = ptrtoint ptr %gep1 to i64
+  %cast2 = ptrtoint ptr %gep2 to i64
   %sub = sub i64 %cast1, %cast2
-  store i8* %gep1, i8** @dummy_global1
-  store i8* %gep2, i8** @dummy_global2
+  store ptr %gep1, ptr @dummy_global1
+  store ptr %gep2, ptr @dummy_global2
   ret i64 %sub
 }
 
-define i64 @test60([100 x [100 x i8]]* %foo, i64 %i, i64 %j) {
+define i64 @test60(ptr %foo, i64 %i, i64 %j) {
 ; CHECK-LABEL: @test60(
-; CHECK-NEXT:    [[GEP1:%.*]] = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* [[FOO:%.*]], i64 0, i64 [[J:%.*]], i64 [[I:%.*]]
-; CHECK-NEXT:    [[GEP2:%.*]] = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* [[FOO]], i64 0, i64 42, i64 0
-; CHECK-NEXT:    [[CAST1:%.*]] = ptrtoint i8* [[GEP1]] to i64
-; CHECK-NEXT:    [[CAST2:%.*]] = ptrtoint i8* [[GEP2]] to i64
+; CHECK-NEXT:    [[GEP1:%.*]] = getelementptr inbounds [100 x [100 x i8]], ptr [[FOO:%.*]], i64 0, i64 [[J:%.*]], i64 [[I:%.*]]
+; CHECK-NEXT:    [[GEP2:%.*]] = getelementptr inbounds [100 x [100 x i8]], ptr [[FOO]], i64 0, i64 42, i64 0
+; CHECK-NEXT:    [[CAST1:%.*]] = ptrtoint ptr [[GEP1]] to i64
+; CHECK-NEXT:    [[CAST2:%.*]] = ptrtoint ptr [[GEP2]] to i64
 ; CHECK-NEXT:    [[SUB:%.*]] = sub i64 [[CAST1]], [[CAST2]]
-; CHECK-NEXT:    store i8* [[GEP1]], i8** @dummy_global1, align 8
+; CHECK-NEXT:    store ptr [[GEP1]], ptr @dummy_global1, align 8
 ; CHECK-NEXT:    ret i64 [[SUB]]
 ;
 ; gep1 has a non-constant index and more than one uses. Shouldn't duplicate the arithmetic.
-  %gep1 = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* %foo, i64 0, i64 %j, i64 %i
-  %gep2 = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* %foo, i64 0, i64 42, i64 0
-  %cast1 = ptrtoint i8* %gep1 to i64
-  %cast2 = ptrtoint i8* %gep2 to i64
+  %gep1 = getelementptr inbounds [100 x [100 x i8]], ptr %foo, i64 0, i64 %j, i64 %i
+  %gep2 = getelementptr inbounds [100 x [100 x i8]], ptr %foo, i64 0, i64 42, i64 0
+  %cast1 = ptrtoint ptr %gep1 to i64
+  %cast2 = ptrtoint ptr %gep2 to i64
   %sub = sub i64 %cast1, %cast2
-  store i8* %gep1, i8** @dummy_global1
+  store ptr %gep1, ptr @dummy_global1
   ret i64 %sub
 }
 
-define i64 @test61([100 x [100 x i8]]* %foo, i64 %i, i64 %j) {
+define i64 @test61(ptr %foo, i64 %i, i64 %j) {
 ; CHECK-LABEL: @test61(
-; CHECK-NEXT:    [[GEP1:%.*]] = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* [[FOO:%.*]], i64 0, i64 42, i64 0
-; CHECK-NEXT:    [[GEP2:%.*]] = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* [[FOO]], i64 0, i64 [[J:%.*]], i64 [[I:%.*]]
-; CHECK-NEXT:    [[CAST1:%.*]] = ptrtoint i8* [[GEP1]] to i64
-; CHECK-NEXT:    [[CAST2:%.*]] = ptrtoint i8* [[GEP2]] to i64
+; CHECK-NEXT:    [[GEP1:%.*]] = getelementptr inbounds [100 x [100 x i8]], ptr [[FOO:%.*]], i64 0, i64 42, i64 0
+; CHECK-NEXT:    [[GEP2:%.*]] = getelementptr inbounds [100 x [100 x i8]], ptr [[FOO]], i64 0, i64 [[J:%.*]], i64 [[I:%.*]]
+; CHECK-NEXT:    [[CAST1:%.*]] = ptrtoint ptr [[GEP1]] to i64
+; CHECK-NEXT:    [[CAST2:%.*]] = ptrtoint ptr [[GEP2]] to i64
 ; CHECK-NEXT:    [[SUB:%.*]] = sub i64 [[CAST1]], [[CAST2]]
-; CHECK-NEXT:    store i8* [[GEP2]], i8** @dummy_global2, align 8
+; CHECK-NEXT:    store ptr [[GEP2]], ptr @dummy_global2, align 8
 ; CHECK-NEXT:    ret i64 [[SUB]]
 ;
 ; gep2 has a non-constant index and more than one uses. Shouldn't duplicate the arithmetic.
-  %gep1 = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* %foo, i64 0, i64 42, i64 0
-  %gep2 = getelementptr inbounds [100 x [100 x i8]], [100 x [100 x i8]]* %foo, i64 0, i64 %j, i64 %i
-  %cast1 = ptrtoint i8* %gep1 to i64
-  %cast2 = ptrtoint i8* %gep2 to i64
+  %gep1 = getelementptr inbounds [100 x [100 x i8]], ptr %foo, i64 0, i64 42, i64 0
+  %gep2 = getelementptr inbounds [100 x [100 x i8]], ptr %foo, i64 0, i64 %j, i64 %i
+  %cast1 = ptrtoint ptr %gep1 to i64
+  %cast2 = ptrtoint ptr %gep2 to i64
   %sub = sub i64 %cast1, %cast2
-  store i8* %gep2, i8** @dummy_global2
+  store ptr %gep2, ptr @dummy_global2
   ret i64 %sub
 }
 
@@ -1515,17 +1515,17 @@ define i8 @sub_not_mask_lowbits(i8 %x) {
   ret i8 %r
 }
 
-define <2 x i8> @sub_mask_lowbits_splat_extra_use(<2 x i8> %x, <2 x i8>* %p) {
+define <2 x i8> @sub_mask_lowbits_splat_extra_use(<2 x i8> %x, ptr %p) {
 ; CHECK-LABEL: @sub_mask_lowbits_splat_extra_use(
 ; CHECK-NEXT:    [[A2:%.*]] = and <2 x i8> [[X:%.*]], <i8 10, i8 10>
-; CHECK-NEXT:    store <2 x i8> [[A2]], <2 x i8>* [[P:%.*]], align 2
+; CHECK-NEXT:    store <2 x i8> [[A2]], ptr [[P:%.*]], align 2
 ; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i8> [[X]], <i8 -11, i8 -11>
 ; CHECK-NEXT:    [[R:%.*]] = add <2 x i8> [[TMP1]], <i8 -64, i8 -64>
 ; CHECK-NEXT:    ret <2 x i8> [[R]]
 ;
   %a1 = add <2 x i8> %x, <i8 192, i8 192> ; 0xc0
   %a2 = and <2 x i8> %x, <i8 10, i8 10>   ; 0x0a
-  store <2 x i8> %a2, <2 x i8>* %p
+  store <2 x i8> %a2, ptr %p
   %r = sub <2 x i8> %a1, %a2
   ret <2 x i8> %r
 }
@@ -2117,5 +2117,103 @@ define i8 @demand_low_bits_uses_commute(i8 %x, i8 %y, i8 %z) {
   call void @use8(i8 %a)
   %s = sub i8 %a, %z
   %r = shl i8 %s, 2
+  ret i8 %r
+}
+
+define i8 @shrink_sub_from_constant_lowbits(i8 %x) {
+; CHECK-LABEL: @shrink_sub_from_constant_lowbits(
+; CHECK-NEXT:    [[X000:%.*]] = shl i8 [[X:%.*]], 3
+; CHECK-NEXT:    [[SUB:%.*]] = sub i8 7, [[X000]]
+; CHECK-NEXT:    [[R:%.*]] = and i8 [[SUB]], -8
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x000 = shl i8 %x, 3   ; 3 low bits are known zero
+  %sub = sub i8 7, %x000
+  %r = and i8 %sub, -8   ; 3 low bits are not demanded
+  ret i8 %r
+}
+
+define i8 @shrink_sub_from_constant_lowbits_uses(i8 %x) {
+; CHECK-LABEL: @shrink_sub_from_constant_lowbits_uses(
+; CHECK-NEXT:    [[X000:%.*]] = shl i8 [[X:%.*]], 3
+; CHECK-NEXT:    [[SUB:%.*]] = sub i8 7, [[X000]]
+; CHECK-NEXT:    call void @use8(i8 [[SUB]])
+; CHECK-NEXT:    [[R:%.*]] = and i8 [[SUB]], -8
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x000 = shl i8 %x, 3   ; 3 low bits are known zero
+  %sub = sub i8 7, %x000
+  call void @use8(i8 %sub)
+  %r = and i8 %sub, -8   ; 3 low bits are not demanded
+  ret i8 %r
+}
+
+define i8 @shrink_sub_from_constant_lowbits2(i8 %x) {
+; CHECK-LABEL: @shrink_sub_from_constant_lowbits2(
+; CHECK-NEXT:    [[X000:%.*]] = and i8 [[X:%.*]], -8
+; CHECK-NEXT:    [[SUB:%.*]] = sub nsw i8 30, [[X000]]
+; CHECK-NEXT:    [[R:%.*]] = and i8 [[SUB]], -16
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x000 = and i8 %x, -8   ; 3 low bits are known zero
+  %sub = sub nsw i8 30, %x000 ; 0b0001_1110
+  %r = and i8 %sub, -16   ; 4 low bits are not demanded
+  ret i8 %r
+}
+
+define <2 x i8> @shrink_sub_from_constant_lowbits3(<2 x i8> %x) {
+; CHECK-LABEL: @shrink_sub_from_constant_lowbits3(
+; CHECK-NEXT:    [[X0000:%.*]] = shl <2 x i8> [[X:%.*]], <i8 4, i8 4>
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw <2 x i8> <i8 31, i8 31>, [[X0000]]
+; CHECK-NEXT:    [[R:%.*]] = lshr <2 x i8> [[SUB]], <i8 3, i8 3>
+; CHECK-NEXT:    ret <2 x i8> [[R]]
+;
+  %x0000 = shl <2 x i8> %x, <i8 4, i8 4>     ; 4 low bits are known zero
+  %sub = sub nuw <2 x i8> <i8 31, i8 31>, %x0000
+  %r = lshr <2 x i8> %sub, <i8 3, i8 3>      ; 3 low bits are not demanded
+  ret <2 x i8> %r
+}
+
+define i8 @demand_sub_from_variable_lowbits(i8 %x, i8 %y) {
+; CHECK-LABEL: @demand_sub_from_variable_lowbits(
+; CHECK-NEXT:    [[X000:%.*]] = shl i8 [[X:%.*]], 3
+; CHECK-NEXT:    [[Y000:%.*]] = and i8 [[Y:%.*]], -8
+; CHECK-NEXT:    [[SUB:%.*]] = sub i8 [[Y000]], [[X000]]
+; CHECK-NEXT:    ret i8 [[SUB]]
+;
+  %x000 = shl i8 %x, 3   ; 3 low bits are known zero
+  %y000 = and i8 %y, -8
+  %sub = sub i8 %y000, %x000
+  %r = and i8 %sub, -8   ; 3 low bits are not demanded
+  ret i8 %r
+}
+
+define i8 @demand_sub_from_variable_lowbits2(i8 %x, i8 %y) {
+; CHECK-LABEL: @demand_sub_from_variable_lowbits2(
+; CHECK-NEXT:    [[X0000:%.*]] = shl i8 [[X:%.*]], 4
+; CHECK-NEXT:    [[Y111:%.*]] = or i8 [[Y:%.*]], 7
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw nsw i8 [[Y111]], [[X0000]]
+; CHECK-NEXT:    [[R:%.*]] = lshr i8 [[SUB]], 4
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x0000 = shl i8 %x, 4   ; 4 low bits are known zero
+  %y111 = or i8 %y, 7
+  %sub = sub nsw nuw i8 %y111, %x0000
+  %r = lshr i8 %sub, 4    ; 4 low bits are not demanded
+  ret i8 %r
+}
+
+define i8 @demand_sub_from_variable_lowbits3(i8 %x, i8 %y) {
+; CHECK-LABEL: @demand_sub_from_variable_lowbits3(
+; CHECK-NEXT:    [[X0000:%.*]] = shl i8 [[X:%.*]], 4
+; CHECK-NEXT:    [[Y00000:%.*]] = and i8 [[Y:%.*]], -32
+; CHECK-NEXT:    [[SUB:%.*]] = sub i8 [[Y00000]], [[X0000]]
+; CHECK-NEXT:    [[R:%.*]] = lshr exact i8 [[SUB]], 4
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x0000 = shl i8 %x, 4   ; 4 low bits are known zero
+  %y00000 = and i8 %y, -32
+  %sub = sub i8 %y00000, %x0000
+  %r = lshr i8 %sub, 4    ; 4 low bits are not demanded
   ret i8 %r
 }

@@ -93,13 +93,13 @@ def ConvertAMDGPUToROCDL : Pass<"convert-amdgpu-to-rocdl"> {
 }
 
 //===----------------------------------------------------------------------===//
-// ArithmeticToLLVM
+// ArithToLLVM
 //===----------------------------------------------------------------------===//
 
-def ArithmeticToLLVMConversionPass : Pass<"convert-arith-to-llvm"> {
-  let summary = "Convert Arithmetic dialect to LLVM dialect";
+def ArithToLLVMConversionPass : Pass<"convert-arith-to-llvm"> {
+  let summary = "Convert Arith dialect to LLVM dialect";
   let description = [{
-    This pass converts supported Arithmetic ops to LLVM dialect instructions.
+    This pass converts supported Arith ops to LLVM dialect instructions.
   }];
   let dependentDialects = ["LLVM::LLVMDialect"];
   let options = [
@@ -110,12 +110,12 @@ def ArithmeticToLLVMConversionPass : Pass<"convert-arith-to-llvm"> {
 }
 
 //===----------------------------------------------------------------------===//
-// ArithmeticToSPIRV
+// ArithToSPIRV
 //===----------------------------------------------------------------------===//
 
-def ConvertArithmeticToSPIRV : Pass<"convert-arith-to-spirv"> {
-  let summary = "Convert Arithmetic dialect to SPIR-V dialect";
-  let constructor = "mlir::arith::createConvertArithmeticToSPIRVPass()";
+def ConvertArithToSPIRV : Pass<"convert-arith-to-spirv"> {
+  let summary = "Convert Arith dialect to SPIR-V dialect";
+  let constructor = "mlir::arith::createConvertArithToSPIRVPass()";
   let dependentDialects = ["spirv::SPIRVDialect"];
   let options = [
     Option<"emulateNon32BitScalarTypes", "emulate-non-32-bit-scalar-types",
@@ -152,7 +152,7 @@ def ConvertAsyncToLLVM : Pass<"convert-async-to-llvm", "ModuleOp"> {
   }];
   let constructor = "mlir::createConvertAsyncToLLVMPass()";
   let dependentDialects = [
-    "arith::ArithmeticDialect",
+    "arith::ArithDialect",
     "async::AsyncDialect",
     "LLVM::LLVMDialect",
   ];
@@ -190,7 +190,7 @@ def ConvertBufferizationToMemRef : Pass<"convert-bufferization-to-memref"> {
 
   }];
   let constructor = "mlir::createBufferizationToMemRefPass()";
-  let dependentDialects = ["arith::ArithmeticDialect", "memref::MemRefDialect"];
+  let dependentDialects = ["arith::ArithDialect", "memref::MemRefDialect"];
 }
 
 //===----------------------------------------------------------------------===//
@@ -440,6 +440,29 @@ def ConvertVulkanLaunchFuncToVulkanCalls
 }
 
 //===----------------------------------------------------------------------===//
+// ConvertIndexToLLVMPass
+//===----------------------------------------------------------------------===//
+
+def ConvertIndexToLLVMPass : Pass<"convert-index-to-llvm"> {
+  let summary = "Lower the `index` dialect to the `llvm` dialect.";
+  let description = [{
+    This pass lowers Index dialect operations to LLVM dialect operations.
+    Operation conversions are 1-to-1 except for the exotic divides: `ceildivs`,
+    `ceildivu`, and `floordivs`, which expand to series of LLVM operations.
+    Importantly, the index bitwidth should be correctly set to the target
+    pointer width via `index-bitwidth`.
+  }];
+
+  let dependentDialects = ["::mlir::LLVM::LLVMDialect"];
+
+  let options = [
+    Option<"indexBitwidth", "index-bitwidth", "unsigned",
+           /*default=kDeriveIndexBitwidthFromDataLayout*/"0",
+           "Bitwidth of the index type, 0 to use size of machine word">,
+  ];
+}
+
+//===----------------------------------------------------------------------===//
 // LinalgToLLVM
 //===----------------------------------------------------------------------===//
 
@@ -486,7 +509,7 @@ def ConvertMathToLibm : Pass<"convert-math-to-libm", "ModuleOp"> {
   }];
   let constructor = "mlir::createConvertMathToLibmPass()";
   let dependentDialects = [
-    "arith::ArithmeticDialect",
+    "arith::ArithDialect",
     "func::FuncDialect",
     "vector::VectorDialect",
   ];
@@ -528,7 +551,7 @@ def ConvertMathToFuncs : Pass<"convert-math-to-funcs", "ModuleOp"> {
   }];
   let constructor = "mlir::createConvertMathToFuncsPass()";
   let dependentDialects = [
-    "arith::ArithmeticDialect",
+    "arith::ArithDialect",
     "cf::ControlFlowDialect",
     "func::FuncDialect",
     "vector::VectorDialect",
@@ -778,7 +801,7 @@ def ConvertTensorToLinalg : Pass<"convert-tensor-to-linalg", "ModuleOp"> {
   let summary = "Convert some Tensor dialect ops to Linalg dialect";
   let constructor = "mlir::createConvertTensorToLinalgPass()";
   let dependentDialects = [
-    "arith::ArithmeticDialect",
+    "arith::ArithDialect",
     "linalg::LinalgDialect",
   ];
 }
@@ -806,7 +829,7 @@ def ConvertTensorToSPIRV : Pass<"convert-tensor-to-spirv"> {
 def TosaToArith : Pass<"tosa-to-arith"> {
   let summary = "Lower TOSA to the Arith dialect";
   let dependentDialects = [
-    "arith::ArithmeticDialect",
+    "arith::ArithDialect",
   ];
   let description = [{
     Pass that converts TOSA operations to the equivalent operations using the

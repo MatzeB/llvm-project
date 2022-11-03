@@ -13,13 +13,14 @@
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/Arithmetic/Utils/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/Utils/Utils.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/DestinationStyleOpInterface.h"
 #include "mlir/Interfaces/TilingInterface.h"
 #include "llvm/Support/Debug.h"
 
@@ -45,12 +46,12 @@ scf::SCFTilingOptions::setTileSizes(ArrayRef<int64_t> ts) {
 
 /// Helper method to adjust the interchange vector to match the iteration
 /// domain.
-static SmallVector<unsigned>
-fillInterchangeVector(ArrayRef<unsigned> interchangeVector,
+static SmallVector<int64_t>
+fillInterchangeVector(ArrayRef<int64_t> interchangeVector,
                       size_t iterationDomainSize) {
-  SmallVector<unsigned> filledVector = llvm::to_vector(interchangeVector);
+  SmallVector<int64_t> filledVector = llvm::to_vector(interchangeVector);
   if (filledVector.size() < iterationDomainSize) {
-    auto range = llvm::seq<unsigned>(filledVector.size(), iterationDomainSize);
+    auto range = llvm::seq<int64_t>(filledVector.size(), iterationDomainSize);
     filledVector.append(range.begin(), range.end());
   }
   if (filledVector.size() > iterationDomainSize)
@@ -61,23 +62,23 @@ fillInterchangeVector(ArrayRef<unsigned> interchangeVector,
 /// Helper method to apply permutation to a vector
 template <typename T>
 static SmallVector<T> applyPermutationToVector(const SmallVector<T> &vector,
-                                               ArrayRef<unsigned> interchange) {
+                                               ArrayRef<int64_t> interchange) {
   assert(interchange.size() == vector.size());
   return llvm::to_vector(
-      llvm::map_range(interchange, [&](unsigned val) { return vector[val]; }));
+      llvm::map_range(interchange, [&](int64_t val) { return vector[val]; }));
 }
 /// Helper method to apply to invert a permutation.
-static SmallVector<unsigned>
-invertPermutationVector(ArrayRef<unsigned> interchange) {
-  SmallVector<unsigned> inversion(interchange.size());
+static SmallVector<int64_t>
+invertPermutationVector(ArrayRef<int64_t> interchange) {
+  SmallVector<int64_t> inversion(interchange.size());
   for (const auto &pos : llvm::enumerate(interchange)) {
     inversion[pos.value()] = pos.index();
   }
   return inversion;
 }
 /// Method to check if an interchange vector is a permutation.
-static bool isPermutation(ArrayRef<unsigned> interchange) {
-  llvm::SmallDenseSet<unsigned, 4> seenVals;
+static bool isPermutation(ArrayRef<int64_t> interchange) {
+  llvm::SmallDenseSet<int64_t, 4> seenVals;
   for (auto val : interchange) {
     if (seenVals.count(val))
       return false;
@@ -87,7 +88,7 @@ static bool isPermutation(ArrayRef<unsigned> interchange) {
 }
 
 //===----------------------------------------------------------------------===//
-// TileUsingSCFForOp pattern implementation.
+// tileUsingSCFForOp implementation.
 //===----------------------------------------------------------------------===//
 
 // Check if `stride` evenly divides the trip count `size - offset`.
@@ -167,7 +168,65 @@ generateTileLoopNest(OpBuilder &builder, Location loc,
   return loops;
 }
 
-/// If the tiled operation is in destination passing style, update the
+/// For a value to be yielded (`yieldedValue`) from within a loop nest `loops`,
+/// construct the destructive update pattern that inserts the yielded
+/// value into a destination tensor provided by `initValue` at offset
+/// `tileOffsets` and size `tileSizes`. For example,
+///
+/// ```mlir
+/// scf.for %iv0 = ... {
+///   %0 = tiled_op
+/// }
+/// ```
+///
+/// is transformed to
+///
+/// ```mlir
+/// scf.for %iv0 = ... iter_args(%arg = %0) {
+///   %1 = tensor.extract_slice %arg
+///   %2 = tiled_op
+///   %3 = tensor.insert_slice %2 into %arg
+///   scf.yield %3
+/// }
+/// ```
+/// TODO: This API can be cleaned up by using `SubsetExtractOpInterface`.
+static FailureOr<SmallVector<Value>>
+yieldTiledValues(RewriterBase &rewriter, ValueRange initValues,
+                 ValueRange yieldedValues,
+                 ArrayRef<SmallVector<OpFoldResult>> tileOffsetsList,
+                 ArrayRef<SmallVector<OpFoldResult>> tileSizesList,
+                 MutableArrayRef<scf::ForOp> loops) {
+  NewYieldValueFn yieldValueFn =
+      [&](OpBuilder &b, Location loc,
+          ArrayRef<BlockArgument> newBBArgs) -> SmallVector<Value> {
+    SmallVector<Value> inserts;
+    for (const auto &yieldedValue : llvm::enumerate(yieldedValues)) {
+      ArrayRef<OpFoldResult> tileOffsets =
+          tileOffsetsList[yieldedValue.index()];
+      ArrayRef<OpFoldResult> tileSizes = tileSizesList[yieldedValue.index()];
+      SmallVector<OpFoldResult> tileStrides(tileOffsets.size(),
+                                            b.getIndexAttr(1));
+      Value insert = b.create<tensor::InsertSliceOp>(
+          loc, yieldedValue.value(), newBBArgs[yieldedValue.index()],
+          tileOffsets, tileSizes, tileStrides);
+      inserts.push_back(insert);
+    }
+    return inserts;
+  };
+
+  SmallVector<scf::ForOp> newLoops =
+      replaceLoopNestWithNewYields(rewriter, loops, initValues, yieldValueFn,
+                                   /*replaceIterOperandsUsesInLoop =*/false);
+  for (const auto &loop : llvm::enumerate(loops)) {
+    rewriter.eraseOp(loop.value());
+    loops[loop.index()] = newLoops[loop.index()];
+  }
+  return llvm::to_vector(llvm::map_range(
+      loops.front().getResults().take_back(yieldedValues.size()),
+      [](OpResult r) -> Value { return r; }));
+}
+
+/// If the tiled operation is destination passing style, update the
 /// slice of the destination used (which refers to the untiled destination)
 /// to use the corresponding region argument of the innermost loop.
 ///
@@ -191,13 +250,11 @@ generateTileLoopNest(OpBuilder &builder, Location loc,
 ///   scf.yield %3
 /// }
 /// ```
-/// TODO: This can be made much cleaner when `DestinationStyleOp` interface is
-/// available generally.
 static void
 updateDestinationOperandsForTiledOp(OpBuilder &builder,
                                     ValueRange tiledOpDestinationValues,
                                     ValueRange bbArgsList) {
-  for (auto destValue : llvm::enumerate(tiledOpDestinationValues)) {
+  for (const auto &destValue : llvm::enumerate(tiledOpDestinationValues)) {
     auto sliceOp = destValue.value().getDefiningOp<tensor::ExtractSliceOp>();
     if (!sliceOp)
       continue;
@@ -205,22 +262,11 @@ updateDestinationOperandsForTiledOp(OpBuilder &builder,
   }
 }
 
-scf::TileUsingSCFForOp::TileUsingSCFForOp(MLIRContext *context,
-                                          scf::SCFTilingOptions options,
-                                          PatternBenefit benefit)
-    : OpInterfaceRewritePattern<TilingInterface>(context, benefit),
-      options(std::move(options)) {}
-
-scf::TileUsingSCFForOp::TileUsingSCFForOp(StringRef opName,
-                                          MLIRContext *context,
-                                          scf::SCFTilingOptions options,
-                                          PatternBenefit benefit)
-    : OpInterfaceRewritePattern<TilingInterface>(context, benefit),
-      options(std::move(options)) {}
-
+/// Implementation of tiling transformation of `op` that implements the
+/// `TilingInterface` using `scf.for` to iterate over the tiles.
 FailureOr<scf::SCFTilingResult>
-scf::TileUsingSCFForOp::returningMatchAndRewrite(
-    TilingInterface op, PatternRewriter &rewriter) const {
+mlir::scf::tileUsingSCFForOp(RewriterBase &rewriter, TilingInterface op,
+                             const scf::SCFTilingOptions &options) {
   OpBuilder::InsertionGuard guard(rewriter);
   rewriter.setInsertionPointAfter(op);
 
@@ -228,6 +274,12 @@ scf::TileUsingSCFForOp::returningMatchAndRewrite(
     return rewriter.notifyMatchFailure(
         op, "missing tile size computation function");
   }
+
+  // Get destination tensors.
+  SmallVector<Value> destinationTensors;
+  if (failed(tensor::getOrCreateDestinations(rewriter, op.getLoc(), op,
+                                             destinationTensors)))
+    return rewriter.notifyMatchFailure(op, "failed to get destinations");
 
   // 1. Get the range of the loops that are represented by the operation.
   SmallVector<Range> iterationDomain = op.getIterationDomain(rewriter);
@@ -253,7 +305,7 @@ scf::TileUsingSCFForOp::returningMatchAndRewrite(
   {
     // If there is an interchange specified, permute the iteration domain and
     // the tile sizes.
-    SmallVector<unsigned> interchangeVector;
+    SmallVector<int64_t> interchangeVector;
     if (!options.interchangeVector.empty()) {
       interchangeVector = fillInterchangeVector(options.interchangeVector,
                                                 iterationDomain.size());
@@ -282,131 +334,89 @@ scf::TileUsingSCFForOp::returningMatchAndRewrite(
       offsets = applyPermutationToVector(offsets, inversePermutation);
       sizes = applyPermutationToVector(sizes, inversePermutation);
     }
+  }
 
-    LLVM_DEBUG({
-      if (!tilingResult.loops.empty()) {
-        llvm::errs() << "LoopNest shell :\n";
-        tilingResult.loops.front().dump();
-        llvm::errs() << "\n";
-      }
-    });
-
-    // 4. Generate the tiled implementation within the inner most loop.
-    if (!tilingResult.loops.empty())
-      rewriter.setInsertionPoint(
-          tilingResult.loops.back().getBody()->getTerminator());
-    SmallVector<Operation *> tiledImplementation =
-        op.getTiledImplementation(rewriter, offsets, sizes);
-    if (tiledImplementation.size() != 1) {
-      return rewriter.notifyMatchFailure(
-          op, "expected tiled implementation to return a single op");
+  LLVM_DEBUG({
+    if (!tilingResult.loops.empty()) {
+      llvm::dbgs() << "LoopNest shell :\n";
+      tilingResult.loops.front().dump();
+      llvm::dbgs() << "\n";
     }
-    tilingResult.tiledOp = tiledImplementation[0];
+  });
 
-    LLVM_DEBUG({
-      if (!tilingResult.loops.empty()) {
-        llvm::errs() << "After tiled implementation :\n";
-        tilingResult.loops.front().dump();
-        llvm::errs() << "\n";
-      }
-    });
-  }
-
-  if (op->getNumResults() == 0) {
-    rewriter.eraseOp(op);
-    return tilingResult;
-  }
-
-  // 5. If the original operations has results, modify the loop nest to yield
-  // the replacement values.
-  if (tilingResult.loops.empty()) {
-    // 5a. If there were no loops, the tiled implementation results are the
-    // replacements.
-    rewriter.replaceOp(op, tilingResult.tiledOp->getResults());
-    return tilingResult;
-  }
-
-  // 6. Yield the results of the tiled operation from the loop nest as
-  //    replacements for the original untiled ops.
-  if (tilingResult.tiledOp->getNumResults() != op->getNumResults()) {
+  // 4. Generate the tiled implementation within the inner most loop.
+  if (!tilingResult.loops.empty())
+    rewriter.setInsertionPoint(
+        tilingResult.loops.back().getBody()->getTerminator());
+  SmallVector<Operation *> tiledImplementation =
+      op.getTiledImplementation(rewriter, offsets, sizes);
+  if (tiledImplementation.size() != 1) {
     return rewriter.notifyMatchFailure(
-        tilingResult.tiledOp,
-        "expected tiled op to have as many results as the untiled operation");
+        op, "expected tiled implementation to return a single op");
+  }
+  tilingResult.tiledOp = tiledImplementation[0];
+  if (op->getNumResults() == 0) {
+    // nothing more to do.
+    return tilingResult;
   }
 
-  // `scf.for` with tensor semantics requires the loop nest to yield the
-  // replacement values using destructive updates. Use the `TilingInterface`
-  // to get the position of the result tiles and use that to generate the
-  // destructive update pattern, i.e.,
-  //
-  // ```mlir
-  // scf.for %iv0 = ... {
-  //   %0 = tiled_op
-  // }
-  // ```
-  //
-  // is transformed to
-  //
-  // ```mlir
-  // %result = scf.for %iv0 = ... iter_args(%arg = %init) -> .. {
-  //   %0 = tiled_op
-  //   %1 = tensor.insert_slice %0 into %arg[..] [..] [..]
-  //   scf.yield %1
-  // }
-  // ```
-  NewYieldValueFn yieldValueFn =
-      [&](OpBuilder &b, Location loc,
-          ArrayRef<BlockArgument> newBBArgs) -> SmallVector<Value> {
-    SmallVector<Value> yieldedValues;
-    Attribute one = b.getIndexAttr(1);
-    for (auto resultNum : llvm::seq<unsigned>(0, op->getNumResults())) {
-      SmallVector<OpFoldResult> resultTileOffsets, resultTileSizes;
-      if (failed(op.getResultTilePosition(b, resultNum, offsets, sizes,
-                                          resultTileOffsets,
-                                          resultTileSizes))) {
-        op.emitOpError("unable to get position of result ")
-            << resultNum << " of the tiled implementation";
-        return {};
-      }
-      SmallVector<OpFoldResult> resultTileStrides(resultTileOffsets.size(),
-                                                  one);
-      Value yieldedValue = b.create<tensor::InsertSliceOp>(
-          op->getLoc(), tilingResult.tiledOp->getResult(resultNum),
-          newBBArgs[resultNum], resultTileOffsets, resultTileSizes,
-          resultTileStrides);
-      yieldedValues.push_back(yieldedValue);
-    }
-    return yieldedValues;
-  };
-  SmallVector<scf::ForOp> newLoops = replaceLoopNestWithNewYields(
-      rewriter, tilingResult.loops, op.getDestinationOperands(rewriter),
-      yieldValueFn, /*replaceIterOperandsUsesInLoops =*/false);
-  for (const auto &loop : llvm::enumerate(tilingResult.loops)) {
-    rewriter.eraseOp(loop.value());
-    tilingResult.loops[loop.index()] = newLoops[loop.index()];
+  // If loops are empty, the tiled op is used as the replacement for the untiled
+  // op.
+  if (tilingResult.loops.empty()) {
+    tilingResult.replacements = llvm::to_vector(
+        llvm::map_range(tiledImplementation[0]->getResults(),
+                        [](OpResult result) -> Value { return result; }));
+    return tilingResult;
   }
-  rewriter.replaceOp(op, tilingResult.loops.front().getResults());
+
+  // 5. Yield all the results of the tiled operation. The surrounding loop
+  //    nest is modified to insert a destructive update pattern to yield
+  //    from the loop nest values to replace the untiled op with.
+  int64_t numResults = op->getNumResults();
+  SmallVector<SmallVector<OpFoldResult>> resultOffsetsList(numResults),
+      resultSizesList(numResults);
+  for (const auto &result : llvm::enumerate(op->getResults())) {
+    if (failed(op.getResultTilePosition(rewriter, result.index(), offsets,
+                                        sizes,
+                                        resultOffsetsList[result.index()],
+                                        resultSizesList[result.index()]))) {
+      return rewriter.notifyMatchFailure(
+          op, "failed to get slice of result produced");
+    }
+  }
+
+  FailureOr<SmallVector<Value>> replacementOr = yieldTiledValues(
+      rewriter, destinationTensors, tilingResult.tiledOp->getResults(),
+      resultOffsetsList, resultSizesList, tilingResult.loops);
+  if (failed(replacementOr))
+    return rewriter.notifyMatchFailure(op, "failed to yield replacement");
+
+  if (auto dstOp =
+          dyn_cast<DestinationStyleOpInterface>(tilingResult.tiledOp)) {
+    auto innerMostLoop = tilingResult.loops.back();
+    SmallVector<Value> destinationTensors = dstOp.getOutputOperands();
+    assert(destinationTensors.size() ==
+               innerMostLoop.getRegionIterArgs().size() &&
+           "unexpected number of outputs");
+    updateDestinationOperandsForTiledOp(rewriter, destinationTensors,
+                                        innerMostLoop.getRegionIterArgs());
+  }
+
+  tilingResult.replacements = replacementOr.value();
+
+  LLVM_DEBUG({
+    if (!tilingResult.loops.empty()) {
+      llvm::dbgs() << "After tiled implementation :\n";
+      tilingResult.loops.front().dump();
+      llvm::dbgs() << "\n";
+    }
+  });
   return tilingResult;
 }
 
 //===----------------------------------------------------------------------===//
-// TileConsumerAndFuseProducersUsingSCFForOp pattern implementation.
+// tileConsumerAndFuseProducerGreedilyUsingSCFForOp implementation.
 //===----------------------------------------------------------------------===//
-
-scf::TileConsumerAndFuseProducersUsingSCFForOp::
-    TileConsumerAndFuseProducersUsingSCFForOp(MLIRContext *context,
-                                              scf::SCFTilingOptions options,
-                                              PatternBenefit benefit)
-    : OpInterfaceRewritePattern<TilingInterface>(context, benefit),
-      tilingPattern(context, std::move(options)) {}
-
-scf::TileConsumerAndFuseProducersUsingSCFForOp::
-    TileConsumerAndFuseProducersUsingSCFForOp(StringRef opName,
-                                              MLIRContext *context,
-                                              scf::SCFTilingOptions options,
-                                              PatternBenefit benefit)
-    : OpInterfaceRewritePattern<TilingInterface>(context, benefit),
-      tilingPattern(context, std::move(options)) {}
 
 /// Return the untiled producer whose slice is used in a tiled consumer. The
 /// method traverses the tile loop nest (`loops`) if needed, and returns the
@@ -430,27 +440,40 @@ getUntiledProducerFromSliceSource(OpOperand *source,
   return {source->get().dyn_cast<OpResult>(), destinationIterArg};
 }
 
+/// Implementation of tile consumer and fuse producer greedily.
 FailureOr<scf::SCFTileAndFuseResult>
-scf::TileConsumerAndFuseProducersUsingSCFForOp::returningMatchAndRewrite(
-    TilingInterface op, PatternRewriter &rewriter) const {
+mlir::scf::tileConsumerAndFuseProducerGreedilyUsingSCFForOp(
+    RewriterBase &rewriter, TilingInterface consumer,
+    const scf::SCFTileAndFuseOptions &options) {
   // This transformation is only valid for ops that return values (i.e. not
   // valid to use with operations that have memref operands).
-  if (!op->getNumResults()) {
+  if (!consumer->getNumResults()) {
     return rewriter.notifyMatchFailure(
-        op, "invalid pattern for op with no results");
+        consumer, "invalid pattern for op with no results");
   }
 
   // 1. First tile the consumer.
-  SCFTileAndFuseResult tileAndFuseResult;
+  scf::SCFTileAndFuseResult tileAndFuseResult;
+  llvm::SmallDenseMap<Value, int64_t> yieldedValueToResultNumber;
   {
-    FailureOr<SCFTilingResult> tilingResult =
-        tilingPattern.returningMatchAndRewrite(op, rewriter);
-    if (failed(tilingResult)) {
-      return failure();
-    }
-    tileAndFuseResult.tiledAndFusedOps.push_back(tilingResult->tiledOp);
+    FailureOr<scf::SCFTilingResult> tilingResult =
+        tileUsingSCFForOp(rewriter, consumer, options.tilingOptions);
+    if (failed(tilingResult))
+      return rewriter.notifyMatchFailure(consumer, "failed to tile consumer");
+    tileAndFuseResult.tiledAndFusedOps.insert(tilingResult->tiledOp);
     tileAndFuseResult.loops = std::move(tilingResult->loops);
+    for (const auto &result : llvm::enumerate(
+             llvm::zip(consumer->getResults(), tilingResult->replacements))) {
+      tileAndFuseResult.replacements[std::get<0>(result.value())] =
+          std::get<1>(result.value());
+      yieldedValueToResultNumber[tilingResult->tiledOp->getResult(
+          result.index())] = result.index();
+    }
   }
+
+  // If there are no loops generated, fusion is immaterial.
+  if (tileAndFuseResult.loops.empty())
+    return tileAndFuseResult;
 
   // 2. Typically, the operands of the tiled operation are slices of the
   //    operands of the untiled operation. These are expressed in IR using
@@ -495,7 +518,7 @@ scf::TileConsumerAndFuseProducersUsingSCFForOp::returningMatchAndRewrite(
     //     values produced by operations that implement the `TilingInterface`.
     //     Add these operations to the worklist.
     Operation *fusedProducer = fusedProducerValue->getDefiningOp();
-    tileAndFuseResult.tiledAndFusedOps.push_back(fusedProducer);
+    tileAndFuseResult.tiledAndFusedOps.insert(fusedProducer);
     addCandidateSlices(fusedProducer, candidates);
 
     // 2e. If the slice is for a destination operand, for example,
@@ -554,21 +577,18 @@ scf::TileConsumerAndFuseProducersUsingSCFForOp::returningMatchAndRewrite(
           *destinationIterArg.value());
     }
     if (iterArgNumber) {
-      unsigned resultNumber = fusableProducer.getResultNumber();
-      if (auto producerOp =
-              dyn_cast<TilingInterface>(fusableProducer.getOwner())) {
-        SmallVector<Value> destination =
-            producerOp.getDestinationOperands(rewriter);
-        outerMostLoop.setIterArg(iterArgNumber.value(),
-                                 destination[resultNumber]);
+      int64_t resultNumber = fusableProducer.getResultNumber();
+      if (auto dstOp = dyn_cast<DestinationStyleOpInterface>(
+              fusableProducer.getOwner())) {
+        outerMostLoop.setIterArg(
+            iterArgNumber.value(),
+            dstOp.getTiedOpOperand(fusableProducer)->get());
       }
-      if (auto tiledAndFusedInterfaceOp =
-              fusedProducerValue.value().getDefiningOp<TilingInterface>()) {
+      if (auto dstOp = fusedProducerValue.value()
+                           .getDefiningOp<DestinationStyleOpInterface>()) {
         scf::ForOp innerMostLoop = tileAndFuseResult.loops.back();
-        SmallVector<Value> destination =
-            tiledAndFusedInterfaceOp.getDestinationOperands(rewriter);
         updateDestinationOperandsForTiledOp(
-            rewriter, destination[resultNumber],
+            rewriter, dstOp.getOutputOperand(resultNumber)->get(),
             innerMostLoop.getRegionIterArgs()[iterArgNumber.value()]);
       }
     }
@@ -577,20 +597,19 @@ scf::TileConsumerAndFuseProducersUsingSCFForOp::returningMatchAndRewrite(
 }
 
 //===----------------------------------------------------------------------===//
-// LowerToLoopsUsingSCFForOp
+// lowerToLoopsUsingSCFForOp implementation.
 //===----------------------------------------------------------------------===//
 
 FailureOr<SmallVector<scf::ForOp>>
-scf::LowerToLoopsUsingSCFForOp::returningMatchAndRewrite(
-    TilingInterface op, PatternRewriter &rewriter) const {
-  SmallVector<Range> domain = op.getIterationDomain(rewriter);
-
+mlir::scf::lowerToLoopsUsingSCFForOp(RewriterBase &rewriter,
+                                     TilingInterface op) {
   // TODO: Handle cases where the op has results if needed.
   if (op->getNumResults() > 0) {
     return rewriter.notifyMatchFailure(
         op, "unable to lower to loops operations with return values");
   }
 
+  SmallVector<Range> domain = op.getIterationDomain(rewriter);
   SmallVector<Value> ivs;
   SmallVector<scf::ForOp> loops;
   Location loc = op.getLoc();
@@ -610,6 +629,5 @@ scf::LowerToLoopsUsingSCFForOp::returningMatchAndRewrite(
   if (failed(op.generateScalarImplementation(rewriter, op.getLoc(), ivs))) {
     return failure();
   }
-  rewriter.eraseOp(op);
   return loops;
 }

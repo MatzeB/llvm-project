@@ -57,9 +57,8 @@ using namespace clang;
 //===----------------------------------------------------------------------===//
 
 MacroInfo *Preprocessor::AllocateMacroInfo(SourceLocation L) {
-  auto *MIChain = new (BP) MacroInfoChain{L, MIChainHead};
-  MIChainHead = MIChain;
-  return &MIChain->MI;
+  static_assert(std::is_trivially_destructible_v<MacroInfo>, "");
+  return new (BP) MacroInfo(L);
 }
 
 DefMacroDirective *Preprocessor::AllocateDefMacroDirective(MacroInfo *MI,
@@ -909,6 +908,10 @@ Preprocessor::getHeaderToIncludeForDiagnostics(SourceLocation IncLoc,
         InPrivateHeader = true;
         continue;
       }
+
+      // Don't suggest explicitly excluded headers.
+      if (Header.getRole() == ModuleMap::ExcludedHeader)
+        continue;
 
       // We'll suggest including textual headers below if they're
       // include-guarded.

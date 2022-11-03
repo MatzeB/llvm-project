@@ -14,8 +14,8 @@ from the [MLIR LangRef](LangRef.md).
 
 Attributes are the mechanism for specifying constant data on operations in
 places where a variable is never allowed - e.g. the comparison predicate of a
-[`arith.cmpi` operation](Dialects/ArithmeticOps.md#arithcmpi-mlirarithcmpiop), or
-the underlying value of a [`arith.constant` operation](Dialects/ArithmeticOps.md#arithconstant-mlirarithconstantop).
+[`arith.cmpi` operation](Dialects/ArithOps.md#arithcmpi-mlirarithcmpiop), or
+the underlying value of a [`arith.constant` operation](Dialects/ArithOps.md#arithconstant-mlirarithconstantop).
 Each operation has an attribute dictionary, which associates a set of attribute
 names to attribute values.
 
@@ -24,7 +24,7 @@ names to attribute values.
 Every SSA value, such as operation results or block arguments, in MLIR has a type
 defined by the type system. MLIR has an open type system with no fixed list of types,
 and there are no restrictions on the abstractions they represent. For example, take
-the following [Arithmetic AddI operation](Dialects/ArithmeticOps.md#arithaddi-mlirarithaddiop):
+the following [Arithmetic AddI operation](Dialects/ArithOps.md#arithaddi-mlirarithaddiop):
 
 ```mlir
   %result = arith.addi %lhs, %rhs : i64
@@ -656,11 +656,16 @@ default-constructed value for the C++ storage type. For example, `Optional<int>`
 will be set to `llvm::None` and `Attribute` will be set to `nullptr`. The
 presence of these parameters is tested by comparing them to their "null" values.
 
-Only optional parameters or directives that only capture optional parameters can
-be used in optional groups. An optional group is a set of elements optionally
-printed based on the presence of an anchor. The group in which the anchor is
-placed is printed if it is present, otherwise the other one is printed. Suppose
-parameter `a` is an `IntegerAttr`.
+An optional group is a set of elements optionally printed based on the presence
+of an anchor. Only optional parameters or directives that only capture optional
+parameters can be used in optional groups. The group in which the anchor is
+placed is printed if it is present, otherwise the other one is printed. If a
+directive that captures more than one optional parameter is used as the anchor,
+the optional group is printed if any of the captured parameters is present. For
+example, a `custom` directive may only be used as an optional group anchor if it
+captures at least one optional parameter.
+
+Suppose parameter `a` is an `IntegerAttr`.
 
 ```
 ( `(` $a^ `)` ) : (`x`)?

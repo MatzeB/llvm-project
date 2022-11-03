@@ -920,6 +920,9 @@ FormatToken *UnwrappedLineParser::parseBlock(
     return IfLBrace;
   }
 
+  const bool IsFunctionRBrace =
+      FormatTok->is(tok::r_brace) && Tok->is(TT_FunctionLBrace);
+
   auto RemoveBraces = [=]() mutable {
     if (!SimpleBlock)
       return false;
@@ -959,10 +962,23 @@ FormatToken *UnwrappedLineParser::parseBlock(
 
   // Munch the closing brace.
   nextToken(/*LevelDifference=*/-AddLevels);
+
+  // When this is a function block and there is an unnecessary semicolon
+  // afterwards then mark it as optional (so the RemoveSemi pass can get rid of
+  // it later).
+  if (Style.RemoveSemicolon && IsFunctionRBrace) {
+    while (FormatTok->is(tok::semi)) {
+      FormatTok->Optional = true;
+      nextToken();
+    }
+  }
+
   HandleVerilogBlockLabel();
 
   if (MacroBlock && FormatTok->is(tok::l_paren))
     parseParens();
+
+  Line->Level = InitialLevel;
 
   if (FormatTok->is(tok::kw_noexcept)) {
     // A noexcept in a requires expression.
@@ -978,8 +994,6 @@ FormatToken *UnwrappedLineParser::parseBlock(
 
   if (MunchSemi && FormatTok->is(tok::semi))
     nextToken();
-
-  Line->Level = InitialLevel;
 
   if (PPStartHash == PPEndHash) {
     Line->MatchingOpeningBlockLineIndex = OpeningLineIndex;
@@ -1103,6 +1117,9 @@ void UnwrappedLineParser::parsePPDirective() {
     break;
   case tok::pp_endif:
     parsePPEndIf();
+    break;
+  case tok::pp_pragma:
+    parsePPPragma();
     break;
   default:
     parsePPUnknown();
@@ -1264,6 +1281,11 @@ void UnwrappedLineParser::parsePPDefine() {
   // re-indentation if there was a structural error) within the macro
   // definition.
   parseFile();
+}
+
+void UnwrappedLineParser::parsePPPragma() {
+  Line->InPragmaDirective = true;
+  parsePPUnknown();
 }
 
 void UnwrappedLineParser::parsePPUnknown() {
@@ -1634,10 +1656,18 @@ void UnwrappedLineParser::parseStructuralElement(
       parseJavaScriptEs6ImportExport();
       return;
     }
-    if (!Style.isCpp())
-      break;
-    // Handle C++ "(inline|export) namespace".
-    [[fallthrough]];
+    if (Style.isCpp()) {
+      nextToken();
+      if (FormatTok->is(Keywords.kw_import)) {
+        parseModuleImport();
+        return;
+      }
+      if (FormatTok->is(tok::kw_namespace)) {
+        parseNamespace();
+        return;
+      }
+    }
+    break;
   case tok::kw_inline:
     nextToken();
     if (FormatTok->is(tok::kw_namespace)) {

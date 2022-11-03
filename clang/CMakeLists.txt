@@ -134,10 +134,6 @@ if(CLANG_BUILT_STANDALONE)
 
     umbrella_lit_testsuite_begin(check-all)
   endif() # LLVM_INCLUDE_TESTS
-
-  set(BACKEND_PACKAGE_STRING "LLVM ${LLVM_PACKAGE_VERSION}")
-else()
-  set(BACKEND_PACKAGE_STRING "${PACKAGE_STRING}")
 endif() # standalone
 
 if(NOT DEFINED LLVM_COMMON_CMAKE_UTILS)
@@ -151,7 +147,12 @@ list(INSERT CMAKE_MODULE_PATH 0
   "${LLVM_COMMON_CMAKE_UTILS}/Modules"
   )
 
-if(LLVM_ENABLE_LIBXML2)
+# This allows disabling clang's XML dependency even if LLVM finds libxml2.
+# By default, clang depends on libxml2 if LLVM does.
+option(CLANG_ENABLE_LIBXML2 "Whether libclang may depend on libxml2"
+       ${LLVM_ENABLE_LIBXML2})
+
+if(CLANG_ENABLE_LIBXML2)
   # Don't look for libxml if we're using MSan, since uninstrumented third party
   # code may call MSan interceptors like strlen, leading to false positives.
   if(NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
@@ -188,23 +189,6 @@ set(CLANG_SPAWN_CC1 OFF CACHE BOOL
     "Whether clang should use a new process for the CC1 invocation")
 
 option(CLANG_DEFAULT_PIE_ON_LINUX "Default to -fPIE and -pie on linux-gnu" ON)
-
-# Manually handle default so we can change the meaning of a cached default.
-set(CLANG_ENABLE_OPAQUE_POINTERS "DEFAULT" CACHE STRING
-    "Enable opaque pointers by default")
-if(CLANG_ENABLE_OPAQUE_POINTERS STREQUAL "DEFAULT")
-  set(CLANG_ENABLE_OPAQUE_POINTERS_INTERNAL ON)
-elseif(CLANG_ENABLE_OPAQUE_POINTERS)
-  set(CLANG_ENABLE_OPAQUE_POINTERS_INTERNAL ON)
-else()
-  set(CLANG_ENABLE_OPAQUE_POINTERS_INTERNAL OFF)
-endif()
-
-# TODO: verify the values against LangStandards.def?
-set(CLANG_DEFAULT_STD_C "" CACHE STRING
-  "Default standard to use for C/ObjC code (IDENT from LangStandards.def, empty for platform default)")
-set(CLANG_DEFAULT_STD_CXX "" CACHE STRING
-  "Default standard to use for C++/ObjC++ code (IDENT from LangStandards.def, empty for platform default)")
 
 set(CLANG_DEFAULT_LINKER "" CACHE STRING
   "Default linker to use (linker name or absolute path, empty for platform default)")
@@ -885,7 +869,7 @@ if (CLANG_ENABLE_BOOTSTRAP)
   endforeach()
 endif()
 
-if (CLANG_BOLT_INSTRUMENT)
+if (CLANG_BOLT_INSTRUMENT AND NOT LLVM_BUILD_INSTRUMENTED)
   set(CLANG_PATH ${LLVM_RUNTIME_OUTPUT_INTDIR}/clang)
   set(CLANGXX_PATH ${CLANG_PATH}++)
   set(CLANG_INSTRUMENTED ${CLANG_PATH}-bolt.inst)

@@ -8,7 +8,7 @@
 
 #include "mlir/Dialect/Tensor/IR/TensorTilingInterfaceImpl.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Arithmetic/Utils/Utils.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -20,21 +20,6 @@ using namespace mlir::tensor;
 namespace {
 
 struct PadOpTiling : public TilingInterface::ExternalModel<PadOpTiling, PadOp> {
-
-  SmallVector<Value> getDestinationOperands(Operation *op, OpBuilder &b) const {
-    OpBuilder::InsertionGuard g(b);
-    b.setInsertionPoint(op);
-    ReifiedRankedShapedTypeDims reifiedShapes;
-    ReifyRankedShapedTypeOpInterface reifyShapedTypeInterface =
-        dyn_cast<ReifyRankedShapedTypeOpInterface>(op);
-    (void)reifyShapedTypeInterface.reifyResultShapes(b, reifiedShapes);
-
-    auto padOp = cast<PadOp>(op);
-    SmallVector<OpFoldResult> mixedSizes = getAsOpFoldResult(reifiedShapes[0]);
-    Value initTensor = b.create<linalg::InitTensorOp>(
-        op->getLoc(), mixedSizes, padOp.getResultType().getElementType());
-    return {initTensor};
-  }
 
   SmallVector<utils::IteratorType> getLoopIteratorTypes(Operation *op) const {
     auto padOp = cast<PadOp>(op);
