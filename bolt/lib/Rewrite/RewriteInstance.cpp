@@ -1453,17 +1453,10 @@ void RewriteInstance::adjustFunctionBoundaries() {
         Function.hasRestoredNameRegex(".*\\.cold(\\.[0-9]+)?");
     if (FragName) {
       static bool PrintedWarning = false;
-      if (!PrintedWarning) {
-        PrintedWarning = true;
+      if (BC->HasRelocations && !PrintedWarning) {
         errs() << "BOLT-WARNING: split function detected on input : "
-               << *FragName;
-        if (BC->HasRelocations)
-          errs() << ". The support is limited in relocation mode";
-        if (opts::Lite) {
-          opts::Lite = false;
-          errs() << "\nBOLT-WARNING: disabling lite mode (-lite) when split "
-                 << "functions are present\n";
-        }
+               << *FragName << ". The support is limited in relocation mode.\n";
+        PrintedWarning = true;
       }
       Function.IsFragment = true;
     }
