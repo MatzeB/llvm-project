@@ -37,6 +37,7 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
