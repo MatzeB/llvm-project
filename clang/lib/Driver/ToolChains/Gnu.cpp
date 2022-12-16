@@ -714,7 +714,7 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       Args.MakeArgString(Twine(Output.getFilename()) + ".pre-bolt");
   MoveCmdArgs.push_back(PreBoltBin);
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
-                                         MvExec, MoveCmdArgs, None));
+                                         MvExec, MoveCmdArgs, std::nullopt));
 
   ArgStringList BoltCmdArgs;
   const char *BoltExec =
@@ -725,7 +725,7 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   BoltCmdArgs.push_back("-o");
   BoltCmdArgs.push_back(Output.getFilename());
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
-                                         BoltExec, BoltCmdArgs, None));
+                                         BoltExec, BoltCmdArgs, std::nullopt));
   // End Facebook T92898286
 }
 
