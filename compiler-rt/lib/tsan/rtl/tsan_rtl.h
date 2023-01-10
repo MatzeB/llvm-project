@@ -680,12 +680,15 @@ ALWAYS_INLINE
 void LazyInitialize(ThreadState *thr) {
   // If we can use .preinit_array, assume that __tsan_init
   // called from .preinit_array initializes runtime before
-  // any instrumented code except when tsan is used as a 
+  // any instrumented code except when tsan is used as a
   // shared library.
-#if (!SANITIZER_CAN_USE_PREINIT_ARRAY || defined(SANITIZER_SHARED))
+  // facebook begin T142224362
+  //  https://fb.workplace.com/groups/llvm15platform010/permalink/689049992780216/
+  // #if (!SANITIZER_CAN_USE_PREINIT_ARRAY || defined(SANITIZER_SHARED))
   if (UNLIKELY(!is_initialized))
     Initialize(thr);
-#endif
+  // #endif
+  // facebook end T142224362
 }
 
 void TraceResetForTesting();
