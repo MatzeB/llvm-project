@@ -79,8 +79,7 @@ VecOpToScalarOp<Op>::matchAndRewrite(Op op, PatternRewriter &rewriter) const {
   Value result = rewriter.create<arith::ConstantOp>(
       loc, DenseElementsAttr::get(
                vecType, FloatAttr::get(vecType.getElementType(), 0.0)));
-  SmallVector<int64_t> ones(shape.size(), 1);
-  SmallVector<int64_t> strides = computeStrides(shape, ones);
+  SmallVector<int64_t> strides = computeStrides(shape);
   for (auto linearIndex = 0; linearIndex < numElements; ++linearIndex) {
     SmallVector<int64_t> positions = delinearize(strides, linearIndex);
     SmallVector<Value> operands;
@@ -172,6 +171,8 @@ void mlir::populateMathToLibmConversionPatterns(
                                                  "atan", benefit);
   patterns.add<ScalarOpToLibmCall<math::Atan2Op>>(patterns.getContext(),
                                                   "atan2f", "atan2", benefit);
+  patterns.add<ScalarOpToLibmCall<math::CbrtOp>>(patterns.getContext(), "cbrtf",
+                                                 "cbrt", benefit);
   patterns.add<ScalarOpToLibmCall<math::ErfOp>>(patterns.getContext(), "erff",
                                                 "erf", benefit);
   patterns.add<ScalarOpToLibmCall<math::ExpM1Op>>(patterns.getContext(),

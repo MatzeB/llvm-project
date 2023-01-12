@@ -51,6 +51,14 @@ def HasStdExtD : Predicate<"Subtarget->hasStdExtD()">,
                            AssemblerPredicate<(all_of FeatureStdExtD),
                            "'D' (Double-Precision Floating-Point)">;
 
+def FeatureStdExtH
+    : SubtargetFeature<"h", "HasStdExtH", "true",
+                       "'H' (Hypervisor)">;
+
+def HasStdExtH : Predicate<"Subtarget->hasStdExtH()">,
+                           AssemblerPredicate<(all_of FeatureStdExtH),
+                           "'H' (Hypervisor)">;
+
 def FeatureStdExtZihintpause
     : SubtargetFeature<"zihintpause", "HasStdExtZihintpause", "true",
                        "'zihintpause' (Pause Hint)">;
@@ -80,6 +88,7 @@ def FeatureStdExtZfh
 def HasStdExtZfh : Predicate<"Subtarget->hasStdExtZfh()">,
                              AssemblerPredicate<(all_of FeatureStdExtZfh),
                              "'Zfh' (Half-Precision Floating-Point)">;
+def NoStdExtZfh : Predicate<"!Subtarget->hasStdExtZfh()">;
 
 def HasStdExtZfhOrZfhmin
     : Predicate<"Subtarget->hasStdExtZfh() || Subtarget->hasStdExtZfhmin()">,
@@ -292,6 +301,26 @@ def HasStdExtCOrZca
                                    "'Zca' (part of the C extension, excluding "
                                    "compressed floating point loads/stores)">;
 
+def FeatureExtZcd
+    : SubtargetFeature<"experimental-zcd", "HasStdExtZcd", "true",
+                       "'Zcd' (Compressed Double-Precision Floating-Point Instructions)">;
+
+def HasStdExtCOrZcd
+    : Predicate<"Subtarget->hasStdExtC() || Subtarget->hasStdExtZcd()">,
+                AssemblerPredicate<(any_of FeatureStdExtC, FeatureExtZcd),
+                                   "'C' (Compressed Instructions) or "
+                                   "'Zcd' (Compressed Double-Precision Floating-Point Instructions)">;
+
+def FeatureExtZcf
+    : SubtargetFeature<"experimental-zcf", "HasStdExtZcf", "true",
+                       "'Zcf' (Compressed Single-Precision Floating-Point Instructions)">;
+
+def HasStdExtCOrZcf
+    : Predicate<"Subtarget->hasStdExtC() || Subtarget->hasStdExtZcf()">,
+                AssemblerPredicate<(any_of FeatureStdExtC, FeatureExtZcf),
+                                   "'C' (Compressed Instructions) or "
+                                   "'Zcf' (Compressed Single-Precision Floating-Point Instructions)">;
+
 def FeatureNoRVCHints
     : SubtargetFeature<"no-rvc-hints", "EnableRVCHintInstrs", "false",
                        "Disable RVC Hint Instructions.">;
@@ -392,6 +421,10 @@ def FeatureStdExtSvnapot
     : SubtargetFeature<"svnapot", "HasStdExtSvnapot", "true",
                        "'Svnapot' (NAPOT Translation Contiguity)">;
 
+def FeatureStdExtSvpbmt
+    : SubtargetFeature<"svpbmt", "HasStdExtSvpbmt", "true",
+                       "'Svpbmt' (Page-Based Memory Types)">;
+
 def FeatureStdExtSvinval
     : SubtargetFeature<"svinval", "HasStdExtSvinval", "true",
                        "'Svinval' (Fine-Grained Address-Translation Cache Invalidation)">;
@@ -412,6 +445,29 @@ def FeatureStdExtZawrs
 def HasStdExtZawrs : Predicate<"Subtarget->hasStdExtZawrs()">,
                                AssemblerPredicate<(all_of FeatureStdExtZawrs),
                                "'Zawrs' (Wait on Reservation Set)">;
+
+//===----------------------------------------------------------------------===//
+// Vendor extensions
+//===----------------------------------------------------------------------===//
+
+def FeatureVendorXVentanaCondOps
+    : SubtargetFeature<"xventanacondops", "HasVendorXVentanaCondOps", "true",
+                       "'XVentanaCondOps' (Ventana Conditional Ops)">;
+def HasVendorXVentanaCondOps : Predicate<"Subtarget->hasVendorXVentanaCondOps()">,
+                                AssemblerPredicate<(all_of FeatureVendorXVentanaCondOps),
+                                "'XVentanaCondOps' (Ventana Conditional Ops)">;
+
+def FeatureVendorXTHeadVdot
+    : SubtargetFeature<"xtheadvdot", "HasVendorXTHeadVdot", "true",
+                       "'xtheadvdot' (T-Head Vector Extensions for Dot)",
+                       [FeatureStdExtV]>;
+def HasVendorXTHeadVdot : Predicate<"Subtarget->hasVendorXTHeadVdot()">,
+                                    AssemblerPredicate<(all_of FeatureVendorXTHeadVdot),
+                                    "'xtheadvdot' (T-Head Vector Extensions for Dot)">;
+
+//===----------------------------------------------------------------------===//
+// LLVM specific features and extensions
+//===----------------------------------------------------------------------===//
 
 // Feature32Bit exists to mark CPUs that support RV32 to distinquish them from
 // tuning CPU names.
@@ -452,6 +508,11 @@ def FeatureUnalignedScalarMem
                       "true", "Has reasonably performant unaligned scalar "
                       "loads and stores">;
 
+def TuneNoOptimizedZeroStrideLoad
+   : SubtargetFeature<"no-optimized-zero-stride-load", "HasOptimizedZeroStrideLoad",
+                      "false", "Hasn't optimized (perform fewer memory operations)"
+                      "zero-stride vector load">;
+
 def TuneLUIADDIFusion
     : SubtargetFeature<"lui-addi-fusion", "HasLUIADDIFusion",
                        "true", "Enable LUI+ADDI macrofusion">;
@@ -484,6 +545,11 @@ def FeatureForcedAtomics : SubtargetFeature<
 def HasAtomicLdSt
     : Predicate<"Subtarget->hasStdExtA() || Subtarget->hasForcedAtomics()">;
 
+def FeatureTaggedGlobals : SubtargetFeature<"tagged-globals",
+    "AllowTaggedGlobals",
+    "true", "Use an instruction sequence for taking the address of a global "
+    "that allows a memory tag in the upper address bits">;
+
 //===----------------------------------------------------------------------===//
 // Named operands for CSR instructions.
 //===----------------------------------------------------------------------===//
@@ -498,9 +564,10 @@ include "RISCVSchedule.td"
 include "RISCVRegisterInfo.td"
 include "RISCVCallingConv.td"
 include "RISCVInstrInfo.td"
-include "RISCVRegisterBanks.td"
+include "GISel/RISCVRegisterBanks.td"
 include "RISCVSchedRocket.td"
 include "RISCVSchedSiFive7.td"
+include "RISCVSchedSyntacoreSCR1.td"
 
 //===----------------------------------------------------------------------===//
 // RISC-V processors supported.
@@ -591,6 +658,14 @@ def : ProcessorModel<"sifive-u74", SiFive7Model, [Feature64Bit,
                                                   FeatureStdExtD,
                                                   FeatureStdExtC],
                      [TuneSiFive7]>;
+
+def : ProcessorModel<"syntacore-scr1-base", SyntacoreSCR1Model,
+                     [Feature32Bit, FeatureStdExtC],
+                     [TuneNoDefaultUnroll]>;
+
+def : ProcessorModel<"syntacore-scr1-max", SyntacoreSCR1Model,
+                     [Feature32Bit, FeatureStdExtM, FeatureStdExtC],
+                     [TuneNoDefaultUnroll]>;
 
 //===----------------------------------------------------------------------===//
 // Define the RISC-V target.

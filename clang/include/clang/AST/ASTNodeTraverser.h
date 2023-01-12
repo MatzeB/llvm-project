@@ -246,7 +246,7 @@ public:
                     .getTypeConstraint()
                     ->getImmediatelyDeclaredConstraint());
       } else if (auto *NR = dyn_cast<concepts::NestedRequirement>(R)) {
-        if (!NR->isSubstitutionFailure())
+        if (!NR->hasInvalidConstraint())
           Visit(NR->getConstraintExpr());
       }
     });
@@ -475,6 +475,8 @@ public:
   void VisitFileScopeAsmDecl(const FileScopeAsmDecl *D) {
     Visit(D->getAsmString());
   }
+
+  void VisitTopLevelStmtDecl(const TopLevelStmtDecl *D) { Visit(D->getStmt()); }
 
   void VisitCapturedDecl(const CapturedDecl *D) { Visit(D->getBody()); }
 

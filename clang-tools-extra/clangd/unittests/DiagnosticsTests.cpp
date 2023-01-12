@@ -824,6 +824,19 @@ TEST(DiagnosticsTest, IgnoreVerify) {
   EXPECT_THAT(*TU.build().getDiagnostics(), IsEmpty());
 }
 
+TEST(DiagnosticTest, IgnoreBEFilelistOptions) {
+  auto TU = TestTU::withCode("");
+  TU.ExtraArgs.push_back("-Xclang");
+  for (const auto *DisableOption :
+       {"-fsanitize-ignorelist=null", "-fprofile-list=null",
+        "-fxray-always-instrument=null", "-fxray-never-instrument=null",
+        "-fxray-attr-list=null"}) {
+    TU.ExtraArgs.push_back(DisableOption);
+    EXPECT_THAT(*TU.build().getDiagnostics(), IsEmpty());
+    TU.ExtraArgs.pop_back();
+  }
+}
+
 // Recursive main-file include is diagnosed, and doesn't crash.
 TEST(DiagnosticsTest, RecursivePreamble) {
   auto TU = TestTU::withCode(R"cpp(
@@ -874,7 +887,7 @@ void foo(int *x);
   auto AST = TU.build();
   EXPECT_THAT(*AST.getDiagnostics(), IsEmpty());
   const auto *X = cast<FunctionDecl>(findDecl(AST, "foo")).getParamDecl(0);
-  ASSERT_TRUE(X->getOriginalType()->getNullability(X->getASTContext()) ==
+  ASSERT_TRUE(X->getOriginalType()->getNullability() ==
               NullabilityKind::NonNull);
 }
 
@@ -892,10 +905,10 @@ void bar(int *Y);
   EXPECT_THAT(*AST.getDiagnostics(),
               ElementsAre(diagName("pp_eof_in_assume_nonnull")));
   const auto *X = cast<FunctionDecl>(findDecl(AST, "foo")).getParamDecl(0);
-  ASSERT_TRUE(X->getOriginalType()->getNullability(X->getASTContext()) ==
+  ASSERT_TRUE(X->getOriginalType()->getNullability() ==
               NullabilityKind::NonNull);
   const auto *Y = cast<FunctionDecl>(findDecl(AST, "bar")).getParamDecl(0);
-  ASSERT_FALSE(Y->getOriginalType()->getNullability(X->getASTContext()));
+  ASSERT_FALSE(Y->getOriginalType()->getNullability());
 }
 
 TEST(DiagnosticsTest, InsideMacros) {
@@ -1071,7 +1084,7 @@ buildIndexWithSymbol(llvm::ArrayRef<SymbolWithHeader> Syms) {
     Sym.Flags |= Symbol::IndexedForCodeCompletion;
     Sym.CanonicalDeclaration.FileURI = S.DeclaringFile.c_str();
     Sym.Definition.FileURI = S.DeclaringFile.c_str();
-    Sym.IncludeHeaders.emplace_back(S.IncludeHeader, 1);
+    Sym.IncludeHeaders.emplace_back(S.IncludeHeader, 1, Symbol::Include);
     Slab.insert(Sym);
   }
   return MemIndex::build(std::move(Slab).build(), RefSlab(), RelationSlab());
@@ -1129,7 +1142,7 @@ TEST(IncludeFixerTest, IncompleteEnum) {
   Symbol Sym = enm("X");
   Sym.Flags |= Symbol::IndexedForCodeCompletion;
   Sym.CanonicalDeclaration.FileURI = Sym.Definition.FileURI = "unittest:///x.h";
-  Sym.IncludeHeaders.emplace_back("\"x.h\"", 1);
+  Sym.IncludeHeaders.emplace_back("\"x.h\"", 1, Symbol::Include);
   SymbolSlab::Builder Slab;
   Slab.insert(Sym);
   auto Index =
@@ -1172,7 +1185,7 @@ int main() {
   Sym.Flags |= Symbol::IndexedForCodeCompletion;
   Sym.CanonicalDeclaration.FileURI = "unittest:///x.h";
   Sym.Definition.FileURI = "unittest:///x.cc";
-  Sym.IncludeHeaders.emplace_back("\"x.h\"", 1);
+  Sym.IncludeHeaders.emplace_back("\"x.h\"", 1, Symbol::Include);
 
   SymbolSlab::Builder Slab;
   Slab.insert(Sym);
@@ -1503,7 +1516,7 @@ TEST(IncludeFixerTest, CImplicitFunctionDecl) {
   Symbol Sym = func("foo");
   Sym.Flags |= Symbol::IndexedForCodeCompletion;
   Sym.CanonicalDeclaration.FileURI = "unittest:///foo.h";
-  Sym.IncludeHeaders.emplace_back("\"foo.h\"", 1);
+  Sym.IncludeHeaders.emplace_back("\"foo.h\"", 1, Symbol::Include);
 
   SymbolSlab::Builder Slab;
   Slab.insert(Sym);

@@ -126,7 +126,7 @@ public:
   iterator end() const { return getStorage() + Bits.Data; }
 
   llvm::ArrayRef<NamedDecl*> decls() const {
-    return llvm::makeArrayRef(begin(), end());
+    return llvm::ArrayRef(begin(), end());
   }
 };
 
@@ -397,7 +397,7 @@ public:
 
   Optional<unsigned> getPackIndex() const {
     if (Bits.Data == 0)
-      return None;
+      return std::nullopt;
     return Bits.Data - 1;
   }
 

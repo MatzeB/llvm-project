@@ -17,6 +17,7 @@
 #include "lldb/Host/HostInfo.h"
 
 #include "PythonTestSuite.h"
+#include <optional>
 
 using namespace lldb_private;
 class TestScriptInterpreterPython : public ScriptInterpreterPythonImpl {
@@ -229,10 +230,10 @@ bool lldb_private::LLDBSWIGPythonRunScriptKeywordProcess(
   return false;
 }
 
-llvm::Optional<std::string> lldb_private::LLDBSWIGPythonRunScriptKeywordThread(
+std::optional<std::string> lldb_private::LLDBSWIGPythonRunScriptKeywordThread(
     const char *python_function_name, const char *session_dictionary_name,
     lldb::ThreadSP thread) {
-  return llvm::None;
+  return std::nullopt;
 }
 
 bool lldb_private::LLDBSWIGPythonRunScriptKeywordTarget(
@@ -241,10 +242,10 @@ bool lldb_private::LLDBSWIGPythonRunScriptKeywordTarget(
   return false;
 }
 
-llvm::Optional<std::string> lldb_private::LLDBSWIGPythonRunScriptKeywordFrame(
+std::optional<std::string> lldb_private::LLDBSWIGPythonRunScriptKeywordFrame(
     const char *python_function_name, const char *session_dictionary_name,
     lldb::StackFrameSP frame) {
-  return llvm::None;
+  return std::nullopt;
 }
 
 bool lldb_private::LLDBSWIGPythonRunScriptKeywordValue(
@@ -269,4 +270,8 @@ bool lldb_private::LLDBSwigPythonStopHookCallHandleStop(
     void *implementor, lldb::ExecutionContextRefSP exc_ctx_sp,
     lldb::StreamSP stream) {
   return false;
+}
+
+python::PythonObject lldb_private::python::ToSWIGWrapper(const Status &status) {
+  return python::PythonObject();
 }

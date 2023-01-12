@@ -55,11 +55,12 @@ public:
 
   LogicalResult matchAndRewrite(GenericOp genericOp,
                                 PatternRewriter &rewriter) const override {
-    if (genericOp.hasBufferSemantics())
+    // Mixed and buffer sematics aren't supported.
+    if (!genericOp.hasTensorSemantics())
       return failure();
 
     // Only support ops generating one output for now.
-    if (genericOp.getNumOutputs() != 1)
+    if (genericOp.getNumDpsInits() != 1)
       return failure();
 
     auto outputType = genericOp.getResultTypes().front().dyn_cast<ShapedType>();
@@ -95,7 +96,7 @@ public:
                       [](AffineMap map) { return map.isPermutation(); }))
       return failure();
 
-    for (OpOperand *operand : genericOp.getOutputOperands()) {
+    for (OpOperand *operand : genericOp.getDpsInitOperands()) {
       if (genericOp.payloadUsesValueFromOperand(operand))
         return failure();
     }
@@ -112,9 +113,9 @@ public:
       return failure();
 
     // All inputs should be constants.
-    int numInputs = genericOp.getNumInputs();
+    int numInputs = genericOp.getNumDpsInputs();
     SmallVector<DenseIntOrFPElementsAttr> inputValues(numInputs);
-    for (const auto &en : llvm::enumerate(genericOp.getInputOperands())) {
+    for (const auto &en : llvm::enumerate(genericOp.getDpsInputOperands())) {
       if (!matchPattern(en.value()->get(),
                         m_Constant(&inputValues[en.index()])))
         return failure();
@@ -122,7 +123,7 @@ public:
 
     // Identified this as a potential candidate for folding. Now check the
     // policy to see whether we are allowed to proceed.
-    for (OpOperand *operand : genericOp.getInputOperands()) {
+    for (OpOperand *operand : genericOp.getDpsInputOperands()) {
       if (!controlFn(operand))
         return failure();
     }
@@ -290,8 +291,8 @@ struct FoldConstantTranspose : public FoldConstantBase<FoldConstantTranspose> {
     // No computation; just return the orginal value.
     return [](const APIntOrFloatArray &inputs) {
       if (inputs.apFloats.empty())
-        return APIntOrFloat{inputs.apInts.front(), llvm::None};
-      return APIntOrFloat{llvm::None, inputs.apFloats.front()};
+        return APIntOrFloat{inputs.apInts.front(), std::nullopt};
+      return APIntOrFloat{std::nullopt, inputs.apFloats.front()};
     };
   }
 

@@ -129,11 +129,9 @@ public:
 
   unsigned size() const { return NumParams; }
 
-  ArrayRef<NamedDecl*> asArray() {
-    return llvm::makeArrayRef(begin(), end());
-  }
+  ArrayRef<NamedDecl *> asArray() { return llvm::ArrayRef(begin(), end()); }
   ArrayRef<const NamedDecl*> asArray() const {
-    return llvm::makeArrayRef(begin(), size());
+    return llvm::ArrayRef(begin(), size());
   }
 
   NamedDecl* getParam(unsigned Idx) {
@@ -274,8 +272,7 @@ public:
   ///
   /// This operation assumes that the input argument list outlives it.
   /// This takes the list as a pointer to avoid looking like a copy
-  /// constructor, since this really really isn't safe to use that
-  /// way.
+  /// constructor, since this really isn't safe to use that way.
   explicit TemplateArgumentList(const TemplateArgumentList *Other)
       : Arguments(Other->data()), NumArguments(Other->size()) {}
 
@@ -290,7 +287,7 @@ public:
 
   /// Produce this as an array ref.
   ArrayRef<TemplateArgument> asArray() const {
-    return llvm::makeArrayRef(data(), size());
+    return llvm::ArrayRef(data(), size());
   }
 
   /// Retrieve the number of template arguments in this
@@ -742,7 +739,7 @@ public:
   unsigned getNumTemplateArgs() const { return NumArgs; }
 
   llvm::ArrayRef<TemplateArgumentLoc> arguments() const {
-    return llvm::makeArrayRef(getTemplateArgs(), getNumTemplateArgs());
+    return llvm::ArrayRef(getTemplateArgs(), getNumTemplateArgs());
   }
 
   /// Returns the nth template argument.
@@ -1246,14 +1243,11 @@ class TemplateTypeParmDecl final : public TypeDecl,
         NumExpanded(NumExpanded.value_or(0)) {}
 
 public:
-  static TemplateTypeParmDecl *Create(const ASTContext &C, DeclContext *DC,
-                                      SourceLocation KeyLoc,
-                                      SourceLocation NameLoc,
-                                      unsigned D, unsigned P,
-                                      IdentifierInfo *Id, bool Typename,
-                                      bool ParameterPack,
-                                      bool HasTypeConstraint = false,
-                                      Optional<unsigned> NumExpanded = None);
+  static TemplateTypeParmDecl *
+  Create(const ASTContext &C, DeclContext *DC, SourceLocation KeyLoc,
+         SourceLocation NameLoc, unsigned D, unsigned P, IdentifierInfo *Id,
+         bool Typename, bool ParameterPack, bool HasTypeConstraint = false,
+         Optional<unsigned> NumExpanded = std::nullopt);
   static TemplateTypeParmDecl *CreateDeserialized(const ASTContext &C,
                                                   unsigned ID);
   static TemplateTypeParmDecl *CreateDeserialized(const ASTContext &C,
@@ -3454,7 +3448,7 @@ inline Optional<unsigned> getExpandedPackSize(const NamedDecl *Param) {
       return TTP->getNumExpansionTemplateParameters();
   }
 
-  return None;
+  return std::nullopt;
 }
 
 /// Internal helper used by Subst* nodes to retrieve the parameter list

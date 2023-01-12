@@ -1,7 +1,7 @@
 .. raw:: html
 
       <style type="text/css">
-        .versionbadge { background-color: #1c913d; height: 20px; display: inline-block; width: 120px; text-align: center; border-radius: 5px; color: #FFFFFF; font-family="Verdana,Geneva,DejaVu Sans,sans-serif" }
+        .versionbadge { background-color: #1c913d; height: 20px; display: inline-block; width: 120px; text-align: center; border-radius: 5px; color: #FFFFFF; font-family: "Verdana,Geneva,DejaVu Sans,sans-serif"; }
       </style>
 
 .. role:: versionbadge
@@ -846,14 +846,88 @@ the configuration (without a prefix: ``Auto``).
 
 
 
-**AlignTrailingComments** (``Boolean``) :versionbadge:`clang-format 3.7`
-  If ``true``, aligns trailing comments.
+**AlignTrailingComments** (``TrailingCommentsAlignmentStyle``) :versionbadge:`clang-format 3.7`
+  Control of trailing comments.
 
-  .. code-block:: c++
+  NOTE: As of clang-format 16 this option is not a bool but can be set
+  to the options. Conventional bool options still can be parsed as before.
 
-    true:                                   false:
-    int a;     // My comment a      vs.     int a; // My comment a
-    int b = 2; // comment  b                int b = 2; // comment about b
+
+  .. code-block:: yaml
+
+    # Example of usage:
+    AlignTrailingComments:
+      Kind: Always
+      OverEmptyLines: 2
+
+  Nested configuration flags:
+
+  Alignment options
+
+  * ``TrailingCommentsAlignmentKinds Kind``
+    Specifies the way to align trailing comments.
+
+    Possible values:
+
+    * ``TCAS_Leave`` (in configuration: ``Leave``)
+      Leave trailing comments as they are.
+
+      .. code-block:: c++
+
+        int a;    // comment
+        int ab;       // comment
+
+        int abc;  // comment
+        int abcd;     // comment
+
+    * ``TCAS_Always`` (in configuration: ``Always``)
+      Align trailing comments.
+
+      .. code-block:: c++
+
+        int a;  // comment
+        int ab; // comment
+
+        int abc;  // comment
+        int abcd; // comment
+
+    * ``TCAS_Never`` (in configuration: ``Never``)
+      Don't align trailing comments but other formatter applies.
+
+      .. code-block:: c++
+
+        int a; // comment
+        int ab; // comment
+
+        int abc; // comment
+        int abcd; // comment
+
+
+  * ``unsigned OverEmptyLines`` How many empty lines to apply alignment.
+    When both ``MaxEmptyLinesToKeep`` and ``OverEmptyLines`` are set to 2,
+    it formats like below.
+
+    .. code-block:: c++
+
+      int a;      // all these
+
+      int ab;     // comments are
+
+
+      int abcdef; // aligned
+
+    When ``MaxEmptyLinesToKeep`` is set to 2 and ``OverEmptyLines`` is set
+    to 1, it formats like below.
+
+    .. code-block:: c++
+
+      int a;  // these are
+
+      int ab; // aligned
+
+
+      int abcdef; // but this isn't
+
 
 **AllowAllArgumentsOnNextLine** (``Boolean``) :versionbadge:`clang-format 9`
   If a function call or braced initializer list doesn't fit on a
@@ -1117,14 +1191,14 @@ the configuration (without a prefix: ``Auto``).
       };
 
   * ``SLS_Inline`` (in configuration: ``Inline``)
-    Merge lambda into a single line if argument of a function.
+    Merge lambda into a single line if the lambda is argument of a function.
 
     .. code-block:: c++
 
-      auto lambda = [](int a) {
-          return a;
+      auto lambda = [](int x, int y) {
+          return x < y;
       };
-      sort(a.begin(), a.end(), []() { return x < y; });
+      sort(a.begin(), a.end(), [](int x, int y) { return x < y; });
 
   * ``SLS_All`` (in configuration: ``All``)
     Merge all lambdas fitting on a single line.
@@ -1688,6 +1762,41 @@ the configuration (without a prefix: ``Auto``).
                            }
 
 
+**BreakAfterAttributes** (``AttributeBreakingStyle``) :versionbadge:`clang-format 16`
+  Break after a group of C++11 attributes before a function
+  declaration/definition name.
+
+  Possible values:
+
+  * ``ABS_Always`` (in configuration: ``Always``)
+    Always break after attributes.
+
+    .. code-block:: c++
+
+      [[nodiscard]]
+      inline int f();
+      [[gnu::const]] [[nodiscard]]
+      int g();
+
+  * ``ABS_Leave`` (in configuration: ``Leave``)
+    Leave the line breaking after attributes as is.
+
+    .. code-block:: c++
+
+      [[nodiscard]] inline int f();
+      [[gnu::const]] [[nodiscard]]
+      int g();
+
+  * ``ABS_Never`` (in configuration: ``Never``)
+    Never break after attributes.
+
+    .. code-block:: c++
+
+      [[nodiscard]] inline int f();
+      [[gnu::const]] [[nodiscard]] int g();
+
+
+
 **BreakAfterJavaFieldAnnotations** (``Boolean``) :versionbadge:`clang-format 3.8`
   Break after each annotation on a field in Java files.
 
@@ -2243,6 +2352,40 @@ the configuration (without a prefix: ``Auto``).
 
 
 
+**BreakBeforeInlineASMColon** (``BreakBeforeInlineASMColonStyle``) :versionbadge:`clang-format 16`
+  The inline ASM colon style to use.
+
+  Possible values:
+
+  * ``BBIAS_Never`` (in configuration: ``Never``)
+    No break before inline ASM colon.
+
+    .. code-block:: c++
+
+       asm volatile("string", : : val);
+
+  * ``BBIAS_OnlyMultiline`` (in configuration: ``OnlyMultiline``)
+    Break before inline ASM colon if the line length is longer than column
+    limit.
+
+    .. code-block:: c++
+
+       asm volatile("string", : : val);
+       asm("cmoveq %1, %2, %[result]"
+           : [result] "=r"(result)
+           : "r"(test), "r"(new), "[result]"(old));
+
+  * ``BBIAS_Always`` (in configuration: ``Always``)
+    Always break before inline ASM colon.
+
+    .. code-block:: c++
+
+       asm volatile("string",
+                    :
+                    : val);
+
+
+
 **BreakBeforeTernaryOperators** (``Boolean``) :versionbadge:`clang-format 3.7`
   If ``true``, ternary operators will be placed after line breaks.
 
@@ -2588,16 +2731,19 @@ the configuration (without a prefix: ``Auto``).
 
 **FixNamespaceComments** (``Boolean``) :versionbadge:`clang-format 5`
   If ``true``, clang-format adds missing namespace end comments for
-  short namespaces and fixes invalid existing ones. Short ones are
-  controlled by "ShortNamespaceLines".
+  namespaces and fixes invalid existing ones. This doesn't affect short
+  namespaces, which are controlled by ``ShortNamespaceLines``.
 
   .. code-block:: c++
 
      true:                                  false:
-     namespace a {                  vs.     namespace a {
-     foo();                                 foo();
-     bar();                                 bar();
+     namespace longNamespace {      vs.     namespace longNamespace {
+     void foo();                            void foo();
+     void bar();                            void bar();
      } // namespace a                       }
+     namespace shortNamespace {             namespace shortNamespace {
+     void baz();                            void baz();
+     }                                      }
 
 **ForEachMacros** (``List of Strings``) :versionbadge:`clang-format 3.7`
   A vector of macros that should be interpreted as foreach loops
@@ -3016,6 +3162,9 @@ the configuration (without a prefix: ``Auto``).
       --i;                                      --i;
     while (i);                                } while (i);
 
+**InsertNewlineAtEOF** (``Boolean``) :versionbadge:`clang-format 16`
+  Insert a newline at end of file if missing.
+
 **InsertTrailingCommas** (``TrailingCommaStyle``) :versionbadge:`clang-format 11`
   If set to ``TCS_Wrapped`` will insert trailing commas in container
   literals (arrays and objects) that wrap across multiple lines.
@@ -3046,6 +3195,37 @@ the configuration (without a prefix: ``Auto``).
     that a container should be formatted one-per-line (i.e. not bin-packed).
     So inserting a trailing comma counteracts bin-packing.
 
+
+
+**IntegerLiteralSeparator** (``IntegerLiteralSeparatorStyle``) :versionbadge:`clang-format 16`
+  Format integer literal separators (``'`` for C++ and ``_`` for C#, Java,
+  and JavaScript).
+
+  Nested configuration flags:
+
+  Separator format of integer literals of different bases.
+  If <0: Remove separators.
+  If  0: Leave the literal as is.
+  If >0: Insert separators between digits starting from the rightmost digit.
+
+  * ``int8_t Binary`` .. code-block:: c++
+
+       -1: 0b100111101101
+        0: 0b10011'11'0110'1
+        3: 0b100'111'101'101
+        4: 0b1001'1110'1101
+
+  * ``int8_t Decimal`` .. code-block:: c++
+
+       -1: 18446744073709550592ull
+        0: 184467'440737'0'95505'92ull
+        3: 18'446'744'073'709'550'592ull
+
+  * ``int8_t Hex`` .. code-block:: c++
+
+       -1: 0xDEADBEEFDEADBEEFuz
+        0: 0xDEAD'BEEF'DE'AD'BEE'Fuz
+        2: 0xDE'AD'BE'EF'DE'AD'BE'EFuz
 
 
 **JavaImportGroups** (``List of Strings``) :versionbadge:`clang-format 8`
@@ -3509,8 +3689,7 @@ the configuration (without a prefix: ``Auto``).
   (counted relative to leading non-whitespace column).
 
 **PenaltyReturnTypeOnItsOwnLine** (``Unsigned``) :versionbadge:`clang-format 3.7`
-  Penalty for putting the return type of a function onto its own
-  line.
+  Penalty for putting the return type of a function onto its own line.
 
 **PointerAlignment** (``PointerAlignmentStyle``) :versionbadge:`clang-format 3.7`
   Pointer and reference alignment style.
@@ -3602,6 +3781,7 @@ the configuration (without a prefix: ``Auto``).
     * const
     * inline
     * static
+    * friend
     * constexpr
     * volatile
     * restrict
@@ -3688,7 +3868,9 @@ the configuration (without a prefix: ``Auto``).
 
 
 **ReflowComments** (``Boolean``) :versionbadge:`clang-format 3.8`
-  If ``true``, clang-format will attempt to re-flow comments.
+  If ``true``, clang-format will attempt to re-flow comments. That is it
+  will touch a comment and *reflow* long comments into new lines, trying to
+  obey the ``ColumnLimit``.
 
   .. code-block:: c++
 
@@ -4503,9 +4685,11 @@ the configuration (without a prefix: ``Auto``).
     ///  - Foo                                /// - Foo
     ///    - Bar                              ///   - Bar
 
+  This option has only effect if ``ReflowComments`` is set to ``true``.
+
   Nested configuration flags:
 
-  Control of spaces within a single line comment
+  Control of spaces within a single line comment.
 
   * ``unsigned Minimum`` The minimum number of spaces at the start of the comment.
 

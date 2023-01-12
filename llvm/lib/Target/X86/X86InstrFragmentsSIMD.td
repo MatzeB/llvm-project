@@ -813,6 +813,13 @@ def SDTX86MaskedStore: SDTypeProfile<0, 3, [       // masked store
   SDTCisVec<0>, SDTCisPtrTy<1>, SDTCisVec<2>, SDTCisSameNumEltsAs<0, 2>
 ]>;
 
+def X86vpdpbssd  : SDNode<"X86ISD::VPDPBSSD",  SDTVnni>;
+def X86vpdpbssds : SDNode<"X86ISD::VPDPBSSDS", SDTVnni>;
+def X86vpdpbsud  : SDNode<"X86ISD::VPDPBSUD",  SDTVnni>;
+def X86vpdpbsuds : SDNode<"X86ISD::VPDPBSUDS", SDTVnni>;
+def X86vpdpbuud  : SDNode<"X86ISD::VPDPBUUD",  SDTVnni>;
+def X86vpdpbuuds : SDNode<"X86ISD::VPDPBUUDS", SDTVnni>;
+
 //===----------------------------------------------------------------------===//
 // SSE pattern fragments
 //===----------------------------------------------------------------------===//
@@ -860,13 +867,13 @@ def extloadv16f16 : PatFrag<(ops node:$ptr), (extloadvf16 node:$ptr)>;
 def alignedstore : PatFrag<(ops node:$val, node:$ptr),
                            (store node:$val, node:$ptr), [{
   auto *St = cast<StoreSDNode>(N);
-  return St->getAlignment() >= St->getMemoryVT().getStoreSize();
+  return St->getAlign() >= St->getMemoryVT().getStoreSize();
 }]>;
 
 // Like 'load', but always requires vector size alignment.
 def alignedload : PatFrag<(ops node:$ptr), (load node:$ptr), [{
   auto *Ld = cast<LoadSDNode>(N);
-  return Ld->getAlignment() >= Ld->getMemoryVT().getStoreSize();
+  return Ld->getAlign() >= Ld->getMemoryVT().getStoreSize();
 }]>;
 
 // 128-bit aligned load pattern fragments
@@ -934,7 +941,7 @@ def alignedloadv64i8  : PatFrag<(ops node:$ptr),
 def memop : PatFrag<(ops node:$ptr), (load node:$ptr), [{
   auto *Ld = cast<LoadSDNode>(N);
   return Subtarget->hasSSEUnalignedMem() ||
-         Ld->getAlignment() >= Ld->getMemoryVT().getStoreSize();
+         Ld->getAlign() >= Ld->getMemoryVT().getStoreSize();
 }]>;
 
 // 128-bit memop pattern fragments
@@ -1127,7 +1134,7 @@ def masked_load_aligned : PatFrag<(ops node:$src1, node:$src2, node:$src3),
   // We can't use memory VT because type widening changes the node VT, but
   // not the memory VT.
   auto *Ld = cast<MaskedLoadSDNode>(N);
-  return Ld->getAlignment() >= Ld->getValueType(0).getStoreSize();
+  return Ld->getAlign() >= Ld->getValueType(0).getStoreSize();
 }]>;
 
 def X86mExpandingLoad : PatFrag<(ops node:$src1, node:$src2, node:$src3),
@@ -1152,7 +1159,7 @@ def masked_store_aligned : PatFrag<(ops node:$src1, node:$src2, node:$src3),
   // We can't use memory VT because type widening changes the node VT, but
   // not the memory VT.
   auto *St = cast<MaskedStoreSDNode>(N);
-  return St->getAlignment() >= St->getOperand(1).getValueType().getStoreSize();
+  return St->getAlign() >= St->getOperand(1).getValueType().getStoreSize();
 }]>;
 
 def X86mCompressingStore : PatFrag<(ops node:$src1, node:$src2, node:$src3),

@@ -155,6 +155,9 @@ struct AssemblerInvocation {
   /// The version of the darwin target variant SDK which was used during the
   /// compilation
   llvm::VersionTuple DarwinTargetVariantSDKVersion;
+
+  /// The name of a file to use with \c .secure_log_unique directives.
+  std::string AsSecureLogFile;
   /// @}
 
 public:
@@ -256,7 +259,7 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
             .Default(llvm::DebugCompressionType::None);
   }
 
-  Opts.RelaxELFRelocations = Args.hasArg(OPT_mrelax_relocations);
+  Opts.RelaxELFRelocations = !Args.hasArg(OPT_mrelax_relocations_no);
   if (auto *DwarfFormatArg = Args.getLastArg(OPT_gdwarf64, OPT_gdwarf32))
     Opts.Dwarf64 = DwarfFormatArg->getOption().matches(OPT_gdwarf64);
   Opts.DwarfVersion = getLastArgIntValue(Args, OPT_dwarf_version_EQ, 2, Diags);
@@ -345,6 +348,8 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
             .Case("default", EmitDwarfUnwindType::Default);
   }
 
+  Opts.AsSecureLogFile = Args.getLastArgValue(OPT_as_secure_log_file);
+
   return Success;
 }
 
@@ -396,6 +401,7 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
 
   MCTargetOptions MCOptions;
   MCOptions.EmitDwarfUnwind = Opts.EmitDwarfUnwind;
+  MCOptions.AsSecureLogFile = Opts.AsSecureLogFile;
 
   std::unique_ptr<MCAsmInfo> MAI(
       TheTarget->createMCAsmInfo(*MRI, Opts.Triple, MCOptions));

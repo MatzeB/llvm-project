@@ -59,6 +59,7 @@
 #include <cassert>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <utility>
 
 using namespace llvm;
@@ -137,8 +138,7 @@ public:
       // Turn this into an undef debug value list; right now, the simplest form
       // of this is an expression with one arg, and an undef debug operand.
       Expression =
-          DIExpression::get(Expr.getContext(), {dwarf::DW_OP_LLVM_arg, 0,
-                                                dwarf::DW_OP_stack_value});
+          DIExpression::get(Expr.getContext(), {dwarf::DW_OP_LLVM_arg, 0});
       if (auto FragmentInfoOpt = Expr.getFragmentInfo())
         Expression = *DIExpression::createFragmentExpression(
             Expression, FragmentInfoOpt->OffsetInBits,
@@ -286,7 +286,7 @@ class LDVImpl;
 class UserValue {
   const DILocalVariable *Variable; ///< The debug info variable we are part of.
   /// The part of the variable we describe.
-  const Optional<DIExpression::FragmentInfo> Fragment;
+  const std::optional<DIExpression::FragmentInfo> Fragment;
   DebugLoc dl;            ///< The debug location for the variable. This is
                           ///< used by dwarf writer to find lexical scope.
   UserValue *leader;      ///< Equivalence class leader.
@@ -319,7 +319,7 @@ class UserValue {
 public:
   /// Create a new UserValue.
   UserValue(const DILocalVariable *var,
-            Optional<DIExpression::FragmentInfo> Fragment, DebugLoc L,
+            std::optional<DIExpression::FragmentInfo> Fragment, DebugLoc L,
             LocMap::Allocator &alloc)
       : Variable(var), Fragment(Fragment), dl(std::move(L)), leader(this),
         locInts(alloc) {}
@@ -440,11 +440,12 @@ public:
   /// VNInfo.
   /// \param [out] Kills Append end points of VNI's live range to Kills.
   /// \param LIS Live intervals analysis.
-  void extendDef(SlotIndex Idx, DbgVariableValue DbgValue,
-                 SmallDenseMap<unsigned, std::pair<LiveRange *, const VNInfo *>>
-                     &LiveIntervalInfo,
-                 Optional<std::pair<SlotIndex, SmallVector<unsigned>>> &Kills,
-                 LiveIntervals &LIS);
+  void
+  extendDef(SlotIndex Idx, DbgVariableValue DbgValue,
+            SmallDenseMap<unsigned, std::pair<LiveRange *, const VNInfo *>>
+                &LiveIntervalInfo,
+            std::optional<std::pair<SlotIndex, SmallVector<unsigned>>> &Kills,
+            LiveIntervals &LIS);
 
   /// The value in LI may be copies to other registers. Determine if
   /// any of the copies are available at the kill points, and add defs if
@@ -582,7 +583,7 @@ class LDVImpl {
 
   /// Find or create a UserValue.
   UserValue *getUserValue(const DILocalVariable *Var,
-                          Optional<DIExpression::FragmentInfo> Fragment,
+                          std::optional<DIExpression::FragmentInfo> Fragment,
                           const DebugLoc &DL);
 
   /// Find the EC leader for VirtReg or null.
@@ -768,9 +769,10 @@ void UserValue::mapVirtRegs(LDVImpl *LDV) {
       LDV->mapVirtReg(locations[i].getReg(), this);
 }
 
-UserValue *LDVImpl::getUserValue(const DILocalVariable *Var,
-                                 Optional<DIExpression::FragmentInfo> Fragment,
-                                 const DebugLoc &DL) {
+UserValue *
+LDVImpl::getUserValue(const DILocalVariable *Var,
+                      std::optional<DIExpression::FragmentInfo> Fragment,
+                      const DebugLoc &DL) {
   // FIXME: Handle partially overlapping fragments. See
   // https://reviews.llvm.org/D70121#1849741.
   DebugVariable ID(Var, Fragment, DL->getInlinedAt());
@@ -873,12 +875,16 @@ bool LDVImpl::handleDebugValue(MachineInstr &MI, SlotIndex Idx) {
 
 MachineBasicBlock::iterator LDVImpl::handleDebugInstr(MachineInstr &MI,
                                                       SlotIndex Idx) {
-  assert(MI.isDebugValue() || MI.isDebugRef() || MI.isDebugPHI());
+  assert(MI.isDebugValueLike() || MI.isDebugPHI());
 
   // In instruction referencing mode, there should be no DBG_VALUE instructions
   // that refer to virtual registers. They might still refer to constants.
-  if (MI.isDebugValue())
-    assert(!MI.getOperand(0).isReg() || !MI.getOperand(0).getReg().isVirtual());
+  if (MI.isDebugValueLike())
+    assert(none_of(MI.debug_operands(),
+                   [](const MachineOperand &MO) {
+                     return MO.isReg() && MO.getReg().isVirtual();
+                   }) &&
+           "MIs should not refer to Virtual Registers in InstrRef mode.");
 
   // Unlink the instruction, store it in the debug instructions collection.
   auto NextInst = std::next(MI.getIterator());
@@ -955,7 +961,7 @@ void UserValue::extendDef(
     SlotIndex Idx, DbgVariableValue DbgValue,
     SmallDenseMap<unsigned, std::pair<LiveRange *, const VNInfo *>>
         &LiveIntervalInfo,
-    Optional<std::pair<SlotIndex, SmallVector<unsigned>>> &Kills,
+    std::optional<std::pair<SlotIndex, SmallVector<unsigned>>> &Kills,
     LiveIntervals &LIS) {
   SlotIndex Start = Idx;
   MachineBasicBlock *MBB = LIS.getMBBFromIndex(Start);
@@ -985,7 +991,7 @@ void UserValue::extendDef(
     Start = Start.getNextSlot();
     if (I.value() != DbgValue || I.stop() != Start) {
       // Clear `Kills`, as we have a new def available.
-      Kills = None;
+      Kills = std::nullopt;
       return;
     }
     // This is a one-slot placeholder. Just skip it.
@@ -996,7 +1002,7 @@ void UserValue::extendDef(
   if (I.valid() && I.start() < Stop) {
     Stop = I.start();
     // Clear `Kills`, as we have a new def available.
-    Kills = None;
+    Kills = std::nullopt;
   }
 
   if (Start < Stop) {
@@ -1129,7 +1135,7 @@ void UserValue::computeIntervals(MachineRegisterInfo &MRI,
         LIs[LocNo] = {LI, VNI};
     }
     if (ShouldExtendDef) {
-      Optional<std::pair<SlotIndex, SmallVector<unsigned>>> Kills;
+      std::optional<std::pair<SlotIndex, SmallVector<unsigned>>> Kills;
       extendDef(Idx, DbgValue, LIs, Kills, LIS);
 
       if (Kills) {

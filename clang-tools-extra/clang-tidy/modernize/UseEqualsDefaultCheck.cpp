@@ -12,6 +12,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Lex/Lexer.h"
+#include <optional>
 
 using namespace clang::ast_matchers;
 
@@ -241,7 +242,9 @@ void UseEqualsDefaultCheck::registerMatchers(MatchFinder *Finder) {
       this);
   Finder->addMatcher(
       cxxConstructorDecl(
-          unless(hasParent(IsUnionLikeClass)), isDefinition(),
+          unless(
+              hasParent(decl(anyOf(IsUnionLikeClass, functionTemplateDecl())))),
+          isDefinition(),
           anyOf(
               // Default constructor.
               allOf(unless(hasAnyConstructorInitializer(isWritten())),
@@ -257,8 +260,9 @@ void UseEqualsDefaultCheck::registerMatchers(MatchFinder *Finder) {
       this);
   // Copy-assignment operator.
   Finder->addMatcher(
-      cxxMethodDecl(unless(hasParent(IsUnionLikeClass)), isDefinition(),
-                    isCopyAssignmentOperator(),
+      cxxMethodDecl(unless(hasParent(
+                        decl(anyOf(IsUnionLikeClass, functionTemplateDecl())))),
+                    isDefinition(), isCopyAssignmentOperator(),
                     // isCopyAssignmentOperator() allows the parameter to be
                     // passed by value, and in this case it cannot be
                     // defaulted.
@@ -341,7 +345,7 @@ void UseEqualsDefaultCheck::check(const MatchFinder::MatchResult &Result) {
         *Body, Result.Context->getSourceManager(),
         Result.Context->getLangOpts());
     // Skipping comments, check for a semicolon after Body->getSourceRange()
-    Optional<Token> Token = utils::lexer::findNextTokenSkippingComments(
+    std::optional<Token> Token = utils::lexer::findNextTokenSkippingComments(
         UnifiedEnd, Result.Context->getSourceManager(),
         Result.Context->getLangOpts());
     StringRef Replacement =

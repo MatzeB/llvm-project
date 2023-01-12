@@ -34,6 +34,29 @@ def NVVM_Dialect : Dialect {
     /// Get the name of the attribute used to annotate external kernel
     /// functions.
     static StringRef getKernelFuncAttrName() { return "nvvm.kernel"; }
+    /// Get the name of the attribute used to annotate max threads required
+    /// per CTA for kernel functions.
+    static StringRef getMaxntidAttrName() { return "nvvm.maxntid"; }
+    /// Get the name of the metadata names for each dimension
+    static StringRef getMaxntidXName() { return "maxntidx"; }
+    static StringRef getMaxntidYName() { return "maxntidy"; }
+    static StringRef getMaxntidZName() { return "maxntidz"; }
+
+    /// Get the name of the attribute used to annotate exact threads required
+    /// per CTA for kernel functions.
+    static StringRef getReqntidAttrName() { return "nvvm.reqntid"; }
+    /// Get the name of the metadata names for each dimension
+    static StringRef getReqntidXName() { return "reqntidx"; }
+    static StringRef getReqntidYName() { return "reqntidy"; }
+    static StringRef getReqntidZName() { return "reqntidz"; }
+
+    /// Get the name of the attribute used to annotate min CTA required
+    /// per SM for kernel functions.
+    static StringRef getMinctasmAttrName() { return "nvvm.minctasm"; }
+
+    /// Get the name of the attribute used to annotate max number of
+    /// registers that can be allocated per thread.
+    static StringRef getMaxnregAttrName() { return "nvvm.maxnreg"; }
   }];
 
   let useDefaultAttributePrinterParser = 1;
@@ -576,7 +599,7 @@ class MMA_SYNC_INTR {
        # " \"" # op[2].ptx_elt_type # "\" == eltypeC && "
        # " \"" # op[3].ptx_elt_type # "\" == eltypeD "
        # " && (sat.has_value()  ? " # sat # " == static_cast<int>(*sat) : true)"
-       # !if(!ne(b1op, ""), " && (b1Op.has_value() ? MMAB1Op::" # b1op # " == b1Op.value() : true)", "") # ")\n"
+       # !if(!ne(b1op, ""), " && (b1Op.has_value() ? MMAB1Op::" # b1op # " == *b1Op : true)", "") # ")\n"
        # "  return " #
        MMA_SYNC_NAME<layoutA, layoutB, b1op, sat, op[0], op[1], op[2], op[3]>.id # ";",
           "") // if supported
@@ -967,8 +990,8 @@ def NVVM_MmaOp : NVVM_Op<"mma.sync", [AttrSizedOperandSegments]> {
   let extraClassDeclaration = !strconcat([{
       static llvm::Intrinsic::ID getIntrinsicID(
             int64_t m, int64_t n, uint64_t k,
-            llvm::Optional<MMAB1Op> b1Op,
-            llvm::Optional<MMAIntOverflow> sat,
+            std::optional<MMAB1Op> b1Op,
+            std::optional<MMAIntOverflow> sat,
             mlir::NVVM::MMALayout layoutAEnum, mlir::NVVM::MMALayout layoutBEnum,
             mlir::NVVM::MMATypes eltypeAEnum, mlir::NVVM::MMATypes eltypeBEnum,
             mlir::NVVM::MMATypes eltypeCEnum, mlir::NVVM::MMATypes eltypeDEnum) {
@@ -983,7 +1006,7 @@ def NVVM_MmaOp : NVVM_Op<"mma.sync", [AttrSizedOperandSegments]> {
         return 0;
       }
 
-      static Optional<mlir::NVVM::MMATypes> inferOperandMMAType(Type operandElType,
+      static std::optional<mlir::NVVM::MMATypes> inferOperandMMAType(Type operandElType,
         bool isAccumulator);
 
       MMATypes accumPtxType();
@@ -993,10 +1016,10 @@ def NVVM_MmaOp : NVVM_Op<"mma.sync", [AttrSizedOperandSegments]> {
   let builders = [
       OpBuilder<(ins  "Type":$resultType, "ValueRange":$operandA,
         "ValueRange":$operandB, "ValueRange":$operandC,
-        "ArrayRef<int64_t>":$shape, "Optional<MMAB1Op>":$b1Op,
-        "Optional<MMAIntOverflow>":$intOverflow,
-        "Optional<std::array<MMATypes, 2>>":$multiplicandPtxTypes,
-        "Optional<std::array<MMALayout, 2>>":$multiplicandLayouts)>
+        "ArrayRef<int64_t>":$shape, "std::optional<MMAB1Op>":$b1Op,
+        "std::optional<MMAIntOverflow>":$intOverflow,
+        "std::optional<std::array<MMATypes, 2>>":$multiplicandPtxTypes,
+        "std::optional<std::array<MMALayout, 2>>":$multiplicandLayouts)>
     ];
 
   string llvmBuilder = [{
@@ -1005,8 +1028,8 @@ def NVVM_MmaOp : NVVM_Op<"mma.sync", [AttrSizedOperandSegments]> {
         $shape.getM(), $shape.getN(), $shape.getK(),
         $b1Op, $intOverflowBehavior,
         $layoutA, $layoutB,
-        $multiplicandAPtxType.value(),
-        $multiplicandBPtxType.value(),
+        *$multiplicandAPtxType,
+        *$multiplicandBPtxType,
         op.accumPtxType(),
         op.resultPtxType());
 

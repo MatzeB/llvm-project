@@ -84,7 +84,7 @@ void tools::gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
 
   RenderExtraToolArgs(JA, CmdArgs);
 
-  // If using a driver driver, force the arch.
+  // If using a driver, force the arch.
   if (getToolChain().getTriple().isOSDarwin()) {
     CmdArgs.push_back("-arch");
     CmdArgs.push_back(
@@ -331,8 +331,8 @@ static bool getStaticPIE(const ArgList &Args, const ToolChain &TC) {
   if (HasStaticPIE && Args.hasArg(options::OPT_nopie)) {
     const Driver &D = TC.getDriver();
     const llvm::opt::OptTable &Opts = D.getOpts();
-    const char *StaticPIEName = Opts.getOptionName(options::OPT_static_pie);
-    const char *NoPIEName = Opts.getOptionName(options::OPT_nopie);
+    StringRef StaticPIEName = Opts.getOptionName(options::OPT_static_pie);
+    StringRef NoPIEName = Opts.getOptionName(options::OPT_nopie);
     D.Diag(diag::err_drv_cannot_mix_options) << StaticPIEName << NoPIEName;
   }
   return HasStaticPIE;
@@ -714,7 +714,7 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       Args.MakeArgString(Twine(Output.getFilename()) + ".pre-bolt");
   MoveCmdArgs.push_back(PreBoltBin);
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
-                                         MvExec, MoveCmdArgs, None));
+                                         MvExec, MoveCmdArgs, std::nullopt));
 
   ArgStringList BoltCmdArgs;
   const char *BoltExec =
@@ -725,7 +725,7 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   BoltCmdArgs.push_back("-o");
   BoltCmdArgs.push_back(Output.getFilename());
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
-                                         BoltExec, BoltCmdArgs, None));
+                                         BoltExec, BoltCmdArgs, std::nullopt));
   // End Facebook T92898286
 }
 
@@ -758,7 +758,7 @@ void tools::gnutools::Assembler::ConstructJob(Compilation &C,
             Args.MakeArgString("--compress-debug-sections=" + Twine(Value)));
       } else {
         D.Diag(diag::err_drv_unsupported_option_argument)
-            << A->getOption().getName() << Value;
+            << A->getSpelling() << Value;
       }
     }
   }
@@ -1652,7 +1652,8 @@ static void findCSKYMultilibs(const Driver &D, const llvm::Triple &TargetTriple,
   FilterNonExistent NonExistent(Path, "/crtbegin.o", D.getVFS());
 
   tools::csky::FloatABI TheFloatABI = tools::csky::getCSKYFloatABI(D, Args);
-  llvm::Optional<llvm::StringRef> Res = tools::csky::getCSKYArchName(D, Args, TargetTriple);
+  std::optional<llvm::StringRef> Res =
+      tools::csky::getCSKYArchName(D, Args, TargetTriple);
 
   if (!Res)
     return;
@@ -1913,8 +1914,15 @@ bool Generic_GCC::GCCVersion::isOlderThan(int RHSMajor, int RHSMinor,
                                           StringRef RHSPatchSuffix) const {
   if (Major != RHSMajor)
     return Major < RHSMajor;
-  if (Minor != RHSMinor)
+  if (Minor != RHSMinor) {
+    // Note that versions without a specified minor sort higher than those with
+    // a minor.
+    if (RHSMinor == -1)
+      return true;
+    if (Minor == -1)
+      return false;
     return Minor < RHSMinor;
+  }
   if (Patch != RHSPatch) {
     // Note that versions without a specified patch sort higher than those with
     // a patch.
@@ -2157,7 +2165,7 @@ void Generic_GCC::GCCInstallationDetector::print(raw_ostream &OS) const {
 
 bool Generic_GCC::GCCInstallationDetector::getBiarchSibling(Multilib &M) const {
   if (BiarchSibling) {
-    M = BiarchSibling.value();
+    M = *BiarchSibling;
     return true;
   }
   return false;
@@ -2913,6 +2921,7 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
   switch (getTriple().getArch()) {
   case llvm::Triple::aarch64:
   case llvm::Triple::aarch64_be:
+  case llvm::Triple::amdgcn:
   case llvm::Triple::arm:
   case llvm::Triple::armeb:
   case llvm::Triple::avr:
@@ -2933,6 +2942,7 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
   case llvm::Triple::ppcle:
   case llvm::Triple::ppc64:
   case llvm::Triple::ppc64le:
+  case llvm::Triple::r600:
   case llvm::Triple::riscv32:
   case llvm::Triple::riscv64:
   case llvm::Triple::sparc:

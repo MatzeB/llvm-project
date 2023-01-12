@@ -201,10 +201,6 @@ what to add to your calendar invite.
      - Every 4 weeks on Tuesdays
      - `ics <http://lists.llvm.org/pipermail/llvm-dev/attachments/20201103/a3499a67/attachment-0001.ics>`__
      - `Minutes/docs <https://docs.google.com/document/d/17U-WvX8qyKc3S36YUKr3xfF-GHunWyYowXbxEdpHscw>`__
-   * - Windows/COFF related developments
-     - Every 2 months on Thursday
-     -
-     - `Minutes/docs <https://docs.google.com/document/d/1A-W0Sas_oHWTEl_x_djZYoRtzAdTONMW_6l1BH9G6Bo/edit?usp=sharing>`__
    * - Vector Predication
      - Every 2 weeks on Tuesdays, 3pm UTC
      -
@@ -231,6 +227,10 @@ what to add to your calendar invite.
      - Every week on Thursday
      -
      - `Meeting details/agenda <https://docs.google.com/document/d/1UjX-LAwPjJ75Nmb8a5jz-Qrm-pPtKtQw0k1S1Lop9jU/edit?usp=sharing>`__
+   * - SYCL Upstream Working Group
+     - Every 2 weeks on Mondays
+     - `gcal <https://calendar.google.com/calendar/u/0?cid=c3ljbC5sbHZtLndnQGdtYWlsLmNvbQ>`__
+     - `Meeting details/agenda <https://docs.google.com/document/d/1ivYDSn_5ChTeiZ7TiO64WC_jYJnGwAUiT9Ngi9cAdFU/edit?usp=sharing>`__
 
 .. _office-hours:
 
@@ -318,6 +318,16 @@ don't find anyone present, chances are they happen to be off that day.
       `gcal <https://calendar.google.com/calendar/embed?src=48c4ad60290a4df218e51e1ceec1106fe317b0ebc76938d9273592053f38204e%40group.calendar.google.com>`__
     - `Google meet <https://meet.google.com/cbz-grrp-obs>`__
     - English, French
+  * - Paulo Matos (he/him)
+    - WebAssembly backend; LLVM IR;
+    - Monthly, 1st Monday of the month at 11:00am Europe/Berlin, for 30 minutes.
+    - `Igalia Jitsi <https://meetings.igalia.com/PauloMatosLLVMOfficeHour>`__
+    - English, Portuguese, German
+  * - Phoebe Wang (she/her)
+    - X86 backend, General questions to X86, women in compilers.
+    - Monthly, 3rd Wednesday of the month at 8:30am Beijing time, for 30 minutes.
+    - `MS Teams <https://teams.microsoft.com/l/meetup-join/19%3ameeting_NWQ0MjU0NjYtZjUyMi00YTU3LThmM2EtY2Y2YTE4NGM3NmFi%40thread.v2/0?context=%7b%22Tid%22%3a%2246c98d88-e344-4ed4-8496-4ed7712e255d%22%2c%22Oid%22%3a%227b309d9c-a9bb-44c8-a940-ab97eef42d4d%22%7d>`__
+    - English, Chinese
 
 
 Guidance for office hours hosts
@@ -443,6 +453,9 @@ also be seen inline below:
 Guidance on what to put into LLVM community calendar invites
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+To add your event, create a calendar event for it and invite calendar@llvm.org
+on it. Your event should then show up on the community calendar.
+ 
 Please put the following pieces of information in your calendar invite:
 
 * Write a single paragraph describing what the event is about. Include things

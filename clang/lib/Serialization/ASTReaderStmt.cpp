@@ -895,9 +895,17 @@ void ASTStmtReader::VisitRequiresExpr(RequiresExpr *E) {
                   std::move(*Req));
       } break;
       case concepts::Requirement::RK_Nested: {
-        if (/* IsSubstitutionDiagnostic */Record.readInt()) {
+        bool HasInvalidConstraint = Record.readInt();
+        if (HasInvalidConstraint) {
+          std::string InvalidConstraint = Record.readString();
+          char *InvalidConstraintBuf =
+              new (Record.getContext()) char[InvalidConstraint.size()];
+          std::copy(InvalidConstraint.begin(), InvalidConstraint.end(),
+                    InvalidConstraintBuf);
           R = new (Record.getContext()) concepts::NestedRequirement(
-              readSubstitutionDiagnostic(Record));
+              Record.getContext(),
+              StringRef(InvalidConstraintBuf, InvalidConstraint.size()),
+              readConstraintSatisfaction(Record));
           break;
         }
         Expr *E = Record.readExpr();
@@ -1824,13 +1832,19 @@ void ASTStmtReader::VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
   E->Param = readDeclAs<ParmVarDecl>();
   E->UsedContext = readDeclAs<DeclContext>();
   E->CXXDefaultArgExprBits.Loc = readSourceLocation();
+  E->CXXDefaultArgExprBits.HasRewrittenInit = Record.readInt();
+  if (E->CXXDefaultArgExprBits.HasRewrittenInit)
+    *E->getTrailingObjects<Expr *>() = Record.readSubExpr();
 }
 
 void ASTStmtReader::VisitCXXDefaultInitExpr(CXXDefaultInitExpr *E) {
   VisitExpr(E);
+  E->CXXDefaultInitExprBits.HasRewrittenInit = Record.readInt();
   E->Field = readDeclAs<FieldDecl>();
   E->UsedContext = readDeclAs<DeclContext>();
   E->CXXDefaultInitExprBits.Loc = readSourceLocation();
+  if (E->CXXDefaultInitExprBits.HasRewrittenInit)
+    *E->getTrailingObjects<Expr *>() = Record.readSubExpr();
 }
 
 void ASTStmtReader::VisitCXXBindTemporaryExpr(CXXBindTemporaryExpr *E) {
@@ -2406,6 +2420,13 @@ void ASTStmtReader::VisitOMPBarrierDirective(OMPBarrierDirective *D) {
 }
 
 void ASTStmtReader::VisitOMPTaskwaitDirective(OMPTaskwaitDirective *D) {
+  VisitStmt(D);
+  // The NumClauses field was read in ReadStmtFromStream.
+  Record.skipInts(1);
+  VisitOMPExecutableDirective(D);
+}
+
+void ASTStmtReader::VisitOMPErrorDirective(OMPErrorDirective *D) {
   VisitStmt(D);
   // The NumClauses field was read in ReadStmtFromStream.
   Record.skipInts(1);
@@ -3359,6 +3380,11 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
           Context, Record[ASTStmtReader::NumStmtFields], Empty);
       break;
 
+    case STMT_OMP_ERROR_DIRECTIVE:
+      S = OMPErrorDirective::CreateEmpty(
+          Context, Record[ASTStmtReader::NumStmtFields], Empty);
+      break;
+
     case STMT_OMP_TASKGROUP_DIRECTIVE:
       S = OMPTaskgroupDirective::CreateEmpty(
           Context, Record[ASTStmtReader::NumStmtFields], Empty);
@@ -3817,11 +3843,13 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
 
     case EXPR_CXX_DEFAULT_ARG:
-      S = new (Context) CXXDefaultArgExpr(Empty);
+      S = CXXDefaultArgExpr::CreateEmpty(
+          Context, /*HasRewrittenInit=*/Record[ASTStmtReader::NumExprFields]);
       break;
 
     case EXPR_CXX_DEFAULT_INIT:
-      S = new (Context) CXXDefaultInitExpr(Empty);
+      S = CXXDefaultInitExpr::CreateEmpty(
+          Context, /*HasRewrittenInit=*/Record[ASTStmtReader::NumExprFields]);
       break;
 
     case EXPR_CXX_BIND_TEMPORARY:

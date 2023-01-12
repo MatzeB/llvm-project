@@ -22,7 +22,7 @@
 namespace __llvm_libc {
 [[maybe_unused]] static inline MemcmpReturnType
 inline_memcmp_embedded_tiny(CPtr p1, CPtr p2, size_t count) {
-#pragma nounroll
+  LLVM_LIBC_LOOP_NOUNROLL
   for (size_t offset = 0; offset < count; ++offset)
     if (auto value = generic::Memcmp<1>::block(p1 + offset, p2 + offset))
       return value;
@@ -83,6 +83,7 @@ inline_memcmp_x86_avx512bw_gt16(CPtr p1, CPtr p2, size_t count) {
   }
   return x86::avx512bw::Memcmp<64>::loop_and_tail(p1, p2, count);
 }
+
 #endif // defined(LLVM_LIBC_ARCH_X86)
 
 #if defined(LLVM_LIBC_ARCH_AARCH64)
@@ -94,6 +95,8 @@ inline_memcmp_aarch64_neon_gt16(CPtr p1, CPtr p2, size_t count) {
     align_to_next_boundary<16, Arg::P1>(p1, p2, count);
     return generic::Memcmp<32>::loop_and_tail(p1, p2, count);
   }
+  if (generic::Bcmp<16>::block(p1, p2)) // [16, 16]
+    return generic::Memcmp<16>::block(p1, p2);
   if (count < 32) // [17, 31]
     return generic::Memcmp<16>::tail(p1, p2, count);
   if (generic::Bcmp<16>::block(p1 + 16, p2 + 16)) // [32, 32]
@@ -135,6 +138,8 @@ static inline MemcmpReturnType inline_memcmp(CPtr p1, CPtr p2, size_t count) {
     return inline_memcmp_generic_gt16(p1, p2, count);
 #endif
 #elif defined(LLVM_LIBC_ARCH_ARM)
+  return inline_memcmp_embedded_tiny(p1, p2, count);
+#elif defined(LLVM_LIBC_ARCH_GPU)
   return inline_memcmp_embedded_tiny(p1, p2, count);
 #else
 #error "Unsupported platform"

@@ -21,6 +21,7 @@
 #include "AVRISelLowering.h"
 #include "AVRInstrInfo.h"
 #include "AVRSelectionDAGInfo.h"
+#include "MCTargetDesc/AVRMCTargetDesc.h"
 
 #define GET_SUBTARGETINFO_HEADER
 #include "AVRGenSubtargetInfo.inc"
@@ -72,6 +73,7 @@ public:
   bool hasLPMX() const { return m_hasLPMX; }
   bool hasELPM() const { return m_hasELPM; }
   bool hasELPMX() const { return m_hasELPMX; }
+  bool hasPROGMEM() const { return m_hasPROGMEM; }
   bool hasSPM() const { return m_hasSPM; }
   bool hasSPMX() const { return m_hasSPMX; }
   bool hasDES() const { return m_hasDES; }
@@ -102,6 +104,13 @@ public:
   int getRegTmpIndex() const { return hasTinyEncoding() ? 16 : 0; }
   int getRegZeroIndex() const { return hasTinyEncoding() ? 17 : 1; }
 
+  Register getTmpRegister() const {
+    return hasTinyEncoding() ? AVR::R16 : AVR::R0;
+  }
+  Register getZeroRegister() const {
+    return hasTinyEncoding() ? AVR::R17 : AVR::R1;
+  }
+
 private:
   /// The ELF e_flags architecture.
   unsigned ELFArch;
@@ -119,6 +128,7 @@ private:
   bool m_hasLPMX;
   bool m_hasELPM;
   bool m_hasELPMX;
+  bool m_hasPROGMEM;
   bool m_hasSPM;
   bool m_hasSPMX;
   bool m_hasDES;

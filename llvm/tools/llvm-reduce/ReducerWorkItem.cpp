@@ -32,13 +32,15 @@
 #include "llvm/Support/WithColor.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include <optional>
 
 extern cl::OptionCategory LLVMReduceOptions;
 static cl::opt<std::string> TargetTriple("mtriple",
                                          cl::desc("Set the target triple"),
                                          cl::cat(LLVMReduceOptions));
 
-void readBitcode(ReducerWorkItem &M, MemoryBufferRef Data, LLVMContext &Ctx, const char *ToolName);
+void readBitcode(ReducerWorkItem &M, MemoryBufferRef Data, LLVMContext &Ctx,
+                 StringRef ToolName);
 
 static void cloneFrameInfo(
     MachineFrameInfo &DstMFI, const MachineFrameInfo &SrcMFI,
@@ -238,7 +240,7 @@ static std::unique_ptr<MachineFunction> cloneMF(MachineFunction *SrcMF,
         SrcMBB.isInlineAsmBrIndirectTarget());
 
     // FIXME: This is not serialized
-    if (Optional<uint64_t> Weight = SrcMBB.getIrrLoopHeaderWeight())
+    if (std::optional<uint64_t> Weight = SrcMBB.getIrrLoopHeaderWeight())
       DstMBB->setIrrLoopHeaderWeight(*Weight);
   }
 
@@ -385,10 +387,10 @@ static void initializeTargetInfo() {
   InitializeAllAsmParsers();
 }
 
-std::unique_ptr<ReducerWorkItem>
-parseReducerWorkItem(const char *ToolName, StringRef Filename,
-                     LLVMContext &Ctxt, std::unique_ptr<TargetMachine> &TM,
-                     bool IsMIR) {
+std::pair<std::unique_ptr<ReducerWorkItem>, bool>
+parseReducerWorkItem(StringRef ToolName, StringRef Filename, LLVMContext &Ctxt,
+                     std::unique_ptr<TargetMachine> &TM, bool IsMIR) {
+  bool IsBitcode = false;
   Triple TheTriple;
 
   auto MMM = std::make_unique<ReducerWorkItem>();
@@ -399,14 +401,14 @@ parseReducerWorkItem(const char *ToolName, StringRef Filename,
     auto FileOrErr = MemoryBuffer::getFileOrSTDIN(Filename, /*IsText=*/true);
     if (std::error_code EC = FileOrErr.getError()) {
       WithColor::error(errs(), ToolName) << EC.message() << '\n';
-      return nullptr;
+      return {nullptr, false};
     }
 
     std::unique_ptr<MIRParser> MParser =
         createMIRParser(std::move(FileOrErr.get()), Ctxt);
 
     auto SetDataLayout =
-        [&](StringRef DataLayoutTargetTriple) -> Optional<std::string> {
+        [&](StringRef DataLayoutTargetTriple) -> std::optional<std::string> {
       // If we are supposed to override the target triple, do so now.
       std::string IRTargetTriple = DataLayoutTargetTriple.str();
       if (!TargetTriple.empty())
@@ -425,7 +427,7 @@ parseReducerWorkItem(const char *ToolName, StringRef Filename,
 
       // Hopefully the MIR parsing doesn't depend on any options.
       TargetOptions Options;
-      Optional<Reloc::Model> RM = codegen::getExplicitRelocModel();
+      std::optional<Reloc::Model> RM = codegen::getExplicitRelocModel();
       std::string CPUStr = codegen::getCPUStr();
       std::string FeaturesStr = codegen::getFeaturesStr();
       TM = std::unique_ptr<TargetMachine>(TheTarget->createTargetMachine(
@@ -447,18 +449,19 @@ parseReducerWorkItem(const char *ToolName, StringRef Filename,
     ErrorOr<std::unique_ptr<MemoryBuffer>> MB = MemoryBuffer::getFileOrSTDIN(Filename);
     if (std::error_code EC = MB.getError()) {
       WithColor::error(errs(), ToolName) << Filename << ": " << EC.message() << "\n";
-      return nullptr;
+      return {nullptr, false};
     }
 
     if (!isBitcode((const unsigned char *)(*MB)->getBufferStart(),
                   (const unsigned char *)(*MB)->getBufferEnd())) {
       std::unique_ptr<Module> Result = parseIRFile(Filename, Err, Ctxt);
       if (!Result) {
-        Err.print(ToolName, errs());
-        return nullptr;
+        Err.print(ToolName.data(), errs());
+        return {nullptr, false};
       }
       MMM->M = std::move(Result);
     } else {
+      IsBitcode = true;
       readBitcode(*MMM, MemoryBufferRef(**MB), Ctxt, ToolName);
 
       if (MMM->LTOInfo->IsThinLTO && MMM->LTOInfo->EnableSplitLTOUnit)
@@ -468,9 +471,9 @@ parseReducerWorkItem(const char *ToolName, StringRef Filename,
   if (verifyReducerWorkItem(*MMM, &errs())) {
     WithColor::error(errs(), ToolName)
         << Filename << " - input module is broken!\n";
-    return nullptr;
+    return {nullptr, false};
   }
-  return MMM;
+  return {std::move(MMM), IsBitcode};
 }
 
 std::unique_ptr<ReducerWorkItem>

@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 
 using namespace lldb;
@@ -82,16 +83,16 @@ ScriptInterpreter::GetDataExtractorFromSBData(const lldb::SBData &data) const {
 Status
 ScriptInterpreter::GetStatusFromSBError(const lldb::SBError &error) const {
   if (error.m_opaque_up)
-    return *error.m_opaque_up.get();
+    return *error.m_opaque_up;
 
   return Status();
 }
 
-llvm::Optional<MemoryRegionInfo>
+std::optional<MemoryRegionInfo>
 ScriptInterpreter::GetOpaqueTypeFromSBMemoryRegionInfo(
     const lldb::SBMemoryRegionInfo &mem_region) const {
   if (!mem_region.m_opaque_up)
-    return llvm::None;
+    return std::nullopt;
   return *mem_region.m_opaque_up.get();
 }
 

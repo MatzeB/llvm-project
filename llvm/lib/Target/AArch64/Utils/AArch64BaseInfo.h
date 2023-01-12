@@ -481,6 +481,14 @@ namespace AArch64SVEPRFM {
 #include "AArch64GenSystemOperands.inc"
 }
 
+namespace AArch64RPRFM {
+struct RPRFM : SysAlias {
+  using SysAlias::SysAlias;
+};
+#define GET_RPRFM_DECL
+#include "AArch64GenSystemOperands.inc"
+} // namespace AArch64RPRFM
+
 namespace AArch64SVEPredPattern {
   struct SVEPREDPAT {
     const char *Name;
@@ -489,6 +497,15 @@ namespace AArch64SVEPredPattern {
 #define GET_SVEPREDPAT_DECL
 #include "AArch64GenSystemOperands.inc"
 }
+
+namespace AArch64SVEVecLenSpecifier {
+  struct SVEVECLENSPECIFIER {
+    const char *Name;
+    uint16_t Encoding;
+  };
+#define GET_SVEVECLENSPECIFIER_DECL
+#include "AArch64GenSystemOperands.inc"
+} // namespace AArch64SVEVecLenSpecifier
 
 /// Return the number of active elements for VL1 to VL256 predicate pattern,
 /// zero for all other patterns.
@@ -519,11 +536,11 @@ inline unsigned getNumElementsFromSVEPredPattern(unsigned Pattern) {
 }
 
 /// Return specific VL predicate pattern based on the number of elements.
-inline Optional<unsigned>
+inline std::optional<unsigned>
 getSVEPredPatternFromNumElements(unsigned MinNumElts) {
   switch (MinNumElts) {
   default:
-    return None;
+    return std::nullopt;
   case 1:
   case 2:
   case 3:
@@ -557,10 +574,16 @@ namespace AArch64ExactFPImm {
 }
 
 namespace AArch64PState {
-  struct PState : SysAlias{
+  struct PStateImm0_15 : SysAlias{
     using SysAlias::SysAlias;
   };
-  #define GET_PSTATE_DECL
+  #define GET_PSTATEIMM0_15_DECL
+  #include "AArch64GenSystemOperands.inc"
+
+  struct PStateImm0_1 : SysAlias{
+    using SysAlias::SysAlias;
+  };
+  #define GET_PSTATEIMM0_1_DECL
   #include "AArch64GenSystemOperands.inc"
 }
 
@@ -822,7 +845,7 @@ inline static StringRef AArch64PACKeyIDToString(AArch64PACKey::ID KeyID) {
 }
 
 /// Return numeric key ID for 2-letter identifier string.
-inline static Optional<AArch64PACKey::ID>
+inline static std::optional<AArch64PACKey::ID>
 AArch64StringToPACKeyID(StringRef Name) {
   if (Name == "ia")
     return AArch64PACKey::IA;
@@ -832,7 +855,7 @@ AArch64StringToPACKeyID(StringRef Name) {
     return AArch64PACKey::DA;
   if (Name == "db")
     return AArch64PACKey::DB;
-  return None;
+  return std::nullopt;
 }
 
 namespace AArch64 {

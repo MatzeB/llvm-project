@@ -21,7 +21,6 @@
 #include "clang/Lex/Token.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
@@ -33,6 +32,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace clang {
@@ -331,7 +331,6 @@ void setTags(clangd::Diag &D) {
       diag::warn_deprecated,
       diag::warn_deprecated_altivec_src_compat,
       diag::warn_deprecated_comma_subscript,
-      diag::warn_deprecated_compound_assign_volatile,
       diag::warn_deprecated_copy,
       diag::warn_deprecated_copy_with_dtor,
       diag::warn_deprecated_copy_with_user_provided_copy,
@@ -625,7 +624,7 @@ void StoreDiags::BeginSourceFile(const LangOptions &Opts,
 
 void StoreDiags::EndSourceFile() {
   flushLastDiag();
-  LangOpts = None;
+  LangOpts = std::nullopt;
   OrigSrcMgr = nullptr;
 }
 
@@ -907,9 +906,9 @@ llvm::StringRef normalizeSuppressedCode(llvm::StringRef Code) {
   return Code;
 }
 
-llvm::Optional<std::string> getDiagnosticDocURI(Diag::DiagSource Source,
-                                                unsigned ID,
-                                                llvm::StringRef Name) {
+std::optional<std::string> getDiagnosticDocURI(Diag::DiagSource Source,
+                                               unsigned ID,
+                                               llvm::StringRef Name) {
   switch (Source) {
   case Diag::Unknown:
     break;
@@ -926,7 +925,7 @@ llvm::Optional<std::string> getDiagnosticDocURI(Diag::DiagSource Source,
     // '-' in the name.
     std::tie(Module, Check) = Name.split('-');
     if (Module.empty() || Check.empty())
-      return llvm::None;
+      return std::nullopt;
     return ("https://clang.llvm.org/extra/clang-tidy/checks/" + Module + "/" +
             Check + ".html")
         .str();
@@ -940,7 +939,7 @@ llvm::Optional<std::string> getDiagnosticDocURI(Diag::DiagSource Source,
     // However we have no diagnostic codes, which the link should describe!
     break;
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 } // namespace clangd

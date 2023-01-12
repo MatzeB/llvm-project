@@ -212,21 +212,53 @@ struct MappingAarch64_42 {
 
 struct MappingAarch64_48 {
   static const uptr kLoAppMemBeg   = 0x0000000001000ull;
-  static const uptr kLoAppMemEnd   = 0x0000200000000ull;
-  static const uptr kShadowBeg = 0x0001000000000ull;
-  static const uptr kShadowEnd = 0x0002000000000ull;
-  static const uptr kMetaShadowBeg = 0x0005000000000ull;
-  static const uptr kMetaShadowEnd = 0x0006000000000ull;
+  static const uptr kLoAppMemEnd   = 0x00a0000000000ull;
+  static const uptr kShadowBeg     = 0x0155400000000ull;
+  static const uptr kShadowEnd     = 0x0540000000000ull;
+  static const uptr kMetaShadowBeg = 0x0800000000000ull;
+  static const uptr kMetaShadowEnd = 0x0a00000000000ull;
   static const uptr kMidAppMemBeg  = 0x0aaaa00000000ull;
-  static const uptr kMidAppMemEnd = 0x0aaaf00000000ull;
-  static const uptr kHeapMemBeg    = 0x0ffff00000000ull;
-  static const uptr kHeapMemEnd    = 0x0ffff00000000ull;
-  static const uptr kHiAppMemBeg   = 0x0ffff00000000ull;
+  static const uptr kMidAppMemEnd  = 0x0ac0000000000ull;
+  static const uptr kHiAppMemBeg   = 0x0fc0000000000ull;
   static const uptr kHiAppMemEnd   = 0x1000000000000ull;
-  static const uptr kShadowMsk = 0x0fff800000000ull;
-  static const uptr kShadowXor = 0x0000800000000ull;
-  static const uptr kShadowAdd = 0x0000000000000ull;
+  static const uptr kHeapMemBeg    = 0x0fc0000000000ull;
+  static const uptr kHeapMemEnd    = 0x0fc0000000000ull;
+  static const uptr kShadowMsk     = 0x0c00000000000ull;
+  static const uptr kShadowXor     = 0x0200000000000ull;
+  static const uptr kShadowAdd     = 0x0000000000000ull;
   static const uptr kVdsoBeg       = 0xffff000000000ull;
+};
+
+/* C/C++ on linux/loongarch64 (47-bit VMA)
+0000 0000 4000 - 0080 0000 0000: main binary
+0080 0000 0000 - 0100 0000 0000: -
+0100 0000 0000 - 1000 0000 0000: shadow memory
+1000 0000 0000 - 3000 0000 0000: -
+3000 0000 0000 - 3400 0000 0000: metainfo
+3400 0000 0000 - 5555 0000 0000: -
+5555 0000 0000 - 5556 0000 0000: main binary (PIE)
+5556 0000 0000 - 7ffe 0000 0000: -
+7ffe 0000 0000 - 7fff 0000 0000: heap
+7fff 0000 0000 - 7fff 8000 0000: -
+7fff 8000 0000 - 8000 0000 0000: modules and main thread stack
+*/
+struct MappingLoongArch64_47 {
+  static const uptr kMetaShadowBeg = 0x300000000000ull;
+  static const uptr kMetaShadowEnd = 0x340000000000ull;
+  static const uptr kShadowBeg     = 0x010000000000ull;
+  static const uptr kShadowEnd     = 0x100000000000ull;
+  static const uptr kHeapMemBeg    = 0x7ffe00000000ull;
+  static const uptr kHeapMemEnd    = 0x7fff00000000ull;
+  static const uptr kLoAppMemBeg   = 0x000000004000ull;
+  static const uptr kLoAppMemEnd   = 0x008000000000ull;
+  static const uptr kMidAppMemBeg  = 0x555500000000ull;
+  static const uptr kMidAppMemEnd  = 0x555600000000ull;
+  static const uptr kHiAppMemBeg   = 0x7fff80000000ull;
+  static const uptr kHiAppMemEnd   = 0x800000000000ull;
+  static const uptr kShadowMsk     = 0x780000000000ull;
+  static const uptr kShadowXor     = 0x040000000000ull;
+  static const uptr kShadowAdd     = 0x000000000000ull;
+  static const uptr kVdsoBeg       = 0x7fffffffc000ull;
 };
 
 /*
@@ -599,6 +631,8 @@ ALWAYS_INLINE auto SelectMapping(Arg arg) {
     case 48:
       return Func::template Apply<MappingAarch64_48>(arg);
   }
+#  elif SANITIZER_LOONGARCH64
+  return Func::template Apply<MappingLoongArch64_47>(arg);
 #  elif defined(__powerpc64__)
   switch (vmaSize) {
     case 44:
@@ -627,6 +661,7 @@ void ForEachMapping() {
   Func::template Apply<MappingAarch64_39>();
   Func::template Apply<MappingAarch64_42>();
   Func::template Apply<MappingAarch64_48>();
+  Func::template Apply<MappingLoongArch64_47>();
   Func::template Apply<MappingPPC64_44>();
   Func::template Apply<MappingPPC64_46>();
   Func::template Apply<MappingPPC64_47>();

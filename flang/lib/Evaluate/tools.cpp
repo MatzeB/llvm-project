@@ -60,12 +60,8 @@ Expr<SomeType> Parenthesize(Expr<SomeType> &&expr) {
 }
 
 std::optional<DataRef> ExtractDataRef(
-    const ActualArgument &arg, bool intoSubstring) {
-  if (const Expr<SomeType> *expr{arg.UnwrapExpr()}) {
-    return ExtractDataRef(*expr, intoSubstring);
-  } else {
-    return std::nullopt;
-  }
+    const ActualArgument &arg, bool intoSubstring, bool intoComplexPart) {
+  return ExtractDataRef(arg.UnwrapExpr(), intoSubstring, intoComplexPart);
 }
 
 std::optional<DataRef> ExtractSubstringBase(const Substring &substring) {
@@ -1004,6 +1000,12 @@ std::optional<parser::MessageFixedText> CheckProcCompatibility(bool isCall,
   } else if (!rhsProcedure) {
     msg = "In assignment to procedure %s, the characteristics of the target"
           " procedure '%s' could not be determined"_err_en_US;
+  } else if (!isCall && lhsProcedure->functionResult &&
+      rhsProcedure->functionResult &&
+      !lhsProcedure->functionResult->IsCompatibleWith(
+          *rhsProcedure->functionResult, &whyNotCompatible)) {
+    msg =
+        "Function %s associated with incompatible function designator '%s': %s"_err_en_US;
   } else if (lhsProcedure->IsCompatibleWith(
                  *rhsProcedure, &whyNotCompatible, specificIntrinsic)) {
     // OK
@@ -1252,9 +1254,9 @@ bool IsPureProcedure(const Symbol &original) {
   // An ENTRY is pure if its containing subprogram is
   const Symbol &symbol{DEREF(GetMainEntry(&original.GetUltimate()))};
   if (const auto *procDetails{symbol.detailsIf<ProcEntityDetails>()}) {
-    if (const Symbol * procInterface{procDetails->interface().symbol()}) {
+    if (procDetails->procInterface()) {
       // procedure with a pure interface
-      return IsPureProcedure(*procInterface);
+      return IsPureProcedure(*procDetails->procInterface());
     }
   } else if (const auto *details{symbol.detailsIf<ProcBindingDetails>()}) {
     return IsPureProcedure(details->symbol());
@@ -1266,6 +1268,9 @@ bool IsPureProcedure(const Symbol &original) {
     // reference an IMPURE procedure or a VOLATILE variable
     if (const auto &expr{symbol.get<SubprogramDetails>().stmtFunction()}) {
       for (const SymbolRef &ref : evaluate::CollectSymbols(*expr)) {
+        if (&*ref == &symbol) {
+          return false; // error recovery, recursion is caught elsewhere
+        }
         if (IsFunction(*ref) && !IsPureProcedure(*ref)) {
           return false;
         }
@@ -1290,7 +1295,7 @@ bool IsElementalProcedure(const Symbol &original) {
   // An ENTRY is elemental if its containing subprogram is
   const Symbol &symbol{DEREF(GetMainEntry(&original.GetUltimate()))};
   if (const auto *procDetails{symbol.detailsIf<ProcEntityDetails>()}) {
-    if (const Symbol * procInterface{procDetails->interface().symbol()}) {
+    if (const Symbol * procInterface{procDetails->procInterface()}) {
       // procedure with an elemental interface, ignoring the elemental
       // aspect of intrinsic functions
       return !procInterface->attrs().test(Attr::INTRINSIC) &&
@@ -1313,9 +1318,8 @@ bool IsFunction(const Symbol &symbol) {
               common::visitors{
                   [](const SubprogramDetails &x) { return x.isFunction(); },
                   [](const ProcEntityDetails &x) {
-                    const auto &ifc{x.interface()};
-                    return ifc.type() ||
-                        (ifc.symbol() && IsFunction(*ifc.symbol()));
+                    const Symbol *ifc{x.procInterface()};
+                    return x.type() || (ifc && IsFunction(*ifc));
                   },
                   [](const ProcBindingDetails &x) {
                     return IsFunction(x.symbol());
@@ -1332,7 +1336,12 @@ bool IsFunction(const Scope &scope) {
 
 bool IsProcedure(const Symbol &symbol) {
   return common::visit(common::visitors{
-                           [](const SubprogramDetails &) { return true; },
+                           [&symbol](const SubprogramDetails &) {
+                             const Scope *scope{symbol.scope()};
+                             // Main programs & BLOCK DATA are not procedures.
+                             return !scope ||
+                                 scope->kind() == Scope::Kind::Subprogram;
+                           },
                            [](const SubprogramNameDetails &) { return true; },
                            [](const ProcEntityDetails &) { return true; },
                            [](const GenericDetails &) { return true; },
@@ -1608,7 +1617,7 @@ static const Symbol *FindFunctionResult(
                          return subp.isFunction() ? &subp.result() : nullptr;
                        },
           [&](const ProcEntityDetails &proc) {
-            const Symbol *iface{proc.interface().symbol()};
+            const Symbol *iface{proc.procInterface()};
             return iface ? FindFunctionResult(*iface, seen) : nullptr;
           },
           [&](const ProcBindingDetails &binding) {

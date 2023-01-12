@@ -110,9 +110,6 @@ public:
     /// Compiling a module from a module map.
     CMK_ModuleMap,
 
-    /// Compiling a module from a list of header files.
-    CMK_HeaderModule,
-
     /// Compiling a module header unit.
     CMK_HeaderUnit,
 
@@ -298,6 +295,8 @@ public:
     FEM_UnsetOnCommandLine = 3
   };
 
+  enum ExcessPrecisionKind { FPP_Standard, FPP_Fast, FPP_None };
+
   /// Possible exception handling behavior.
   enum class ExceptionHandlingKind { None, SjLj, WinEH, DwarfCFI, Wasm };
 
@@ -377,7 +376,7 @@ public:
     /// Any trailing array member of undefined or 0 size is a FAM.
     ZeroOrIncomplete = 2,
     /// Any trailing array member of undefined size is a FAM.
-    Incomplete = 3,
+    IncompleteOnly = 3,
   };
 
 public:

@@ -20,7 +20,7 @@
 using namespace clang;
 using namespace clang::targets;
 
-const Builtin::Info NVPTXTargetInfo::BuiltinInfo[] = {
+static constexpr Builtin::Info BuiltinInfo[] = {
 #define BUILTIN(ID, TYPE, ATTRS)                                               \
   {#ID, TYPE, ATTRS, nullptr, ALL_LANGUAGES, nullptr},
 #define LIBBUILTIN(ID, TYPE, ATTRS, HEADER)                                    \
@@ -97,8 +97,8 @@ NVPTXTargetInfo::NVPTXTargetInfo(const llvm::Triple &Triple,
   }
 
   // Copy properties from host target.
-  PointerWidth = HostTarget->getPointerWidth(/* AddrSpace = */ 0);
-  PointerAlign = HostTarget->getPointerAlign(/* AddrSpace = */ 0);
+  PointerWidth = HostTarget->getPointerWidth(LangAS::Default);
+  PointerAlign = HostTarget->getPointerAlign(LangAS::Default);
   BoolWidth = HostTarget->getBoolWidth();
   BoolAlign = HostTarget->getBoolAlign();
   IntWidth = HostTarget->getIntWidth();
@@ -119,7 +119,7 @@ NVPTXTargetInfo::NVPTXTargetInfo(const llvm::Triple &Triple,
       HostTarget->getDefaultAlignForAttributeAligned();
   SizeType = HostTarget->getSizeType();
   IntMaxType = HostTarget->getIntMaxType();
-  PtrDiffType = HostTarget->getPtrDiffType(/* AddrSpace = */ 0);
+  PtrDiffType = HostTarget->getPtrDiffType(LangAS::Default);
   IntPtrType = HostTarget->getIntPtrType();
   WCharType = HostTarget->getWCharType();
   WIntType = HostTarget->getWIntType();
@@ -153,7 +153,7 @@ NVPTXTargetInfo::NVPTXTargetInfo(const llvm::Triple &Triple,
 }
 
 ArrayRef<const char *> NVPTXTargetInfo::getGCCRegNames() const {
-  return llvm::makeArrayRef(GCCRegNames);
+  return llvm::ArrayRef(GCCRegNames);
 }
 
 bool NVPTXTargetInfo::hasFeature(StringRef Feature) const {
@@ -263,6 +263,6 @@ void NVPTXTargetInfo::getTargetDefines(const LangOptions &Opts,
 }
 
 ArrayRef<Builtin::Info> NVPTXTargetInfo::getTargetBuiltins() const {
-  return llvm::makeArrayRef(BuiltinInfo, clang::NVPTX::LastTSBuiltin -
-                                             Builtin::FirstTSBuiltin);
+  return llvm::ArrayRef(BuiltinInfo,
+                        clang::NVPTX::LastTSBuiltin - Builtin::FirstTSBuiltin);
 }

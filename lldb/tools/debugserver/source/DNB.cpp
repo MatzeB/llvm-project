@@ -599,6 +599,14 @@ size_t DNBGetAllInfos(std::vector<struct kinfo_proc> &proc_infos) {
   return proc_infos.size();
 }
 
+JSONGenerator::ObjectSP DNBGetDyldProcessState(nub_process_t pid) {
+  MachProcessSP procSP;
+  if (GetProcessSP(pid, procSP)) {
+    return procSP->GetDyldProcessState();
+  }
+  return {};
+}
+
 static size_t
 GetAllInfosMatchingName(const char *full_process_name,
                         std::vector<struct kinfo_proc> &matching_proc_infos) {
@@ -1433,12 +1441,11 @@ nub_bool_t DNBProcessSharedLibrariesUpdated(nub_process_t pid) {
   return false;
 }
 
-const char *DNBGetDeploymentInfo(nub_process_t pid, bool is_executable,
-                                 const struct load_command &lc,
-                                 uint64_t load_command_address,
-                                 uint32_t &major_version,
-                                 uint32_t &minor_version,
-                                 uint32_t &patch_version) {
+std::optional<std::string>
+DNBGetDeploymentInfo(nub_process_t pid, bool is_executable,
+                     const struct load_command &lc,
+                     uint64_t load_command_address, uint32_t &major_version,
+                     uint32_t &minor_version, uint32_t &patch_version) {
   MachProcessSP procSP;
   if (GetProcessSP(pid, procSP)) {
     // FIXME: This doesn't return the correct result when xctest (a

@@ -124,6 +124,7 @@ namespace clang {
     void VisitLinkageSpecDecl(LinkageSpecDecl *D);
     void VisitExportDecl(ExportDecl *D);
     void VisitFileScopeAsmDecl(FileScopeAsmDecl *D);
+    void VisitTopLevelStmtDecl(TopLevelStmtDecl *D);
     void VisitImportDecl(ImportDecl *D);
     void VisitAccessSpecDecl(AccessSpecDecl *D);
     void VisitFriendDecl(FriendDecl *D);
@@ -204,7 +205,7 @@ namespace clang {
       return Common->PartialSpecializations;
     }
     ArrayRef<Decl> getPartialSpecializations(FunctionTemplateDecl::Common *) {
-      return None;
+      return std::nullopt;
     }
 
     template<typename DeclTy>
@@ -222,7 +223,7 @@ namespace clang {
 
       ArrayRef<DeclID> LazySpecializations;
       if (auto *LS = Common->LazySpecializations)
-        LazySpecializations = llvm::makeArrayRef(LS + 1, LS[0]);
+        LazySpecializations = llvm::ArrayRef(LS + 1, LS[0]);
 
       // Add a slot to the record for the number of specializations.
       unsigned I = Record.size();
@@ -906,7 +907,7 @@ void ASTDeclWriter::VisitObjCImplementationDecl(ObjCImplementationDecl *D) {
   Record.push_back(D->NumIvarInitializers);
   if (D->NumIvarInitializers)
     Record.AddCXXCtorInitializers(
-        llvm::makeArrayRef(D->init_begin(), D->init_end()));
+        llvm::ArrayRef(D->init_begin(), D->init_end()));
   Code = serialization::DECL_OBJC_IMPLEMENTATION;
 }
 
@@ -1036,8 +1037,7 @@ void ASTDeclWriter::VisitVarDecl(VarDecl *D) {
   if (D->getStorageDuration() == SD_Static) {
     bool ModulesCodegen = false;
     if (Writer.WritingModule &&
-        !D->getDescribedVarTemplate() && !D->getMemberSpecializationInfo() &&
-        !isa<VarTemplateSpecializationDecl>(D)) {
+        !D->getDescribedVarTemplate() && !D->getMemberSpecializationInfo()) {
       // When building a C++20 module interface unit or a partition unit, a
       // strong definition in the module interface is provided by the
       // compilation of that unit, not by its users. (Inline variables are still
@@ -1171,6 +1171,12 @@ void ASTDeclWriter::VisitFileScopeAsmDecl(FileScopeAsmDecl *D) {
   Code = serialization::DECL_FILE_SCOPE_ASM;
 }
 
+void ASTDeclWriter::VisitTopLevelStmtDecl(TopLevelStmtDecl *D) {
+  VisitDecl(D);
+  Record.AddStmt(D->getStmt());
+  Code = serialization::DECL_TOP_LEVEL_STMT_DECL;
+}
+
 void ASTDeclWriter::VisitEmptyDecl(EmptyDecl *D) {
   VisitDecl(D);
   Code = serialization::DECL_EMPTY;
@@ -1252,6 +1258,7 @@ void ASTDeclWriter::VisitNamespaceDecl(NamespaceDecl *D) {
   VisitRedeclarable(D);
   VisitNamedDecl(D);
   Record.push_back(D->isInline());
+  Record.push_back(D->isNested());
   Record.AddSourceLocation(D->getBeginLoc());
   Record.AddSourceLocation(D->getRBraceLoc());
 
@@ -2417,7 +2424,7 @@ static bool isRequiredDecl(const Decl *D, ASTContext &Context,
 
   // File scoped assembly or obj-c or OMP declare target implementation must be
   // seen.
-  if (isa<FileScopeAsmDecl>(D) || isa<ObjCImplDecl>(D))
+  if (isa<FileScopeAsmDecl, TopLevelStmtDecl, ObjCImplDecl>(D))
     return true;
 
   if (WritingModule && isPartOfPerModuleInitializer(D)) {
@@ -2457,11 +2464,12 @@ void ASTWriter::WriteDecl(ASTContext &Context, Decl *D) {
   SourceLocation Loc = D->getLocation();
   unsigned Index = ID - FirstDeclID;
   if (DeclOffsets.size() == Index)
-    DeclOffsets.emplace_back(Loc, Offset, DeclTypesBlockStartOffset);
+    DeclOffsets.emplace_back(getAdjustedLocation(Loc), Offset,
+                             DeclTypesBlockStartOffset);
   else if (DeclOffsets.size() < Index) {
     // FIXME: Can/should this happen?
     DeclOffsets.resize(Index+1);
-    DeclOffsets[Index].setLocation(Loc);
+    DeclOffsets[Index].setLocation(getAdjustedLocation(Loc));
     DeclOffsets[Index].setBitOffset(Offset, DeclTypesBlockStartOffset);
   } else {
     llvm_unreachable("declarations should be emitted in ID order");
@@ -2514,8 +2522,7 @@ void ASTRecordWriter::AddFunctionDefinition(const FunctionDecl *FD) {
   if (auto *CD = dyn_cast<CXXConstructorDecl>(FD)) {
     Record->push_back(CD->getNumCtorInitializers());
     if (CD->getNumCtorInitializers())
-      AddCXXCtorInitializers(
-          llvm::makeArrayRef(CD->init_begin(), CD->init_end()));
+      AddCXXCtorInitializers(llvm::ArrayRef(CD->init_begin(), CD->init_end()));
   }
   AddStmt(FD->getBody());
 }

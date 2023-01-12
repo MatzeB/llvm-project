@@ -32,6 +32,7 @@
 #include "lldb/Utility/Args.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 using namespace lldb;
@@ -99,9 +100,9 @@ public:
     }
 
     // Options.
-    llvm::Optional<lldb::addr_t> address;
-    llvm::Optional<ConstString> reg;
-    llvm::Optional<int64_t> offset;
+    std::optional<lldb::addr_t> address;
+    std::optional<ConstString> reg;
+    std::optional<int64_t> offset;
   };
 
   CommandObjectFrameDiagnose(CommandInterpreter &interpreter)
@@ -144,10 +145,10 @@ protected:
             "`frame diagnose --address` is incompatible with other arguments.");
         return false;
       }
-      valobj_sp = frame_sp->GuessValueForAddress(m_options.address.value());
+      valobj_sp = frame_sp->GuessValueForAddress(*m_options.address);
     } else if (m_options.reg) {
       valobj_sp = frame_sp->GuessValueForRegisterAndOffset(
-          m_options.reg.value(), m_options.offset.value_or(0));
+          *m_options.reg, m_options.offset.value_or(0));
     } else {
       StopInfoSP stop_info_sp = thread->GetStopInfo();
       if (!stop_info_sp) {
@@ -256,7 +257,7 @@ public:
       return llvm::makeArrayRef(g_frame_select_options);
     }
 
-    llvm::Optional<int32_t> relative_frame_offset;
+    std::optional<int32_t> relative_frame_offset;
   };
 
   CommandObjectFrameSelect(CommandInterpreter &interpreter)

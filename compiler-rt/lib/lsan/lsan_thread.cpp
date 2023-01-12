@@ -82,9 +82,14 @@ void LockThreadRegistry() { thread_registry->Lock(); }
 
 void UnlockThreadRegistry() { thread_registry->Unlock(); }
 
-ThreadRegistry *GetThreadRegistryLocked() {
+ThreadRegistry *GetLsanThreadRegistryLocked() {
   thread_registry->CheckLocked();
   return thread_registry;
+}
+
+void RunCallbackForEachThreadLocked(
+    __sanitizer::ThreadRegistry::ThreadCallback cb, void *arg) {
+  GetLsanThreadRegistryLocked()->RunCallbackForEachThreadLocked(cb, arg);
 }
 
 }  // namespace __lsan

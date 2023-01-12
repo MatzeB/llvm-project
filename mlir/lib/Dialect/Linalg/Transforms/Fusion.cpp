@@ -150,22 +150,22 @@ static LinalgOp fuse(OpBuilder &b, LinalgOp producer,
   // fully dynamic at construction time.
   SmallVector<Type, 4> resultTypes;
   resultTypes.reserve(producer->getNumResults());
-  for (OpOperand *operand : producer.getOutputOperands()) {
+  for (OpOperand *operand : producer.getDpsInitOperands()) {
     auto tensorType = operand->get().getType().dyn_cast<RankedTensorType>();
     if (!tensorType)
       continue;
     unsigned rank = tensorType.getRank();
     SmallVector<int64_t, 4> staticOffsetsVector(
-        rank, ShapedType::kDynamicStrideOrOffset);
-    SmallVector<int64_t, 4> staticSizesVector(rank, ShapedType::kDynamicSize);
+        rank, ShapedType::kDynamic);
+    SmallVector<int64_t, 4> staticSizesVector(rank, ShapedType::kDynamic);
     SmallVector<int64_t, 4> staticStridesVector(
-        rank, ShapedType::kDynamicStrideOrOffset);
+        rank, ShapedType::kDynamic);
     resultTypes.push_back(tensor::ExtractSliceOp::inferResultType(
         tensorType, staticOffsetsVector, staticSizesVector,
         staticStridesVector));
   }
 
-  Operation *clonedOp = producer.clone(b, loc, resultTypes, clonedShapes);
+  Operation *clonedOp = clone(b, producer, resultTypes, clonedShapes);
 
   // Shift all IndexOp results by the tile offset.
   SmallVector<OpFoldResult> allIvs = llvm::to_vector(
@@ -211,7 +211,7 @@ static bool isStructurallyFusableProducer(LinalgOp producer, Value consumedView,
          "expected linalg op with buffer semantics");
   assert(consumer.hasBufferSemantics() &&
          "expected linalg op with buffer semantics");
-  if (producer.getNumOutputs() != 1) {
+  if (producer.getNumDpsInits() != 1) {
     LLVM_DEBUG(llvm::dbgs() << "\nNot structurally fusable (multi-output)");
     return false;
   }
@@ -443,7 +443,7 @@ mlir::linalg::fuseProducerOfTensor(OpBuilder &b, OpResult producerOpResult,
   b.setInsertionPoint(consumerOp);
   LLVM_DEBUG(llvm::dbgs() << "Fuse into consumer: " << *consumerOp << "\n");
   OpOperand *opOperand =
-      producerOp.getOutputOperand(producerOpResult.getResultNumber());
+      producerOp.getDpsInitOperand(producerOpResult.getResultNumber());
   LinalgOp fusedProducer =
       fuse(b, producerOp, producerOp.getMatchingIndexingMap(opOperand),
            consumerOpOperand);

@@ -36,6 +36,7 @@
 #include "llvm/ADT/ScopeExit.h"
 
 #include <bitset>
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -151,8 +152,8 @@ public:
 
   Options *GetOptions() override { return &m_all_options; }
 
-  llvm::Optional<std::string> GetRepeatCommand(Args &current_command_args,
-                                               uint32_t index) override {
+  std::optional<std::string> GetRepeatCommand(Args &current_command_args,
+                                              uint32_t index) override {
     // No repeat for "process launch"...
     return std::string("");
   }
@@ -1537,8 +1538,9 @@ protected:
       StructuredData::DictionarySP crash_info_sp = *expected_crash_info;
 
       if (crash_info_sp) {
+        strm.EOL();
         strm.PutCString("Extended Crash Information:\n");
-        crash_info_sp->Dump(strm);
+        crash_info_sp->GetDescription(strm);
       }
     }
 

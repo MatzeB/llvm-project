@@ -17,11 +17,11 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
 #include <cstring>
+#include <optional>
 #include <utility>
 
 using namespace clang::ast_matchers;
@@ -672,7 +672,7 @@ void LoopConvertCheck::doConversion(
       CharSourceRange::getTokenRange(ParenRange), Range));
 
   if (Descriptor.NeedsReverseCall && !getReverseHeader().empty()) {
-    if (Optional<FixItHint> Insertion = Inserter.createIncludeInsertion(
+    if (std::optional<FixItHint> Insertion = Inserter.createIncludeInsertion(
             Context->getSourceManager().getFileID(Loop->getBeginLoc()),
             getReverseHeader()))
       FixIts.push_back(*Insertion);

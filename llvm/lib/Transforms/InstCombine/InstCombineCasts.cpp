@@ -14,9 +14,12 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
+#include <optional>
+
 using namespace llvm;
 using namespace PatternMatch;
 
@@ -163,6 +166,10 @@ Instruction *InstCombinerImpl::PromoteCastOfAllocation(BitCastInst &CI,
   New->setAlignment(AI.getAlign());
   New->takeName(&AI);
   New->setUsedWithInAlloca(AI.isUsedWithInAlloca());
+  New->setMetadata(LLVMContext::MD_DIAssignID,
+                   AI.getMetadata(LLVMContext::MD_DIAssignID));
+
+  replaceAllDbgUsesWith(AI, *New, *New, DT);
 
   // If the allocation has multiple real uses, insert a cast and change all
   // things that used it to use the new cast.  This will also hack on CI, but it
@@ -974,7 +981,7 @@ Instruction *InstCombinerImpl::visitTrunc(TruncInst &Trunc) {
         Trunc.getFunction()->hasFnAttribute(Attribute::VScaleRange)) {
       Attribute Attr =
           Trunc.getFunction()->getFnAttribute(Attribute::VScaleRange);
-      if (Optional<unsigned> MaxVScale = Attr.getVScaleRangeMax()) {
+      if (std::optional<unsigned> MaxVScale = Attr.getVScaleRangeMax()) {
         if (Log2_32(*MaxVScale) < DestWidth) {
           Value *VScale = Builder.CreateVScale(ConstantInt::get(DestTy, 1));
           return replaceInstUsesWith(Trunc, VScale);
@@ -986,7 +993,8 @@ Instruction *InstCombinerImpl::visitTrunc(TruncInst &Trunc) {
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::transformZExtICmp(ICmpInst *Cmp, ZExtInst &Zext) {
+Instruction *InstCombinerImpl::transformZExtICmp(ICmpInst *Cmp,
+                                                 ZExtInst &Zext) {
   // If we are just checking for a icmp eq of a single bit and zext'ing it
   // to an integer, then shift the bit to the appropriate place and then
   // cast to integer to avoid the comparison.
@@ -1016,13 +1024,18 @@ Instruction *InstCombinerImpl::transformZExtICmp(ICmpInst *Cmp, ZExtInst &Zext) 
     // zext (X == 0) to i32 --> (X>>1)^1 iff X has only the 2nd bit set.
     // zext (X != 0) to i32 --> X        iff X has only the low bit set.
     // zext (X != 0) to i32 --> X>>1     iff X has only the 2nd bit set.
-    if (Op1CV->isZero() && Cmp->isEquality()) {
+    if (Op1CV->isZero() && Cmp->isEquality() &&
+        (Cmp->getOperand(0)->getType() == Zext.getType() ||
+         Cmp->getPredicate() == ICmpInst::ICMP_NE)) {
       // If Op1C some other power of two, convert:
       KnownBits Known = computeKnownBits(Cmp->getOperand(0), 0, &Zext);
 
+      // Exactly 1 possible 1? But not the high-bit because that is
+      // canonicalized to this form.
       APInt KnownZeroMask(~Known.Zero);
-      if (KnownZeroMask.isPowerOf2()) { // Exactly 1 possible 1?
-        bool isNE = Cmp->getPredicate() == ICmpInst::ICMP_NE;
+      if (KnownZeroMask.isPowerOf2() &&
+          (Zext.getType()->getScalarSizeInBits() !=
+           KnownZeroMask.logBase2() + 1)) {
         uint32_t ShAmt = KnownZeroMask.logBase2();
         Value *In = Cmp->getOperand(0);
         if (ShAmt) {
@@ -1032,10 +1045,9 @@ Instruction *InstCombinerImpl::transformZExtICmp(ICmpInst *Cmp, ZExtInst &Zext) 
                                   In->getName() + ".lobit");
         }
 
-        if (!isNE) { // Toggle the low bit.
-          Constant *One = ConstantInt::get(In->getType(), 1);
-          In = Builder.CreateXor(In, One);
-        }
+        // Toggle the low bit for "X == 0".
+        if (Cmp->getPredicate() == ICmpInst::ICMP_EQ)
+          In = Builder.CreateXor(In, ConstantInt::get(In->getType(), 1));
 
         if (Zext.getType() == In->getType())
           return replaceInstUsesWith(Zext, In);
@@ -1328,11 +1340,22 @@ Instruction *InstCombinerImpl::visitZExt(ZExtInst &CI) {
     return BinaryOperator::CreateXor(Builder.CreateAnd(X, ZC), ZC);
   }
 
+  // If we are truncating, masking, and then zexting back to the original type,
+  // that's just a mask. This is not handled by canEvaluateZextd if the
+  // intermediate values have extra uses. This could be generalized further for
+  // a non-constant mask operand.
+  // zext (and (trunc X), C) --> and X, (zext C)
+  if (match(Src, m_And(m_Trunc(m_Value(X)), m_Constant(C))) &&
+      X->getType() == DestTy) {
+    Constant *ZextC = ConstantExpr::getZExt(C, DestTy);
+    return BinaryOperator::CreateAnd(X, ZextC);
+  }
+
   if (match(Src, m_VScale(DL))) {
     if (CI.getFunction() &&
         CI.getFunction()->hasFnAttribute(Attribute::VScaleRange)) {
       Attribute Attr = CI.getFunction()->getFnAttribute(Attribute::VScaleRange);
-      if (Optional<unsigned> MaxVScale = Attr.getVScaleRangeMax()) {
+      if (std::optional<unsigned> MaxVScale = Attr.getVScaleRangeMax()) {
         unsigned TypeWidth = Src->getType()->getScalarSizeInBits();
         if (Log2_32(*MaxVScale) < TypeWidth) {
           Value *VScale = Builder.CreateVScale(ConstantInt::get(DestTy, 1));
@@ -1606,7 +1629,7 @@ Instruction *InstCombinerImpl::visitSExt(SExtInst &CI) {
     if (CI.getFunction() &&
         CI.getFunction()->hasFnAttribute(Attribute::VScaleRange)) {
       Attribute Attr = CI.getFunction()->getFnAttribute(Attribute::VScaleRange);
-      if (Optional<unsigned> MaxVScale = Attr.getVScaleRangeMax()) {
+      if (std::optional<unsigned> MaxVScale = Attr.getVScaleRangeMax()) {
         if (Log2_32(*MaxVScale) < (SrcBitSize - 1)) {
           Value *VScale = Builder.CreateVScale(ConstantInt::get(DestTy, 1));
           return replaceInstUsesWith(CI, VScale);

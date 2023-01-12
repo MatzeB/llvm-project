@@ -98,7 +98,8 @@ def FSEL_S : FP_SEL<0b00001101000000, "fsel", FPR32>;
 def FMOV_S     : FP_MOV<0b0000000100010100100101, "fmov.s", FPR32, FPR32>;
 def MOVGR2FR_W : FP_MOV<0b0000000100010100101001, "movgr2fr.w", FPR32, GPR>;
 def MOVFR2GR_S : FP_MOV<0b0000000100010100101101, "movfr2gr.s", GPR, FPR32>;
-def MOVGR2FCSR : FP_MOV<0b0000000100010100110000, "movgr2fcsr", FCSR, GPR>;
+def MOVGR2FCSR : FPFmtMOV<0b0000000100010100110000, (outs), (ins FCSR:$dst, GPR:$src),
+    "movgr2fcsr", "$dst, $src">;
 def MOVFCSR2GR : FP_MOV<0b0000000100010100110010, "movfcsr2gr", GPR, FCSR>;
 def MOVFR2CF_S : FP_MOV<0b0000000100010100110100, "movfr2cf", CFR, FPR32>;
 def MOVCF2FR_S : FP_MOV<0b0000000100010100110101, "movcf2fr", FPR32, CFR>;
@@ -121,6 +122,13 @@ def FLDLE_S : FP_LOAD_3R<0b00111000011101010, "fldle.s", FPR32>;
 def FSTGT_S : FP_STORE_3R<0b00111000011101100, "fstgt.s", FPR32>;
 def FSTLE_S : FP_STORE_3R<0b00111000011101110, "fstle.s", FPR32>;
 
+// Pseudo instructions for spill/reload CFRs.
+let hasSideEffects = 0, mayLoad = 0, mayStore = 1 in
+def PseudoST_CFR : Pseudo<(outs),
+                          (ins CFR:$ccd, GPR:$rj, grlenimm:$imm)>;
+let hasSideEffects = 0, mayLoad = 1, mayStore = 0 in
+def PseudoLD_CFR : Pseudo<(outs CFR:$ccd),
+                          (ins GPR:$rj, grlenimm:$imm)>;
 } // Predicates = [HasBasicF]
 
 //===----------------------------------------------------------------------===//
@@ -159,7 +167,7 @@ def : Pat<(fcanonicalize FPR32:$fj), (FMAX_S $fj, $fj)>;
 
 class PatFPSetcc<CondCode cc, LAInst CmpInst, RegisterClass RegTy>
     : Pat<(any_fsetcc RegTy:$fj, RegTy:$fk, cc),
-          (MOVCF2GR (CmpInst RegTy:$fj, RegTy:$fk))>;
+          (CmpInst RegTy:$fj, RegTy:$fk)>;
 // SETOGT/SETOGE/SETUGT/SETUGE/SETGE/SETNE/SETGT will expand into
 // SETOLT/SETOLE/SETULT/SETULE/SETLE/SETEQ/SETLT.
 def : PatFPSetcc<SETOEQ, FCMP_CEQ_S,  FPR32>;
@@ -200,7 +208,7 @@ defm : PatFPBrcond<SETLT,  FCMP_CLT_S, FPR32>;
 
 class PatStrictFsetccs<CondCode cc, LAInst CmpInst, RegisterClass RegTy>
     : Pat<(strict_fsetccs RegTy:$fj, RegTy:$fk, cc),
-          (MOVCF2GR (CmpInst RegTy:$fj, RegTy:$fk))>;
+          (CmpInst RegTy:$fj, RegTy:$fk)>;
 def : PatStrictFsetccs<SETOEQ, FCMP_SEQ_S,  FPR32>;
 def : PatStrictFsetccs<SETOLT, FCMP_SLT_S,  FPR32>;
 def : PatStrictFsetccs<SETOLE, FCMP_SLE_S,  FPR32>;
@@ -215,8 +223,8 @@ def : PatStrictFsetccs<SETLT,  FCMP_SLT_S,  FPR32>;
 
 /// Select
 
-def : Pat<(select GPR:$cc, FPR32:$fk, FPR32:$fj),
-          (FSEL_S FPR32:$fj, FPR32:$fk, (MOVGR2CF GPR:$cc))>;
+def : Pat<(select CFR:$cc, FPR32:$fk, FPR32:$fj),
+          (FSEL_S FPR32:$fj, FPR32:$fk, CFR:$cc)>;
 
 /// Selectcc
 
@@ -284,7 +292,11 @@ def : Pat<(loongarch_movgr2fr_w_la64 GPR:$src), (MOVGR2FR_W GPR:$src)>;
 def : Pat<(loongarch_movfr2gr_s_la64 FPR32:$src),
           (MOVFR2GR_S FPR32:$src)>;
 // int -> f32
-def : Pat<(f32 (sint_to_fp GPR:$src)), (FFINT_S_W (MOVGR2FR_W GPR:$src))>;
+def : Pat<(f32 (sint_to_fp (i64 (sexti32 (i64 GPR:$src))))),
+          (FFINT_S_W (MOVGR2FR_W GPR:$src))>;
+// uint -> f32
+def : Pat<(f32 (uint_to_fp (i64 (sexti32 (i64 GPR:$src))))),
+          (FFINT_S_W (MOVGR2FR_W GPR:$src))>;
 } // Predicates = [HasBasicF, IsLA64]
 
 // FP Rounding

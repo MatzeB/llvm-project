@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s -split-input-file -verify-diagnostics
 
-// expected-error @below {{expects the entry block to have one argument of type implementing TransformTypeInterface}}
+// expected-error @below {{expects the entry block to have one argument of type implementing TransformHandleTypeInterface}}
 transform.sequence failures(propagate) {
 }
 
@@ -31,6 +31,17 @@ transform.sequence failures(propagate) {
 ^bb0(%arg0: !pdl.operation):
   // expected-note @below {{terminator}}
   transform.yield
+}
+
+// -----
+
+transform.sequence failures(propagate) {
+^bb0(%arg0: !transform.any_op):
+  // expected-error @below {{expects the type of the block argument to match the type of the operand}}
+  transform.sequence %arg0: !transform.any_op failures(propagate) {
+  ^bb1(%arg1: !pdl.operation):
+    transform.yield
+  }
 }
 
 // -----
@@ -179,7 +190,7 @@ transform.sequence failures(propagate) {
 
 // -----
 
-// expected-error @below {{expects the entry block to have one argument of type implementing TransformTypeInterface}}
+// expected-error @below {{expects the entry block to have one argument of type implementing TransformHandleTypeInterface}}
 transform.alternatives {
 ^bb0:
   transform.yield

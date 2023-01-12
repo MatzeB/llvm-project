@@ -33,7 +33,7 @@ static std::pair<Type *, Align> getArgumentTypeAlign(const Argument &Arg,
   if (!ArgAlign)
     ArgAlign = DL.getABITypeAlign(Ty);
 
-  return std::make_pair(Ty, *ArgAlign);
+  return std::pair(Ty, *ArgAlign);
 }
 
 namespace llvm {
@@ -500,16 +500,16 @@ void MetadataStreamerMsgPackV3::verify(StringRef HSAMetadataString) const {
   }
 }
 
-Optional<StringRef>
+std::optional<StringRef>
 MetadataStreamerMsgPackV3::getAccessQualifier(StringRef AccQual) const {
-  return StringSwitch<Optional<StringRef>>(AccQual)
+  return StringSwitch<std::optional<StringRef>>(AccQual)
       .Case("read_only", StringRef("read_only"))
       .Case("write_only", StringRef("write_only"))
       .Case("read_write", StringRef("read_write"))
-      .Default(None);
+      .Default(std::nullopt);
 }
 
-Optional<StringRef> MetadataStreamerMsgPackV3::getAddressSpaceQualifier(
+std::optional<StringRef> MetadataStreamerMsgPackV3::getAddressSpaceQualifier(
     unsigned AddressSpace) const {
   switch (AddressSpace) {
   case AMDGPUAS::PRIVATE_ADDRESS:
@@ -525,7 +525,7 @@ Optional<StringRef> MetadataStreamerMsgPackV3::getAddressSpaceQualifier(
   case AMDGPUAS::REGION_ADDRESS:
     return StringRef("region");
   default:
-    return None;
+    return std::nullopt;
   }
 }
 
@@ -877,6 +877,9 @@ msgpack::MapDocNode MetadataStreamerMsgPackV3::getHSAKernelProps(
   if (AMDGPU::getAmdhsaCodeObjectVersion() >= 5)
     Kern[".uses_dynamic_stack"] =
         Kern.getDocument()->getNode(ProgramInfo.DynamicCallStack);
+  if (AMDGPU::getAmdhsaCodeObjectVersion() >= 5 && STM.supportsWGP())
+    Kern[".workgroup_processor_mode"] =
+        Kern.getDocument()->getNode(ProgramInfo.WgpMode);
 
   // FIXME: The metadata treats the minimum as 16?
   Kern[".kernarg_segment_align"] =
@@ -1076,6 +1079,15 @@ void MetadataStreamerMsgPackV5::emitHiddenKernelArgs(
   if (MFI.hasQueuePtr())
     emitKernelArg(DL, Int8PtrTy, Align(8), "hidden_queue_ptr", Offset, Args);
 }
+
+void MetadataStreamerMsgPackV5::emitKernelAttrs(const Function &Func,
+                                                msgpack::MapDocNode Kern) {
+  MetadataStreamerMsgPackV3::emitKernelAttrs(Func, Kern);
+
+  if (Func.getFnAttribute("uniform-work-group-size").getValueAsBool())
+    Kern[".uniform_work_group_size"] = Kern.getDocument()->getNode(1);
+}
+
 
 } // end namespace HSAMD
 } // end namespace AMDGPU

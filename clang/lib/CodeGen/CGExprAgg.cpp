@@ -201,7 +201,16 @@ public:
       return EmitFinalDestCopy(E->getType(), LV);
     }
 
-    CGF.EmitPseudoObjectRValue(E, EnsureSlot(E->getType()));
+    AggValueSlot Slot = EnsureSlot(E->getType());
+    bool NeedsDestruction =
+        !Slot.isExternallyDestructed() &&
+        E->getType().isDestructedType() == QualType::DK_nontrivial_c_struct;
+    if (NeedsDestruction)
+      Slot.setExternallyDestructed();
+    CGF.EmitPseudoObjectRValue(E, Slot);
+    if (NeedsDestruction)
+      CGF.pushDestroy(QualType::DK_nontrivial_c_struct, Slot.getAddress(),
+                      E->getType());
   }
 
   void VisitVAArgExpr(VAArgExpr *E);
@@ -1685,7 +1694,7 @@ void AggExprEmitter::VisitInitListExpr(InitListExpr *E) {
       // Make sure that it's really an empty and not a failure of
       // semantic analysis.
       for (const auto *Field : record->fields())
-        assert(Field->isUnnamedBitfield() && "Only unnamed bitfields allowed");
+        assert((Field->isUnnamedBitfield() || Field->isAnonymousStructOrUnion()) && "Only unnamed bitfields or ananymous class allowed");
 #endif
       return;
     }
@@ -1926,7 +1935,7 @@ static CharUnits GetNumNonZeroBytesInInit(const Expr *E, CodeGenFunction &CGF) {
         // Reference values are always non-null and have the width of a pointer.
         if (Field->getType()->isReferenceType())
           NumNonZeroBytes += CGF.getContext().toCharUnitsFromBits(
-              CGF.getTarget().getPointerWidth(0));
+              CGF.getTarget().getPointerWidth(LangAS::Default));
         else
           NumNonZeroBytes += GetNumNonZeroBytesInInit(E, CGF);
       }

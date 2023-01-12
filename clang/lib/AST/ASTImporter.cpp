@@ -56,7 +56,6 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -68,6 +67,7 @@
 #include <cassert>
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -200,8 +200,8 @@ namespace clang {
     // cast the return value to `T`.
     template <typename T>
     auto import(T *From)
-        -> std::conditional_t<std::is_base_of<Type, T>::value,
-                              Expected<const T *>, Expected<T *>> {
+        -> std::conditional_t<std::is_base_of_v<Type, T>, Expected<const T *>,
+                              Expected<T *>> {
       auto ToOrErr = Importer.Import(From);
       if (!ToOrErr)
         return ToOrErr.takeError();
@@ -223,7 +223,7 @@ namespace clang {
     template<typename T>
     Expected<Optional<T>> import(Optional<T> From) {
       if (!From)
-        return Optional<T>();
+        return std::nullopt;
       return import(*From);
     }
 
@@ -895,7 +895,7 @@ ASTNodeImporter::import(const TemplateArgument &From) {
       return std::move(Err);
 
     return TemplateArgument(
-        llvm::makeArrayRef(ToPack).copy(Importer.getToContext()));
+        llvm::ArrayRef(ToPack).copy(Importer.getToContext()));
   }
   }
 
@@ -2412,10 +2412,10 @@ ExpectedDecl ASTNodeImporter::VisitNamespaceDecl(NamespaceDecl *D) {
   // Create the "to" namespace, if needed.
   NamespaceDecl *ToNamespace = MergeWithNamespace;
   if (!ToNamespace) {
-    if (GetImportedOrCreateDecl(
-            ToNamespace, D, Importer.getToContext(), DC, D->isInline(),
-            *BeginLocOrErr, Loc, Name.getAsIdentifierInfo(),
-            /*PrevDecl=*/nullptr))
+    if (GetImportedOrCreateDecl(ToNamespace, D, Importer.getToContext(), DC,
+                                D->isInline(), *BeginLocOrErr, Loc,
+                                Name.getAsIdentifierInfo(),
+                                /*PrevDecl=*/nullptr, D->isNested()))
       return ToNamespace;
     ToNamespace->setRBraceLoc(*RBraceLocOrErr);
     ToNamespace->setLexicalDeclContext(LexicalDC);
@@ -3174,10 +3174,10 @@ Error ASTNodeImporter::ImportTemplateInformation(
     // Import TemplateArgumentListInfo.
     TemplateArgumentListInfo ToTAInfo;
     if (Error Err = ImportTemplateArgumentListInfo(
-        FromInfo->getLAngleLoc(), FromInfo->getRAngleLoc(),
-        llvm::makeArrayRef(
-            FromInfo->getTemplateArgs(), FromInfo->getNumTemplateArgs()),
-        ToTAInfo))
+            FromInfo->getLAngleLoc(), FromInfo->getRAngleLoc(),
+            llvm::ArrayRef(FromInfo->getTemplateArgs(),
+                           FromInfo->getNumTemplateArgs()),
+            ToTAInfo))
       return Err;
 
     ToFD->setDependentTemplateSpecialization(Importer.getToContext(),
@@ -3981,7 +3981,7 @@ static FriendCountAndPosition getFriendCountAndPosition(
     const FriendDecl *FD,
     llvm::function_ref<T(const FriendDecl *)> GetCanTypeOrDecl) {
   unsigned int FriendCount = 0;
-  llvm::Optional<unsigned int> FriendPosition;
+  std::optional<unsigned int> FriendPosition;
   const auto *RD = cast<CXXRecordDecl>(FD->getLexicalDeclContext());
 
   T TypeOrDecl = GetCanTypeOrDecl(FD);
@@ -5916,10 +5916,10 @@ ExpectedDecl ASTNodeImporter::VisitClassTemplateSpecializationDecl(
     CanonInjType = CanonInjType.getCanonicalType();
 
     if (GetImportedOrCreateDecl<ClassTemplatePartialSpecializationDecl>(
-            D2, D, Importer.getToContext(), D->getTagKind(), DC,
-            *BeginLocOrErr, *IdLocOrErr, ToTPList, ClassTemplate,
-            llvm::makeArrayRef(TemplateArgs.data(), TemplateArgs.size()),
-            ToTAInfo, CanonInjType,
+            D2, D, Importer.getToContext(), D->getTagKind(), DC, *BeginLocOrErr,
+            *IdLocOrErr, ToTPList, ClassTemplate,
+            llvm::ArrayRef(TemplateArgs.data(), TemplateArgs.size()), ToTAInfo,
+            CanonInjType,
             cast_or_null<ClassTemplatePartialSpecializationDecl>(PrevDecl)))
       return D2;
 
@@ -7012,14 +7012,14 @@ ASTNodeImporter::VisitGenericSelectionExpr(GenericSelectionExpr *E) {
   const ASTContext &ToCtx = Importer.getToContext();
   if (E->isResultDependent()) {
     return GenericSelectionExpr::Create(
-        ToCtx, ToGenericLoc, ToControllingExpr,
-        llvm::makeArrayRef(ToAssocTypes), llvm::makeArrayRef(ToAssocExprs),
-        ToDefaultLoc, ToRParenLoc, E->containsUnexpandedParameterPack());
+        ToCtx, ToGenericLoc, ToControllingExpr, llvm::ArrayRef(ToAssocTypes),
+        llvm::ArrayRef(ToAssocExprs), ToDefaultLoc, ToRParenLoc,
+        E->containsUnexpandedParameterPack());
   }
 
   return GenericSelectionExpr::Create(
-      ToCtx, ToGenericLoc, ToControllingExpr, llvm::makeArrayRef(ToAssocTypes),
-      llvm::makeArrayRef(ToAssocExprs), ToDefaultLoc, ToRParenLoc,
+      ToCtx, ToGenericLoc, ToControllingExpr, llvm::ArrayRef(ToAssocTypes),
+      llvm::ArrayRef(ToAssocExprs), ToDefaultLoc, ToRParenLoc,
       E->containsUnexpandedParameterPack(), E->getResultIndex());
 }
 
@@ -7687,9 +7687,16 @@ ExpectedStmt ASTNodeImporter::VisitCXXDefaultArgExpr(CXXDefaultArgExpr *E) {
     if (Error Err = ImportDefaultArgOfParmVarDecl(*FromParam, ToParam))
       return std::move(Err);
   }
-
+  Expr *RewrittenInit = nullptr;
+  if (E->hasRewrittenInit()) {
+    ExpectedExpr ExprOrErr = import(E->getRewrittenExpr());
+    if (!ExprOrErr)
+      return ExprOrErr.takeError();
+    RewrittenInit = ExprOrErr.get();
+  }
   return CXXDefaultArgExpr::Create(Importer.getToContext(), *ToUsedLocOrErr,
-                                   *ToParamOrErr, *UsedContextOrErr);
+                                   *ToParamOrErr, RewrittenInit,
+                                   *UsedContextOrErr);
 }
 
 ExpectedStmt
@@ -8104,7 +8111,7 @@ ExpectedStmt ASTNodeImporter::VisitCXXUnresolvedConstructExpr(
 
   return CXXUnresolvedConstructExpr::Create(
       Importer.getToContext(), ToType, ToTypeSourceInfo, ToLParenLoc,
-      llvm::makeArrayRef(ToArgs), ToRParenLoc);
+      llvm::ArrayRef(ToArgs), ToRParenLoc);
 }
 
 ExpectedStmt
@@ -8381,8 +8388,16 @@ ExpectedStmt ASTNodeImporter::VisitCXXDefaultInitExpr(CXXDefaultInitExpr *E) {
     ToField->setInClassInitializer(*ToInClassInitializerOrErr);
   }
 
+  Expr *RewrittenInit = nullptr;
+  if (E->hasRewrittenInit()) {
+    ExpectedExpr ExprOrErr = import(E->getRewrittenExpr());
+    if (!ExprOrErr)
+      return ExprOrErr.takeError();
+    RewrittenInit = ExprOrErr.get();
+  }
+
   return CXXDefaultInitExpr::Create(Importer.getToContext(), *ToBeginLocOrErr,
-                                    ToField, *UsedContextOrErr);
+                                    ToField, *UsedContextOrErr, RewrittenInit);
 }
 
 ExpectedStmt ASTNodeImporter::VisitCXXNamedCastExpr(CXXNamedCastExpr *E) {
@@ -8544,7 +8559,7 @@ Optional<unsigned> ASTImporter::getFieldIndex(Decl *F) {
 
   auto *Owner = dyn_cast<RecordDecl>(F->getDeclContext());
   if (!Owner)
-    return None;
+    return std::nullopt;
 
   unsigned Index = 0;
   for (const auto *D : Owner->decls()) {
@@ -8557,7 +8572,7 @@ Optional<unsigned> ASTImporter::getFieldIndex(Decl *F) {
 
   llvm_unreachable("Field was not found in its parent context.");
 
-  return None;
+  return std::nullopt;
 }
 
 ASTImporter::FoundDeclsTy
@@ -8668,6 +8683,7 @@ Expected<TypeSourceInfo *> ASTImporter::Import(TypeSourceInfo *FromTSI) {
   return ToContext.getTrivialTypeSourceInfo(*TOrErr, *BeginLocOrErr);
 }
 
+namespace {
 // To use this object, it should be created before the new attribute is created,
 // and destructed after it is created. The construction already performs the
 // import of the data.
@@ -8798,6 +8814,7 @@ public:
     return ToAttr;
   }
 };
+} // namespace
 
 Expected<Attr *> ASTImporter::Import(const Attr *FromAttr) {
   AttrImporter AI(*this);
@@ -10022,7 +10039,7 @@ ASTImporter::getImportDeclErrorIfAny(Decl *FromD) const {
   if (Pos != ImportDeclErrors.end())
     return Pos->second;
   else
-    return Optional<ASTImportError>();
+    return std::nullopt;
 }
 
 void ASTImporter::setImportDeclError(Decl *From, ASTImportError Error) {

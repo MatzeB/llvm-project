@@ -515,6 +515,14 @@ func.func @mmaLoadOp_identity_layout(){
 
 // -----
 
+func.func @mma_invalid_memref_type(%src: memref<32x4xvector<4x8xf32>>, %i: index) {
+    // expected-error @+1 {{operand #0 must be memref of 16-bit float or 32-bit float or vector of 16-bit float or 32-bit float values of ranks 1 values}}
+    %0 = gpu.subgroup_mma_load_matrix %src[%i, %i] {leadDimension = 4 : index} : memref<32x4xvector<4x8xf32>> -> !gpu.mma_matrix<16x16xf16, "AOp">
+    return
+}
+
+// -----
+
 #layout_map_col_major = affine_map<(i, j) -> (j, i)>
 
 func.func @wmmaStoreOp_invalid_map(%arg0 : !gpu.mma_matrix<16x16xf16, "COp">) -> () {
@@ -590,4 +598,26 @@ func.func @alloc() {
    // expected-error@+1 {{dimension operand count does not equal memref dynamic dimension count}}
    %1 = gpu.alloc(%0) : memref<2x?x?xf32, 1>
    return
+}
+
+// -----
+
+module attributes {gpu.container_module} {
+  gpu.module @kernel {
+    // expected-error@+1 {{'gpu.func' op gpu.known_block_size must be a dense i32 array}}
+    gpu.func @kernel() kernel attributes {gpu.known_block_size = 32 : i32} {
+      gpu.return
+    }
+  }
+}
+
+// -----
+
+module attributes {gpu.container_module} {
+  gpu.module @kernel {
+    // expected-error@+1 {{'gpu.func' op gpu.known_block_size must contain exactly 3 elements}}
+    gpu.func @kernel() kernel attributes {gpu.known_block_size = array<i32: 2, 1>} {
+      gpu.return
+    }
+  }
 }

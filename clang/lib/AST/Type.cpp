@@ -42,7 +42,6 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -523,6 +522,10 @@ template<typename T> static const T *getAsSugar(const Type *Cur) {
 
 template <> const TypedefType *Type::getAs() const {
   return getAsSugar<TypedefType>(this);
+}
+
+template <> const UsingType *Type::getAs() const {
+  return getAsSugar<UsingType>(this);
 }
 
 template <> const TemplateSpecializationType *Type::getAs() const {
@@ -1073,7 +1076,7 @@ public:
 
       if (exceptionChanged) {
         info.ExceptionSpec.Exceptions =
-            llvm::makeArrayRef(exceptionTypes).copy(Ctx);
+            llvm::ArrayRef(exceptionTypes).copy(Ctx);
       }
     }
 
@@ -1215,10 +1218,10 @@ public:
         !typeArgChanged)
       return QualType(T, 0);
 
-    return Ctx.getObjCObjectType(baseType, typeArgs,
-                                 llvm::makeArrayRef(T->qual_begin(),
-                                                    T->getNumProtocols()),
-                                 T->isKindOfTypeAsWritten());
+    return Ctx.getObjCObjectType(
+        baseType, typeArgs,
+        llvm::ArrayRef(T->qual_begin(), T->getNumProtocols()),
+        T->isKindOfTypeAsWritten());
   }
 
   TRIVIAL_TYPE_CLASS(ObjCInterface)
@@ -1370,7 +1373,7 @@ struct SubstObjCTypeArgsVisitor
 
       if (exceptionChanged) {
         info.ExceptionSpec.Exceptions =
-            llvm::makeArrayRef(exceptionTypes).copy(Ctx);
+            llvm::ArrayRef(exceptionTypes).copy(Ctx);
       }
     }
 
@@ -1480,6 +1483,25 @@ struct StripObjCKindOfTypeVisitor
 
 } // namespace
 
+bool QualType::UseExcessPrecision(const ASTContext &Ctx) {
+  const BuiltinType *BT = getTypePtr()->getAs<BuiltinType>();
+  if (BT) {
+    switch (BT->getKind()) {
+    case BuiltinType::Kind::Float16: {
+      const TargetInfo &TI = Ctx.getTargetInfo();
+      if (TI.hasFloat16Type() && !TI.hasLegalHalfType() &&
+          Ctx.getLangOpts().getFloat16ExcessPrecision() !=
+              Ctx.getLangOpts().ExcessPrecisionKind::FPP_None)
+        return true;
+      return false;
+    }
+    default:
+      return false;
+    }
+  }
+  return false;
+}
+
 /// Substitute the given type arguments for Objective-C type
 /// parameters within the given type, recursively.
 QualType QualType::substObjCTypeArgs(ASTContext &ctx,
@@ -1527,23 +1549,23 @@ Optional<ArrayRef<QualType>> Type::getObjCSubstitutions(
     // substitution to do.
     dcTypeParams = dcClassDecl->getTypeParamList();
     if (!dcTypeParams)
-      return None;
+      return std::nullopt;
   } else {
     // If we are in neither a class nor a category, there's no
     // substitution to perform.
     dcCategoryDecl = dyn_cast<ObjCCategoryDecl>(dc);
     if (!dcCategoryDecl)
-      return None;
+      return std::nullopt;
 
     // If the category does not have any type parameters, there's no
     // substitution to do.
     dcTypeParams = dcCategoryDecl->getTypeParamList();
     if (!dcTypeParams)
-      return None;
+      return std::nullopt;
 
     dcClassDecl = dcCategoryDecl->getClassInterface();
     if (!dcClassDecl)
-      return None;
+      return std::nullopt;
   }
   assert(dcTypeParams && "No substitutions to perform");
   assert(dcClassDecl && "No class context");
@@ -3696,7 +3718,7 @@ IdentifierInfo *SubstTemplateTypeParmPackType::getIdentifier() const {
 }
 
 TemplateArgument SubstTemplateTypeParmPackType::getArgumentPack() const {
-  return TemplateArgument(llvm::makeArrayRef(Arguments, getNumArgs()));
+  return TemplateArgument(llvm::ArrayRef(Arguments, getNumArgs()));
 }
 
 void SubstTemplateTypeParmPackType::Profile(llvm::FoldingSetNodeID &ID) {
@@ -3838,7 +3860,7 @@ void ObjCObjectTypeImpl::Profile(llvm::FoldingSetNodeID &ID,
 
 void ObjCObjectTypeImpl::Profile(llvm::FoldingSetNodeID &ID) {
   Profile(ID, getBaseType(), getTypeArgsAsWritten(),
-          llvm::makeArrayRef(qual_begin(), getNumProtocols()),
+          llvm::ArrayRef(qual_begin(), getNumProtocols()),
           isKindOfTypeAsWritten());
 }
 
@@ -3855,7 +3877,7 @@ void ObjCTypeParamType::Profile(llvm::FoldingSetNodeID &ID,
 
 void ObjCTypeParamType::Profile(llvm::FoldingSetNodeID &ID) {
   Profile(ID, getDecl(), getCanonicalTypeInternal(),
-          llvm::makeArrayRef(qual_begin(), getNumProtocols()));
+          llvm::ArrayRef(qual_begin(), getNumProtocols()));
 }
 
 namespace {
@@ -4142,8 +4164,7 @@ LinkageInfo Type::getLinkageAndVisibility() const {
   return LinkageComputer{}.getTypeLinkageAndVisibility(this);
 }
 
-Optional<NullabilityKind>
-Type::getNullability(const ASTContext &Context) const {
+Optional<NullabilityKind> Type::getNullability() const {
   QualType Type(this, 0);
   while (const auto *AT = Type->getAs<AttributedType>()) {
     // Check whether this is an attributed type with nullability
@@ -4153,7 +4174,7 @@ Type::getNullability(const ASTContext &Context) const {
 
     Type = AT->getEquivalentType();
   }
-  return None;
+  return std::nullopt;
 }
 
 bool Type::canHaveNullability(bool ResultIfUnknown) const {
@@ -4294,7 +4315,7 @@ AttributedType::getImmediateNullability() const {
     return NullabilityKind::Unspecified;
   if (getAttrKind() == attr::TypeNullableResult)
     return NullabilityKind::NullableResult;
-  return None;
+  return std::nullopt;
 }
 
 Optional<NullabilityKind> AttributedType::stripOuterNullability(QualType &T) {
@@ -4309,7 +4330,7 @@ Optional<NullabilityKind> AttributedType::stripOuterNullability(QualType &T) {
     }
   }
 
-  return None;
+  return std::nullopt;
 }
 
 bool Type::isBlockCompatibleObjCPointerType(ASTContext &ctx) const {

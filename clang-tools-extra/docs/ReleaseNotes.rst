@@ -96,6 +96,12 @@ The improvements are...
 Improvements to clang-tidy
 --------------------------
 
+- Change to Python 3 in the shebang of `add_new_check.py` and `rename_check.py`,
+  as the existing code is not compatible with Python 2.
+
+- Fix a minor bug in `add_new_check.py` to only traverse subdirectories
+  when updating the list of checks in the documentation.
+
 New checks
 ^^^^^^^^^^
 
@@ -114,6 +120,22 @@ New checks
   <clang-tidy/checks/cppcoreguidelines/avoid-do-while>` check.
 
   Warns when using ``do-while`` loops.
+
+- New :doc:`cppcoreguidelines-avoid-reference-coroutine-parameters
+  <clang-tidy/checks/cppcoreguidelines/avoid-reference-coroutine-parameters>` check.
+
+  Warns on coroutines that accept reference parameters.
+
+- New :doc:`misc-use-anonymous-namespace
+  <clang-tidy/checks/misc/use-anonymous-namespace>` check.
+
+  Warns when using ``static`` function or variables at global scope, and suggests
+  moving them into an anonymous namespace.
+
+- New :doc:`bugprone-standalone-empty <clang-tidy/checks/bugprone/standalone-empty>` check.
+
+  Warns when `empty()` is used on a range and the result is ignored. Suggests `clear()`
+  if it is an existing member function.
 
 New check aliases
 ^^^^^^^^^^^^^^^^^
@@ -141,6 +163,10 @@ Changes in existing checks
   would be emitted for uninitialized members of an anonymous union despite
   there being an initializer for one of the other members.
 
+- Fixed false positives in :doc:`google-objc-avoid-throwing-exception
+  <clang-tidy/checks/google/objc-avoid-throwing-exception>` check for exceptions
+  thrown by code emitted from macros in system headers.
+
 - Improved :doc:`modernize-use-emplace <clang-tidy/checks/modernize/use-emplace>`
   check.
 
@@ -158,9 +184,9 @@ Changes in existing checks
   The check now skips unions/union-like classes since in this case a default constructor
   with empty body is not equivalent to the explicitly defaulted one, variadic constructors
   since they cannot be explicitly defaulted. The check also skips copy assignment operators
-  with nonstandard return types, private/protected default constructors for C++17 or earlier.
-  The automatic fixit has been adjusted to avoid adding superfluous semicolon.
-  The check is restricted to C++11 or later.
+  with nonstandard return types, template constructors, private/protected default constructors
+  for C++17 or earlier. The automatic fixit has been adjusted to avoid adding superfluous
+  semicolon. The check is restricted to C++11 or later.
 
 - Change the default behavior of :doc:`readability-avoid-const-params-in-decls
   <clang-tidy/checks/readability/avoid-const-params-in-decls>` to not
@@ -171,11 +197,24 @@ Changes in existing checks
   :doc:`readability-simplify-boolean-expr <clang-tidy/checks/readability/simplify-boolean-expr>`
   when using a C++23 ``if consteval`` statement.
 
+- Change the behavior of :doc:`readability-const-return-type
+  <clang-tidy/checks/readability/const-return-type>` to not
+  warn about `const` return types in overridden functions since the derived
+  class cannot always choose to change the function signature.
+
+- Change the default behavior of :doc:`readability-const-return-type
+  <clang-tidy/checks/readability/const-return-type>` to not
+  warn about `const` value parameters of declarations inside macros.
+
 - Improved :doc:`misc-redundant-expression <clang-tidy/checks/misc/redundant-expression>`
   check.
 
   The check now skips concept definitions since redundant expressions still make sense
   inside them.
+
+- Support removing ``c_str`` calls from ``std::string_view`` constructor calls in
+  :doc: `readability-redundant-string-cstr <clang-tidy/checks/readability/redundant-string-cstr>`
+  check.
 
 Removed checks
 ^^^^^^^^^^^^^^

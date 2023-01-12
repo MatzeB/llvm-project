@@ -1390,6 +1390,13 @@ ExprResult Sema::ActOnCXXThis(SourceLocation Loc) {
 
 Expr *Sema::BuildCXXThisExpr(SourceLocation Loc, QualType Type,
                              bool IsImplicit) {
+  if (getLangOpts().HLSL && Type.getTypePtr()->isPointerType()) {
+    auto *This = new (Context)
+        CXXThisExpr(Loc, Type.getTypePtr()->getPointeeType(), IsImplicit);
+    This->setValueKind(ExprValueKind::VK_LValue);
+    MarkThisReferenced(This);
+    return This;
+  }
   auto *This = new (Context) CXXThisExpr(Loc, Type, IsImplicit);
   MarkThisReferenced(This);
   return This;
@@ -1452,9 +1459,8 @@ Sema::BuildCXXTypeConstructExpr(TypeSourceInfo *TInfo,
   QualType Ty = TInfo->getType();
   SourceLocation TyBeginLoc = TInfo->getTypeLoc().getBeginLoc();
 
-  assert((!ListInitialization ||
-          (Exprs.size() == 1 && isa<InitListExpr>(Exprs[0]))) &&
-         "List initialization must have initializer list as expression.");
+  assert((!ListInitialization || Exprs.size() == 1) &&
+         "List initialization must have exactly one expression.");
   SourceRange FullRange = SourceRange(TyBeginLoc, RParenOrBraceLoc);
 
   InitializedEntity Entity =
@@ -2654,7 +2660,9 @@ bool Sema::FindAllocationFunctions(SourceLocation StartLoc, SourceRange Range,
   // tree? Or should the consumer just recalculate the value?
   // FIXME: Using a dummy value will interact poorly with attribute enable_if.
   IntegerLiteral Size(
-      Context, llvm::APInt::getZero(Context.getTargetInfo().getPointerWidth(0)),
+      Context,
+      llvm::APInt::getZero(
+          Context.getTargetInfo().getPointerWidth(LangAS::Default)),
       Context.getSizeType(), SourceLocation());
   AllocArgs.push_back(&Size);
 
@@ -2972,6 +2980,14 @@ void Sema::DeclareGlobalNewDelete() {
   if (getLangOpts().OpenCLCPlusPlus)
     return;
 
+  // C++ [basic.stc.dynamic.general]p2:
+  //   The library provides default definitions for the global allocation
+  //   and deallocation functions. Some global allocation and deallocation
+  //   functions are replaceable ([new.delete]); these are attached to the
+  //   global module ([module.unit]).
+  if (getLangOpts().CPlusPlusModules && getCurrentModule())
+    PushGlobalModuleFragment(SourceLocation(), /*IsImplicit=*/true);
+
   // C++ [basic.std.dynamic]p2:
   //   [...] The following allocation and deallocation functions (18.4) are
   //   implicitly declared in global scope in each translation unit of a
@@ -3011,6 +3027,14 @@ void Sema::DeclareGlobalNewDelete() {
                                       &PP.getIdentifierTable().get("bad_alloc"),
                                         nullptr);
     getStdBadAlloc()->setImplicit(true);
+
+    // The implicitly declared "std::bad_alloc" should live in global module
+    // fragment.
+    if (GlobalModuleFragment) {
+      getStdBadAlloc()->setModuleOwnershipKind(
+          Decl::ModuleOwnershipKind::ReachableWhenImported);
+      getStdBadAlloc()->setLocalOwningModule(GlobalModuleFragment);
+    }
   }
   if (!StdAlignValT && getLangOpts().AlignedAllocation) {
     // The "std::align_val_t" enum class has not yet been declared, so build it
@@ -3018,9 +3042,19 @@ void Sema::DeclareGlobalNewDelete() {
     auto *AlignValT = EnumDecl::Create(
         Context, getOrCreateStdNamespace(), SourceLocation(), SourceLocation(),
         &PP.getIdentifierTable().get("align_val_t"), nullptr, true, true, true);
+
+    // The implicitly declared "std::align_val_t" should live in global module
+    // fragment.
+    if (GlobalModuleFragment) {
+      AlignValT->setModuleOwnershipKind(
+          Decl::ModuleOwnershipKind::ReachableWhenImported);
+      AlignValT->setLocalOwningModule(GlobalModuleFragment);
+    }
+
     AlignValT->setIntegerType(Context.getSizeType());
     AlignValT->setPromotionType(Context.getSizeType());
     AlignValT->setImplicit(true);
+
     StdAlignValT = AlignValT;
   }
 
@@ -3062,6 +3096,9 @@ void Sema::DeclareGlobalNewDelete() {
   DeclareGlobalAllocationFunctions(OO_Array_New, VoidPtr, SizeT);
   DeclareGlobalAllocationFunctions(OO_Delete, Context.VoidTy, VoidPtr);
   DeclareGlobalAllocationFunctions(OO_Array_Delete, Context.VoidTy, VoidPtr);
+
+  if (getLangOpts().CPlusPlusModules && getCurrentModule())
+    PopGlobalModuleFragment();
 }
 
 /// DeclareGlobalAllocationFunction - Declares a single implicit global
@@ -3083,7 +3120,7 @@ void Sema::DeclareGlobalAllocationFunction(DeclarationName Name,
         for (auto *P : Func->parameters())
           FuncParams.push_back(
               Context.getCanonicalType(P->getType().getUnqualifiedType()));
-        if (llvm::makeArrayRef(FuncParams) == Params) {
+        if (llvm::ArrayRef(FuncParams) == Params) {
           // Make the function visible to name lookup, even if we found it in
           // an unimported module. It either is an implicitly-declared global
           // allocation function, or is suppressing that function.
@@ -3106,7 +3143,7 @@ void Sema::DeclareGlobalAllocationFunction(DeclarationName Name,
       BadAllocType = Context.getTypeDeclType(getStdBadAlloc());
       assert(StdBadAlloc && "Must have std::bad_alloc declared");
       EPI.ExceptionSpec.Type = EST_Dynamic;
-      EPI.ExceptionSpec.Exceptions = llvm::makeArrayRef(BadAllocType);
+      EPI.ExceptionSpec.Exceptions = llvm::ArrayRef(BadAllocType);
     }
     if (getLangOpts().NewInfallible) {
       EPI.ExceptionSpec.Type = EST_DynamicNone;
@@ -3129,6 +3166,22 @@ void Sema::DeclareGlobalAllocationFunction(DeclarationName Name,
     if (HasBadAllocExceptionSpec && getLangOpts().NewInfallible)
       Alloc->addAttr(
           ReturnsNonNullAttr::CreateImplicit(Context, Alloc->getLocation()));
+
+    // C++ [basic.stc.dynamic.general]p2:
+    //   The library provides default definitions for the global allocation
+    //   and deallocation functions. Some global allocation and deallocation
+    //   functions are replaceable ([new.delete]); these are attached to the
+    //   global module ([module.unit]).
+    //
+    // In the language wording, these functions are attched to the global
+    // module all the time. But in the implementation, the global module
+    // is only meaningful when we're in a module unit. So here we attach
+    // these allocation functions to global module conditionally.
+    if (GlobalModuleFragment) {
+      Alloc->setModuleOwnershipKind(
+          Decl::ModuleOwnershipKind::ReachableWhenImported);
+      Alloc->setLocalOwningModule(GlobalModuleFragment);
+    }
 
     Alloc->addAttr(VisibilityAttr::CreateImplicit(
         Context, LangOpts.GlobalAllocationFunctionVisibilityHidden
@@ -4822,9 +4875,16 @@ static bool CheckUnaryTypeTraitTypeCompleteness(Sema &S, TypeTrait UTT,
           Loc, ArgTy, diag::err_incomplete_type_used_in_type_trait_expr);
     return true;
 
+  // LWG3823: T shall be an array type, a complete type, or cv void.
+  case UTT_IsAggregate:
+    if (ArgTy->isArrayType() || ArgTy->isVoidType())
+      return true;
+
+    return !S.RequireCompleteType(
+        Loc, ArgTy, diag::err_incomplete_type_used_in_type_trait_expr);
+
   // C++1z [meta.unary.prop]:
   //   remove_all_extents_t<T> shall be a complete type or cv void.
-  case UTT_IsAggregate:
   case UTT_IsTrivial:
   case UTT_IsTriviallyCopyable:
   case UTT_IsStandardLayout:
@@ -7277,8 +7337,8 @@ Expr *Sema::MaybeCreateExprWithCleanups(Expr *SubExpr) {
   if (!Cleanup.exprNeedsCleanups())
     return SubExpr;
 
-  auto Cleanups = llvm::makeArrayRef(ExprCleanupObjects.begin() + FirstCleanup,
-                                     ExprCleanupObjects.size() - FirstCleanup);
+  auto Cleanups = llvm::ArrayRef(ExprCleanupObjects.begin() + FirstCleanup,
+                                 ExprCleanupObjects.size() - FirstCleanup);
 
   auto *E = ExprWithCleanups::Create(
       Context, SubExpr, Cleanup.cleanupsHaveSideEffects(), Cleanups);
@@ -8223,7 +8283,7 @@ static void CheckIfAnyEnclosingLambdasMustCaptureAnyPotentialCaptures(
   // All the potentially captureable variables in the current nested
   // lambda (within a generic outer lambda), must be captured by an
   // outer lambda that is enclosed within a non-dependent context.
-  CurrentLSI->visitPotentialCaptures([&] (VarDecl *Var, Expr *VarExpr) {
+  CurrentLSI->visitPotentialCaptures([&](ValueDecl *Var, Expr *VarExpr) {
     // If the variable is clearly identified as non-odr-used and the full
     // expression is not instantiation dependent, only then do we not
     // need to check enclosing lambda's for speculative captures.
@@ -8239,6 +8299,10 @@ static void CheckIfAnyEnclosingLambdasMustCaptureAnyPotentialCaptures(
         !IsFullExprInstantiationDependent)
       return;
 
+    VarDecl *UnderlyingVar = Var->getPotentiallyDecomposedVarDecl();
+    if (!UnderlyingVar)
+      return;
+
     // If we have a capture-capable lambda for the variable, go ahead and
     // capture the variable in that lambda (and all its enclosing lambdas).
     if (const Optional<unsigned> Index =
@@ -8246,7 +8310,7 @@ static void CheckIfAnyEnclosingLambdasMustCaptureAnyPotentialCaptures(
                 S.FunctionScopes, Var, S))
       S.MarkCaptureUsedInEnclosingContext(Var, VarExpr->getExprLoc(), *Index);
     const bool IsVarNeverAConstantExpression =
-        VariableCanNeverBeAConstantExpression(Var, S.Context);
+        VariableCanNeverBeAConstantExpression(UnderlyingVar, S.Context);
     if (!IsFullExprInstantiationDependent || IsVarNeverAConstantExpression) {
       // This full expression is not instantiation dependent or the variable
       // can not be used in a constant expression - which means
@@ -8439,7 +8503,7 @@ class TransformTypos : public TreeTransform<TransformTypos> {
       return DRE->getFoundDecl();
     if (auto *ME = dyn_cast<MemberExpr>(E))
       return ME->getFoundDecl();
-    // FIXME: Add any other expr types that could be be seen by the delayed typo
+    // FIXME: Add any other expr types that could be seen by the delayed typo
     // correction TreeTransform for which the corresponding TypoCorrection could
     // contain multiple decls.
     return nullptr;
@@ -8713,14 +8777,14 @@ Sema::CorrectDelayedTyposInExpr(Expr *E, VarDecl *InitDecl,
 }
 
 ExprResult Sema::ActOnFinishFullExpr(Expr *FE, SourceLocation CC,
-                                     bool DiscardedValue,
-                                     bool IsConstexpr) {
+                                     bool DiscardedValue, bool IsConstexpr,
+                                     bool IsTemplateArgument) {
   ExprResult FullExpr = FE;
 
   if (!FullExpr.get())
     return ExprError();
 
-  if (DiagnoseUnexpandedParameterPack(FullExpr.get()))
+  if (!IsTemplateArgument && DiagnoseUnexpandedParameterPack(FullExpr.get()))
     return ExprError();
 
   if (DiscardedValue) {
@@ -9026,9 +9090,11 @@ Sema::BuildNestedRequirement(Expr *Constraint) {
 }
 
 concepts::NestedRequirement *
-Sema::BuildNestedRequirement(
-    concepts::Requirement::SubstitutionDiagnostic *SubstDiag) {
-  return new (Context) concepts::NestedRequirement(SubstDiag);
+Sema::BuildNestedRequirement(StringRef InvalidConstraintEntity,
+                       const ASTConstraintSatisfaction &Satisfaction) {
+  return new (Context) concepts::NestedRequirement(
+      InvalidConstraintEntity,
+      ASTConstraintSatisfaction::Rebuild(Context, Satisfaction));
 }
 
 RequiresExprBodyDecl *

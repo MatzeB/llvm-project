@@ -107,9 +107,15 @@ public:
       Buffer = &StaticBuffer[0];
       memset(Buffer, 0, BufferSize);
     } else {
+      // When using a heap-based buffer, precommit the pages backing the
+      // Vmar by passing |MAP_PRECOMMIT| flag. This allows an optimization
+      // where page fault exceptions are skipped as the allocated memory
+      // is accessed.
+      const uptr MmapFlags =
+          MAP_ALLOWNOMEM | (SCUDO_FUCHSIA ? MAP_PRECOMMIT : 0);
       Buffer = reinterpret_cast<uptr *>(
           map(nullptr, roundUpTo(BufferSize, getPageSizeCached()),
-              "scudo:counters", MAP_ALLOWNOMEM, &MapData));
+              "scudo:counters", MmapFlags, &MapData));
     }
   }
 
@@ -258,7 +264,16 @@ struct PageReleaseContext {
     PageSizeLog = getLog2(PageSize);
     RoundedRegionSize = PagesCount << PageSizeLog;
     RoundedSize = NumberOfRegions * RoundedRegionSize;
+  }
 
+  // PageMap is lazily allocated when markFreeBlocks() is invoked.
+  bool hasBlockMarked() const {
+    return PageMap.isAllocated();
+  }
+
+  void ensurePageMapAllocated() {
+    if (PageMap.isAllocated())
+      return;
     PageMap.reset(NumberOfRegions, PagesCount, FullPagesBlockCountMax);
     DCHECK(PageMap.isAllocated());
   }
@@ -266,6 +281,8 @@ struct PageReleaseContext {
   template<class TransferBatchT, typename DecompactPtrT>
   void markFreeBlocks(const IntrusiveList<TransferBatchT> &FreeList,
                       DecompactPtrT DecompactPtr, uptr Base) {
+    ensurePageMapAllocated();
+
     // Iterate over free chunks and count how many free chunks affect each
     // allocated page.
     if (BlockSize <= PageSize && PageSize % BlockSize == 0) {

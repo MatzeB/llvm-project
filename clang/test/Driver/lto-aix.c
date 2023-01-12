@@ -27,6 +27,16 @@
 // O2: "-bplugin_opt:-O2"
 // O3: "-bplugin_opt:-O3"
 //
+// vec-extabi option
+// RUN: %clang --target=powerpc-ibm-aix --sysroot %S/Inputs/aix_ppc_tree %s \
+// RUN:   -fuse-ld=ld -flto -mabi=vec-extabi -### 2>&1 \
+// RUN:   | FileCheck --check-prefix=VECEXTABI %s
+// RUN: %clang --target=powerpc-ibm-aix --sysroot %S/Inputs/aix_ppc_tree %s \
+// RUN:   -fuse-ld=ld -flto -### 2>&1 | FileCheck --check-prefix=NOVECEXTABI %s
+//
+// VECEXTABI: "-bplugin_opt:-vec-extabi"
+// NOVECEXTABI-NOT: "-bplugin_opt:-vec-extabi"
+//
 // Test debugging options
 // RUN: %clang --target=powerpc-ibm-aix -### %s -flto -fuse-ld=ld -gdbx 2>&1 \
 // RUN:   | FileCheck -check-prefix=DBX %s
@@ -57,3 +67,9 @@
 //
 // STRICT:       "-bplugin_opt:-strict-dwarf=true"
 // NOSTRICT-NOT: "-bplugin_opt:-strict-dwarf=true"
+//
+// Test cspgo options
+// RUN: %clang --target=powerpc-ibm-aix -### %s -flto -fuse-ld=ld \
+// RUN:   -fcs-profile-generate 2>&1 | FileCheck -check-prefix=CSPGO %s
+//
+// CSPGO: "-bplugin_opt:-cs-profile-generate" "-bplugin_opt:-cs-profile-path=default_%m.profraw"

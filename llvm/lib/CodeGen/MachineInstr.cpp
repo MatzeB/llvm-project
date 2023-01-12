@@ -13,7 +13,6 @@
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallVector.h"
@@ -85,11 +84,11 @@ static void tryToGetTargetInfo(const MachineInstr &MI,
 }
 
 void MachineInstr::addImplicitDefUseOperands(MachineFunction &MF) {
-  if (MCID->ImplicitDefs)
+  if (MCID->getImplicitDefs())
     for (const MCPhysReg *ImpDefs = MCID->getImplicitDefs(); *ImpDefs;
            ++ImpDefs)
       addOperand(MF, MachineOperand::CreateReg(*ImpDefs, true, true));
-  if (MCID->ImplicitUses)
+  if (MCID->getImplicitUses())
     for (const MCPhysReg *ImpUses = MCID->getImplicitUses(); *ImpUses;
            ++ImpUses)
       addOperand(MF, MachineOperand::CreateReg(*ImpUses, false, true));
@@ -675,6 +674,25 @@ bool MachineInstr::isIdenticalTo(const MachineInstr &Other,
   return true;
 }
 
+bool MachineInstr::isEquivalentDbgInstr(const MachineInstr &Other) const {
+  if (!isDebugValueLike() || !Other.isDebugValueLike())
+    return false;
+  if (getDebugLoc() != Other.getDebugLoc())
+    return false;
+  if (getDebugVariable() != Other.getDebugVariable())
+    return false;
+  if (getNumDebugOperands() != Other.getNumDebugOperands())
+    return false;
+  for (unsigned OpIdx = 0; OpIdx < getNumDebugOperands(); ++OpIdx)
+    if (!getDebugOperand(OpIdx).isIdenticalTo(Other.getDebugOperand(OpIdx)))
+      return false;
+  if (!DIExpression::isEqualExpression(
+          getDebugExpression(), isIndirectDebugValue(),
+          Other.getDebugExpression(), Other.isIndirectDebugValue()))
+    return false;
+  return true;
+}
+
 const MachineFunction *MachineInstr::getMF() const {
   return getParent()->getParent();
 }
@@ -836,14 +854,14 @@ const DILabel *MachineInstr::getDebugLabel() const {
 }
 
 const MachineOperand &MachineInstr::getDebugVariableOp() const {
-  assert((isDebugValue() || isDebugRef()) && "not a DBG_VALUE*");
-  unsigned VariableOp = isDebugValueList() ? 0 : 2;
+  assert((isDebugValueLike()) && "not a DBG_VALUE*");
+  unsigned VariableOp = isNonListDebugValue() ? 2 : 0;
   return getOperand(VariableOp);
 }
 
 MachineOperand &MachineInstr::getDebugVariableOp() {
-  assert((isDebugValue() || isDebugRef()) && "not a DBG_VALUE*");
-  unsigned VariableOp = isDebugValueList() ? 0 : 2;
+  assert((isDebugValueLike()) && "not a DBG_VALUE*");
+  unsigned VariableOp = isNonListDebugValue() ? 2 : 0;
   return getOperand(VariableOp);
 }
 
@@ -852,14 +870,14 @@ const DILocalVariable *MachineInstr::getDebugVariable() const {
 }
 
 const MachineOperand &MachineInstr::getDebugExpressionOp() const {
-  assert((isDebugValue() || isDebugRef()) && "not a DBG_VALUE*");
-  unsigned ExpressionOp = isDebugValueList() ? 1 : 3;
+  assert((isDebugValueLike()) && "not a DBG_VALUE*");
+  unsigned ExpressionOp = isNonListDebugValue() ? 3 : 1;
   return getOperand(ExpressionOp);
 }
 
 MachineOperand &MachineInstr::getDebugExpressionOp() {
-  assert((isDebugValue() || isDebugRef()) && "not a DBG_VALUE*");
-  unsigned ExpressionOp = isDebugValueList() ? 1 : 3;
+  assert((isDebugValueLike()) && "not a DBG_VALUE*");
+  unsigned ExpressionOp = isNonListDebugValue() ? 3 : 1;
   return getOperand(ExpressionOp);
 }
 
@@ -2120,41 +2138,35 @@ MachineInstrBuilder llvm::BuildMI(MachineFunction &MF, const DebugLoc &DL,
 
 MachineInstrBuilder llvm::BuildMI(MachineFunction &MF, const DebugLoc &DL,
                                   const MCInstrDesc &MCID, bool IsIndirect,
-                                  const MachineOperand &MO,
+                                  ArrayRef<MachineOperand> DebugOps,
                                   const MDNode *Variable, const MDNode *Expr) {
   assert(isa<DILocalVariable>(Variable) && "not a variable");
   assert(cast<DIExpression>(Expr)->isValid() && "not an expression");
   assert(cast<DILocalVariable>(Variable)->isValidLocationForIntrinsic(DL) &&
          "Expected inlined-at fields to agree");
-  if (MO.isReg())
-    return BuildMI(MF, DL, MCID, IsIndirect, MO.getReg(), Variable, Expr);
+  if (MCID.Opcode == TargetOpcode::DBG_VALUE) {
+    assert(DebugOps.size() == 1 &&
+           "DBG_VALUE must contain exactly one debug operand");
+    MachineOperand DebugOp = DebugOps[0];
+    if (DebugOp.isReg())
+      return BuildMI(MF, DL, MCID, IsIndirect, DebugOp.getReg(), Variable,
+                     Expr);
 
-  auto MIB = BuildMI(MF, DL, MCID).add(MO);
-  if (IsIndirect)
-    MIB.addImm(0U);
-  else
-    MIB.addReg(0U);
-  return MIB.addMetadata(Variable).addMetadata(Expr);
-}
-
-MachineInstrBuilder llvm::BuildMI(MachineFunction &MF, const DebugLoc &DL,
-                                  const MCInstrDesc &MCID, bool IsIndirect,
-                                  ArrayRef<MachineOperand> MOs,
-                                  const MDNode *Variable, const MDNode *Expr) {
-  assert(isa<DILocalVariable>(Variable) && "not a variable");
-  assert(cast<DIExpression>(Expr)->isValid() && "not an expression");
-  assert(cast<DILocalVariable>(Variable)->isValidLocationForIntrinsic(DL) &&
-         "Expected inlined-at fields to agree");
-  if (MCID.Opcode == TargetOpcode::DBG_VALUE)
-    return BuildMI(MF, DL, MCID, IsIndirect, MOs[0], Variable, Expr);
+    auto MIB = BuildMI(MF, DL, MCID).add(DebugOp);
+    if (IsIndirect)
+      MIB.addImm(0U);
+    else
+      MIB.addReg(0U);
+    return MIB.addMetadata(Variable).addMetadata(Expr);
+  }
 
   auto MIB = BuildMI(MF, DL, MCID);
   MIB.addMetadata(Variable).addMetadata(Expr);
-  for (const MachineOperand &MO : MOs)
-    if (MO.isReg())
-      MIB.addReg(MO.getReg());
+  for (const MachineOperand &DebugOp : DebugOps)
+    if (DebugOp.isReg())
+      MIB.addReg(DebugOp.getReg());
     else
-      MIB.add(MO);
+      MIB.add(DebugOp);
   return MIB;
 }
 
@@ -2172,21 +2184,12 @@ MachineInstrBuilder llvm::BuildMI(MachineBasicBlock &BB,
 MachineInstrBuilder llvm::BuildMI(MachineBasicBlock &BB,
                                   MachineBasicBlock::iterator I,
                                   const DebugLoc &DL, const MCInstrDesc &MCID,
-                                  bool IsIndirect, MachineOperand &MO,
+                                  bool IsIndirect,
+                                  ArrayRef<MachineOperand> DebugOps,
                                   const MDNode *Variable, const MDNode *Expr) {
   MachineFunction &MF = *BB.getParent();
-  MachineInstr *MI = BuildMI(MF, DL, MCID, IsIndirect, MO, Variable, Expr);
-  BB.insert(I, MI);
-  return MachineInstrBuilder(MF, *MI);
-}
-
-MachineInstrBuilder llvm::BuildMI(MachineBasicBlock &BB,
-                                  MachineBasicBlock::iterator I,
-                                  const DebugLoc &DL, const MCInstrDesc &MCID,
-                                  bool IsIndirect, ArrayRef<MachineOperand> MOs,
-                                  const MDNode *Variable, const MDNode *Expr) {
-  MachineFunction &MF = *BB.getParent();
-  MachineInstr *MI = BuildMI(MF, DL, MCID, IsIndirect, MOs, Variable, Expr);
+  MachineInstr *MI =
+      BuildMI(MF, DL, MCID, IsIndirect, DebugOps, Variable, Expr);
   BB.insert(I, MI);
   return MachineInstrBuilder(MF, *MI);
 }
@@ -2228,6 +2231,8 @@ MachineInstr *llvm::buildDbgValueForSpill(MachineBasicBlock &BB,
                                           MachineBasicBlock::iterator I,
                                           const MachineInstr &Orig,
                                           int FrameIndex, Register SpillReg) {
+  assert(!Orig.isDebugRef() &&
+         "DBG_INSTR_REF should not reference a virtual register.");
   const DIExpression *Expr = computeExprForSpill(Orig, SpillReg);
   MachineInstrBuilder NewMI =
       BuildMI(BB, I, Orig.getDebugLoc(), Orig.getDesc());
@@ -2330,7 +2335,7 @@ static unsigned getSpillSlotSize(const MMOList &Accesses,
   return Size;
 }
 
-Optional<unsigned>
+std::optional<unsigned>
 MachineInstr::getSpillSize(const TargetInstrInfo *TII) const {
   int FI;
   if (TII->isStoreToStackSlotPostFE(*this, FI)) {
@@ -2338,18 +2343,18 @@ MachineInstr::getSpillSize(const TargetInstrInfo *TII) const {
     if (MFI.isSpillSlotObjectIndex(FI))
       return (*memoperands_begin())->getSize();
   }
-  return None;
+  return std::nullopt;
 }
 
-Optional<unsigned>
+std::optional<unsigned>
 MachineInstr::getFoldedSpillSize(const TargetInstrInfo *TII) const {
   MMOList Accesses;
   if (TII->hasStoreToStackSlot(*this, Accesses))
     return getSpillSlotSize(Accesses, getMF()->getFrameInfo());
-  return None;
+  return std::nullopt;
 }
 
-Optional<unsigned>
+std::optional<unsigned>
 MachineInstr::getRestoreSize(const TargetInstrInfo *TII) const {
   int FI;
   if (TII->isLoadFromStackSlotPostFE(*this, FI)) {
@@ -2357,15 +2362,15 @@ MachineInstr::getRestoreSize(const TargetInstrInfo *TII) const {
     if (MFI.isSpillSlotObjectIndex(FI))
       return (*memoperands_begin())->getSize();
   }
-  return None;
+  return std::nullopt;
 }
 
-Optional<unsigned>
+std::optional<unsigned>
 MachineInstr::getFoldedRestoreSize(const TargetInstrInfo *TII) const {
   MMOList Accesses;
   if (TII->hasLoadFromStackSlot(*this, Accesses))
     return getSpillSlotSize(Accesses, getMF()->getFrameInfo());
-  return None;
+  return std::nullopt;
 }
 
 unsigned MachineInstr::getDebugInstrNum() {
