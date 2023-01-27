@@ -20,7 +20,7 @@
 #include "clang/Lex/Lexer.h"
 #include "clang/Tooling/Tooling.h"
 #include "llvm/IR/DataLayout.h"
-#include "llvm/Testing/Support/Annotations.h"
+#include "llvm/Testing/Annotations/Annotations.h"
 #include "gtest/gtest.h"
 
 using namespace clang::ast_matchers;
@@ -489,4 +489,35 @@ TEST(Decl, ImplicitlyDeclaredAllocationFunctionsInModules) {
             Ctx));
   ASSERT_TRUE(AlignedArrayDelete->getOwningModule());
   EXPECT_TRUE(AlignedArrayDelete->getOwningModule()->isGlobalModule());
+}
+
+TEST(Decl, TemplateArgumentDefaulted) {
+  llvm::Annotations Code(R"cpp(
+    template<typename T1, typename T2>
+    struct Alloc {};
+
+    template <typename T1,
+              typename T2 = double,
+              int      T3 = 42,
+              typename T4 = Alloc<T1, T2>>
+    struct Foo {
+    };
+
+    Foo<char, int, 42, Alloc<char, int>> X;
+  )cpp");
+
+  auto AST =
+      tooling::buildASTFromCodeWithArgs(Code.code(), /*Args=*/{"-std=c++20"});
+  ASTContext &Ctx = AST->getASTContext();
+
+  auto const *CTSD = selectFirst<ClassTemplateSpecializationDecl>(
+      "id",
+      match(classTemplateSpecializationDecl(hasName("Foo")).bind("id"), Ctx));
+  ASSERT_NE(CTSD, nullptr);
+  auto const &ArgList = CTSD->getTemplateArgs();
+
+  EXPECT_FALSE(ArgList.get(0).getIsDefaulted());
+  EXPECT_FALSE(ArgList.get(1).getIsDefaulted());
+  EXPECT_TRUE(ArgList.get(2).getIsDefaulted());
+  EXPECT_TRUE(ArgList.get(3).getIsDefaulted());
 }

@@ -223,7 +223,11 @@ std::optional<MemoryBufferRef> macho::readFile(StringRef path) {
   // real files for different CPU ISAs. Here, we search for a file that matches
   // with the current link target and returns it as a MemoryBufferRef.
   const auto *arch = reinterpret_cast<const fat_arch *>(buf + sizeof(*hdr));
+  auto getArchName = [](uint32_t cpuType, uint32_t cpuSubtype) {
+    return getArchitectureName(getArchitectureFromCpuType(cpuType, cpuSubtype));
+  };
 
+  std::vector<StringRef> archs;
   for (uint32_t i = 0, n = read32be(&hdr->nfat_arch); i < n; ++i) {
     if (reinterpret_cast<const char *>(arch + i + 1) >
         buf + mbref.getBufferSize()) {
@@ -238,8 +242,10 @@ std::optional<MemoryBufferRef> macho::readFile(StringRef path) {
     // FIXME: LD64 has a more complex fallback logic here.
     // Consider implementing that as well?
     if (cpuType != static_cast<uint32_t>(target->cpuType) ||
-        cpuSubtype != target->cpuSubtype)
+        cpuSubtype != target->cpuSubtype) {
+      archs.emplace_back(getArchName(cpuType, cpuSubtype));
       continue;
+    }
 
     uint32_t offset = read32be(&arch[i].offset);
     uint32_t size = read32be(&arch[i].size);
@@ -251,7 +257,9 @@ std::optional<MemoryBufferRef> macho::readFile(StringRef path) {
                                               path.copy(bAlloc));
   }
 
-  error("unable to find matching architecture in " + path);
+  auto targetArchName = getArchName(target->cpuType, target->cpuSubtype);
+  warn(path + ": ignoring file because it is universal (" + join(archs, ",") +
+       ") but does not contain the " + targetArchName + " architecture");
   return std::nullopt;
 }
 
@@ -2206,6 +2214,9 @@ BitcodeFile::BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
     : InputFile(BitcodeKind, mb, lazy), forceHidden(forceHidden) {
   this->archiveName = std::string(archiveName);
   std::string path = mb.getBufferIdentifier().str();
+  if (config->thinLTOIndexOnly)
+    path = replaceThinLTOSuffix(mb.getBufferIdentifier());
+
   // ThinLTO assumes that all MemoryBufferRefs given to it have a unique
   // name. If two members with the same name are provided, this causes a
   // collision and ThinLTO can't proceed.
@@ -2244,6 +2255,13 @@ void BitcodeFile::parseLazy() {
         break;
     }
   }
+}
+
+std::string macho::replaceThinLTOSuffix(StringRef path) {
+  auto [suffix, repl] = config->thinLTOObjectSuffixReplace;
+  if (path.consume_back(suffix))
+    return (path + repl).str();
+  return std::string(path);
 }
 
 void macho::extract(InputFile &file, StringRef reason) {

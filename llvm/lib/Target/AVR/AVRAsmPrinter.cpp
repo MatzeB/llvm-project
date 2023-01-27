@@ -128,8 +128,8 @@ bool AVRAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
       assert(BytesPerReg <= 2 && "Only 8 and 16 bit regs are supported.");
 
       unsigned RegIdx = ByteNumber / BytesPerReg;
-      assert(RegIdx < NumOpRegs && "Multibyte index out of range.");
-
+      if (RegIdx >= NumOpRegs)
+        return true;
       Reg = MI->getOperand(OpNum + RegIdx).getReg();
 
       if (BytesPerReg == 2) {
@@ -140,6 +140,13 @@ bool AVRAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNum,
       O << AVRInstPrinter::getPrettyRegisterName(Reg, MRI);
       return false;
     }
+  }
+
+  // Print global symbols.
+  const auto &MO = MI->getOperand(OpNum);
+  if (Error && MO.getType() == MachineOperand::MO_GlobalAddress) {
+    PrintSymbolOperand(MO, O);
+    return false;
   }
 
   if (Error)

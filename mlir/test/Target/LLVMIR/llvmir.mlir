@@ -939,7 +939,7 @@ llvm.func @vector_splat_nonzero() -> vector<4xf32> {
 
 // CHECK-LABEL: @vector_splat_nonzero_scalable
 llvm.func @vector_splat_nonzero_scalable() -> vector<[4]xf32> {
-  // CHECK: ret <vscale x 4 x float> shufflevector (<vscale x 4 x float> insertelement (<vscale x 4 x float> poison, float 1.000000e+00, i32 0), <vscale x 4 x float> poison, <vscale x 4 x i32> zeroinitializer)
+  // CHECK: ret <vscale x 4 x float> shufflevector (<vscale x 4 x float> insertelement (<vscale x 4 x float> poison, float 1.000000e+00, i64 0), <vscale x 4 x float> poison, <vscale x 4 x i32> zeroinitializer)
   %0 = llvm.mlir.constant(dense<1.000000e+00> : vector<[4]xf32>) : vector<[4]xf32>
   llvm.return %0 : vector<[4]xf32>
 }
@@ -1889,7 +1889,6 @@ module {
   llvm.metadata @metadata {
     llvm.access_group @group1
     llvm.access_group @group2
-    llvm.return
   }
 }
 
@@ -1920,7 +1919,6 @@ module {
     llvm.alias_scope @scope1 { domain = @domain, description = "The first scope" }
     llvm.alias_scope @scope2 { domain = @domain }
     llvm.alias_scope @scope3 { domain = @domain }
-    llvm.return
   }
 }
 
@@ -2069,12 +2067,21 @@ llvm.func @vararg_function(%arg0: i32, ...) {
 
 // -----
 
-// Function attributes: readnone
-
-// CHECK: declare void @readnone_function() #[[ATTR:[0-9]+]]
-// CHECK: attributes #[[ATTR]] = { memory(none) }
-llvm.func @readnone_function() attributes {llvm.readnone}
-
-// -----
 // CHECK: declare void @readonly_function([[PTR:.+]] readonly)
 llvm.func @readonly_function(%arg0: !llvm.ptr<f32> {llvm.readonly})
+
+// -----
+
+// CHECK: declare void @arg_mem_none_func() #[[ATTR:[0-9]+]]
+llvm.func @arg_mem_none_func() attributes {
+  memory = #llvm.memory_effects<other = readwrite, argMem = none, inaccessibleMem = readwrite>}
+
+// CHECK: attributes #[[ATTR]] = { memory(readwrite, argmem: none) }
+
+// -----
+
+// CHECK: declare void @readwrite_func() #[[ATTR:[0-9]+]]
+llvm.func @readwrite_func() attributes {
+  memory = #llvm.memory_effects<other = readwrite, argMem = readwrite, inaccessibleMem = readwrite>}
+
+// CHECK: attributes #[[ATTR]] = { memory(readwrite) }

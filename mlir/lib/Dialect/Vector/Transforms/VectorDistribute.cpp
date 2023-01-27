@@ -995,19 +995,20 @@ struct WarpOpExtractElement : public OpRewritePattern<WarpExecuteOnLane0Op> {
     unsigned int operandNumber = operand->getOperandNumber();
     auto extractOp = operand->get().getDefiningOp<vector::ExtractElementOp>();
     VectorType extractSrcType = extractOp.getVectorType();
-    bool is0dExtract = extractSrcType.getRank() == 0;
+    bool is0dOrVec1Extract = extractSrcType.getNumElements() == 1;
     Type elType = extractSrcType.getElementType();
     VectorType distributedVecType;
-    if (!is0dExtract) {
+    if (!is0dOrVec1Extract) {
       assert(extractSrcType.getRank() == 1 &&
              "expected that extractelement src rank is 0 or 1");
+      if (extractSrcType.getShape()[0] % warpOp.getWarpSize() != 0)
+        return failure();
       int64_t elementsPerLane =
           extractSrcType.getShape()[0] / warpOp.getWarpSize();
       distributedVecType = VectorType::get({elementsPerLane}, elType);
     } else {
       distributedVecType = extractSrcType;
     }
-
     // Yield source vector from warp op.
     Location loc = extractOp.getLoc();
     SmallVector<size_t> newRetIndices;
@@ -1019,9 +1020,17 @@ struct WarpOpExtractElement : public OpRewritePattern<WarpExecuteOnLane0Op> {
 
     // 0d extract: The new warp op broadcasts the source vector to all lanes.
     // All lanes extract the scalar.
-    if (is0dExtract) {
-      Value newExtract =
-          rewriter.create<vector::ExtractElementOp>(loc, distributedVec);
+    if (is0dOrVec1Extract) {
+      Value newExtract;
+      if (extractSrcType.getRank() == 1) {
+        newExtract = rewriter.create<vector::ExtractElementOp>(
+            loc, distributedVec,
+            rewriter.create<arith::ConstantIndexOp>(loc, 0));
+
+      } else {
+        newExtract =
+            rewriter.create<vector::ExtractElementOp>(loc, distributedVec);
+      }
       newWarpOp->getResult(operandNumber).replaceAllUsesWith(newExtract);
       return success();
     }
@@ -1117,7 +1126,7 @@ struct WarpOpInsertElement : public OpRewritePattern<WarpExecuteOnLane0Op> {
     Value newResult =
         rewriter
             .create<scf::IfOp>(
-                loc, distrType, isInsertingLane,
+                loc, isInsertingLane,
                 /*thenBuilder=*/
                 [&](OpBuilder &builder, Location loc) {
                   Value newInsert = builder.create<vector::InsertElementOp>(
@@ -1248,7 +1257,7 @@ struct WarpOpInsert : public OpRewritePattern<WarpExecuteOnLane0Op> {
         builder.create<scf::YieldOp>(loc, distributedDest);
       };
       newResult = rewriter
-                      .create<scf::IfOp>(loc, distrDestType, isInsertingLane,
+                      .create<scf::IfOp>(loc, isInsertingLane,
                                          /*thenBuilder=*/insertingBuilder,
                                          /*elseBuilder=*/nonInsertingBuilder)
                       .getResult(0);

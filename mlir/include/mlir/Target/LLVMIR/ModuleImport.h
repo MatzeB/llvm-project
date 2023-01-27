@@ -184,11 +184,10 @@ private:
   LogicalResult processBasicBlock(llvm::BasicBlock *bb, Block *block);
   /// Converts an LLVM intrinsic to an MLIR LLVM dialect operation if an MLIR
   /// counterpart exists. Otherwise, returns failure.
-  LogicalResult convertIntrinsic(OpBuilder &odsBuilder, llvm::CallInst *inst);
+  LogicalResult convertIntrinsic(llvm::CallInst *inst);
   /// Converts an LLVM instruction to an MLIR LLVM dialect operation if an MLIR
   /// counterpart exists. Otherwise, returns failure.
-  LogicalResult convertInstruction(OpBuilder &odsBuilder,
-                                   llvm::Instruction *inst);
+  LogicalResult convertInstruction(llvm::Instruction *inst);
   /// Converts the metadata attached to the original instruction `inst` if
   /// a dialect interfaces supports the specific kind of metadata and attaches
   /// the resulting dialect attributes to the converted operation `op`. Emits a
@@ -211,6 +210,14 @@ private:
   LogicalResult convertCallTypeAndOperands(llvm::CallBase *callInst,
                                            SmallVectorImpl<Type> &types,
                                            SmallVectorImpl<Value> &operands);
+  /// Converts the parameter attributes attached to `func` and adds them to the
+  /// `funcOp`.
+  void convertParameterAttributes(llvm::Function *func, LLVMFuncOp funcOp,
+                                  OpBuilder &builder);
+  /// Converts the AttributeSet of one parameter in LLVM IR to a corresponding
+  /// DictionaryAttr for the LLVM dialect.
+  DictionaryAttr convertParameterAttribute(llvm::AttributeSet llvmParamAttrs,
+                                           OpBuilder &builder);
   /// Returns the builtin type equivalent to be used in attributes for the given
   /// LLVM IR dialect type.
   Type getStdTypeForAttr(Type type);

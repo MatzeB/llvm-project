@@ -6,7 +6,7 @@ define i32 @ori32i32_eq(i32 %x, i32 %y) {
 ; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    and r0, r0, #1
 ; CHECK-NEXT:    cmp r1, #0
-; CHECK-NEXT:    csinc r0, r0, zr, eq
+; CHECK-NEXT:    csinc r0, r0, zr, ne
 ; CHECK-NEXT:    bx lr
   %xa = and i32 %x, 1
   %c = icmp eq i32 %y, 0
@@ -20,7 +20,7 @@ define i32 @ori32_eq_c(i32 %x, i32 %y) {
 ; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    and r0, r0, #1
 ; CHECK-NEXT:    cmp r1, #0
-; CHECK-NEXT:    csinc r0, r0, zr, eq
+; CHECK-NEXT:    csinc r0, r0, zr, ne
 ; CHECK-NEXT:    bx lr
   %xa = and i32 %x, 1
   %c = icmp eq i32 %y, 0
@@ -34,7 +34,7 @@ define i32 @ori32i64_eq(i32 %x, i64 %y) {
 ; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    orrs.w r1, r2, r3
 ; CHECK-NEXT:    and r0, r0, #1
-; CHECK-NEXT:    csinc r0, r0, zr, eq
+; CHECK-NEXT:    csinc r0, r0, zr, ne
 ; CHECK-NEXT:    bx lr
   %xa = and i32 %x, 1
   %c = icmp eq i64 %y, 0
@@ -48,7 +48,7 @@ define i32 @ori32_sgt(i32 %x, i32 %y) {
 ; CHECK:       @ %bb.0:
 ; CHECK-NEXT:    and r0, r0, #1
 ; CHECK-NEXT:    cmp r1, #0
-; CHECK-NEXT:    csinc r0, r0, zr, gt
+; CHECK-NEXT:    csinc r0, r0, zr, le
 ; CHECK-NEXT:    bx lr
   %xa = and i32 %x, 1
   %c = icmp sgt i32 %y, 0
@@ -170,3 +170,43 @@ define i64 @andi64_ne(i8 %x, i8 %y) {
   %a = and i64 %xa, %cz
   ret i64 %a
 }
+
+; Check for multiple uses on the csinc
+define i32 @t5(i32 %f.0, i32 %call) {
+; CHECK-LABEL: t5:
+; CHECK:       @ %bb.0: @ %entry
+; CHECK-NEXT:    cmp r1, #0
+; CHECK-NEXT:    cset r1, ne
+; CHECK-NEXT:    cmp r0, #13
+; CHECK-NEXT:    cset r0, eq
+; CHECK-NEXT:    and.w r2, r0, r1
+; CHECK-NEXT:    orrs r0, r1
+; CHECK-NEXT:    eor r0, r0, #1
+; CHECK-NEXT:    orrs r0, r2
+; CHECK-NEXT:    bx lr
+entry:
+  %tobool1.i = icmp ne i32 %call, 0
+  %cmp = icmp eq i32 %f.0, 13
+  %or.cond = select i1 %cmp, i1 %tobool1.i, i1 false
+  %or.cond7.not = select i1 %cmp, i1 true, i1 %tobool1.i
+  %or.cond7.not.not = xor i1 %or.cond7.not, true
+  %not.or.cond12 = select i1 %or.cond, i1 true, i1 %or.cond7.not.not
+  %g.0 = zext i1 %not.or.cond12 to i32
+  ret i32 %g.0
+}
+
+define i32 @test(i32 %a, i32 %b) {
+; CHECK-LABEL: test:
+; CHECK:       @ %bb.0: @ %entry
+; CHECK-NEXT:    movs r2, #1
+; CHECK-NEXT:    cmp r1, r0
+; CHECK-NEXT:    lsr.w r2, r2, r1
+; CHECK-NEXT:    csinc r0, r2, zr, le
+; CHECK-NEXT:    bx lr
+entry:
+  %cmp = icmp sgt i32 %b, %a
+  %b.op = lshr i32 1, %b
+  %shr = select i1 %cmp, i32 1, i32 %b.op
+  ret i32 %shr
+}
+

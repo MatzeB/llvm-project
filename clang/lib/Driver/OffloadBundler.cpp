@@ -847,6 +847,8 @@ CreateFileHandler(MemoryBuffer &FirstInput,
     return std::make_unique<TextFileHandler>(/*Comment=*/"//");
   if (FilesType == "cui")
     return std::make_unique<TextFileHandler>(/*Comment=*/"//");
+  if (FilesType == "hipi")
+    return std::make_unique<TextFileHandler>(/*Comment=*/"//");
   // TODO: `.d` should be eventually removed once `-M` and its variants are
   // handled properly in offload compilation.
   if (FilesType == "d")
@@ -1058,7 +1060,8 @@ Error OffloadBundler::UnbundleFiles() {
 
   // If we found elements, we emit an error if none of those were for the host
   // in case host bundle name was provided in command line.
-  if (!FoundHostBundle && BundlerConfig.HostInputIndex != ~0u)
+  if (!(FoundHostBundle || BundlerConfig.HostInputIndex == ~0u ||
+        BundlerConfig.AllowMissingBundles))
     return createStringError(inconvertibleErrorCode(),
                              "Can't find bundle for the host target");
 

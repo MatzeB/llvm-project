@@ -1040,7 +1040,7 @@ static SDValue combineShiftToAVG(SDValue Op, SelectionDAG &DAG,
   EVT VT = Op.getValueType();
   unsigned MinWidth =
       std::max<unsigned>(VT.getScalarSizeInBits() - KnownBits, 8);
-  EVT NVT = EVT::getIntegerVT(*DAG.getContext(), PowerOf2Ceil(MinWidth));
+  EVT NVT = EVT::getIntegerVT(*DAG.getContext(), llvm::bit_ceil(MinWidth));
   if (VT.isVector())
     NVT = EVT::getVectorVT(*DAG.getContext(), NVT, VT.getVectorElementCount());
   if (!TLI.isOperationLegalOrCustom(AVGOpc, NVT))
@@ -3634,6 +3634,7 @@ bool TargetLowering::isKnownNeverNaNForTargetNode(SDValue Op,
 bool TargetLowering::isSplatValueForTargetNode(SDValue Op,
                                                const APInt &DemandedElts,
                                                APInt &UndefElts,
+                                               const SelectionDAG &DAG,
                                                unsigned Depth) const {
   assert((Op.getOpcode() >= ISD::BUILTIN_OP_END ||
           Op.getOpcode() == ISD::INTRINSIC_WO_CHAIN ||
@@ -9343,7 +9344,7 @@ TargetLowering::IncrementMemoryAddress(SDValue Addr, SDValue Mask,
   } else if (DataVT.isScalableVector()) {
     Increment = DAG.getVScale(DL, AddrVT,
                               APInt(AddrVT.getFixedSizeInBits(),
-                                    DataVT.getStoreSize().getKnownMinSize()));
+                                    DataVT.getStoreSize().getKnownMinValue()));
   } else
     Increment = DAG.getConstant(DataVT.getStoreSize(), DL, AddrVT);
 
@@ -10341,7 +10342,7 @@ SDValue TargetLowering::expandVectorSplice(SDNode *Node,
   // Store the hi part of CONCAT_VECTORS(V1, V2)
   SDValue OffsetToV2 = DAG.getVScale(
       DL, PtrVT,
-      APInt(PtrVT.getFixedSizeInBits(), VT.getStoreSize().getKnownMinSize()));
+      APInt(PtrVT.getFixedSizeInBits(), VT.getStoreSize().getKnownMinValue()));
   SDValue StackPtr2 = DAG.getNode(ISD::ADD, DL, PtrVT, StackPtr, OffsetToV2);
   SDValue StoreV2 = DAG.getStore(StoreV1, DL, V2, StackPtr2, PtrInfo);
 
@@ -10362,9 +10363,10 @@ SDValue TargetLowering::expandVectorSplice(SDNode *Node,
       DAG.getConstant(TrailingElts * EltByteSize, DL, PtrVT);
 
   if (TrailingElts > VT.getVectorMinNumElements()) {
-    SDValue VLBytes = DAG.getVScale(
-        DL, PtrVT,
-        APInt(PtrVT.getFixedSizeInBits(), VT.getStoreSize().getKnownMinSize()));
+    SDValue VLBytes =
+        DAG.getVScale(DL, PtrVT,
+                      APInt(PtrVT.getFixedSizeInBits(),
+                            VT.getStoreSize().getKnownMinValue()));
     TrailingBytes = DAG.getNode(ISD::UMIN, DL, PtrVT, TrailingBytes, VLBytes);
   }
 

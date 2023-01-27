@@ -35,6 +35,7 @@
 #include "flang/Optimizer/HLFIR/HLFIROps.h"
 #include "flang/Optimizer/Support/FIRContext.h"
 #include "flang/Optimizer/Support/FatalError.h"
+#include "flang/Optimizer/Support/InternalNames.h"
 #include "flang/Semantics/runtime-type-info.h"
 #include "flang/Semantics/tools.h"
 #include "llvm/Support/Debug.h"
@@ -649,15 +650,37 @@ static void deallocateIntentOut(Fortran::lower::AbstractConverter &converter,
           if (mlir::isa<fir::AllocaOp>(op))
             return;
         mlir::Location loc = converter.getCurrentLocation();
+        fir::FirOpBuilder &builder = converter.getFirOpBuilder();
         if (Fortran::semantics::IsOptional(sym)) {
-          fir::FirOpBuilder &builder = converter.getFirOpBuilder();
           auto isPresent = builder.create<fir::IsPresentOp>(
               loc, builder.getI1Type(), fir::getBase(extVal));
           builder.genIfThen(loc, isPresent)
               .genThen([&]() { genDeallocateBox(converter, *mutBox, loc); })
               .end();
         } else {
-          genDeallocateBox(converter, *mutBox, loc);
+          if (mutBox->isDerived() || mutBox->isPolymorphic() ||
+              mutBox->isUnlimitedPolymorphic()) {
+            mlir::Value isAlloc = fir::factory::genIsAllocatedOrAssociatedTest(
+                builder, loc, *mutBox);
+            builder.genIfThen(loc, isAlloc)
+                .genThen([&]() {
+                  if (mutBox->isPolymorphic()) {
+                    mlir::Value declaredTypeDesc;
+                    assert(sym.GetType());
+                    if (const Fortran::semantics::DerivedTypeSpec
+                            *derivedTypeSpec = sym.GetType()->AsDerived()) {
+                      declaredTypeDesc = Fortran::lower::getTypeDescAddr(
+                          builder, loc, *derivedTypeSpec);
+                    }
+                    genDeallocateBox(converter, *mutBox, loc, declaredTypeDesc);
+                  } else {
+                    genDeallocateBox(converter, *mutBox, loc);
+                  }
+                })
+                .end();
+          } else {
+            genDeallocateBox(converter, *mutBox, loc);
+          }
         }
       }
     }
@@ -1014,7 +1037,7 @@ declareCommonBlock(Fortran::lower::AbstractConverter &converter,
     auto commonTy = fir::SequenceType::get(shape, i8Ty);
     auto vecTy = mlir::VectorType::get(sz, i8Ty);
     mlir::Attribute zero = builder.getIntegerAttr(i8Ty, 0);
-    auto init = mlir::DenseElementsAttr::get(vecTy, llvm::makeArrayRef(zero));
+    auto init = mlir::DenseElementsAttr::get(vecTy, llvm::ArrayRef(zero));
     builder.createGlobal(loc, commonTy, commonName, linkage, init);
     // No need to add any initial value later.
     return std::nullopt;
@@ -1288,9 +1311,8 @@ recoverShapeVector(llvm::ArrayRef<std::int64_t> shapeVec, mlir::Value initVal) {
   return result;
 }
 
-static fir::FortranVariableFlagsAttr
-translateSymbolAttributes(mlir::MLIRContext *mlirContext,
-                          const Fortran::semantics::Symbol &sym) {
+fir::FortranVariableFlagsAttr Fortran::lower::translateSymbolAttributes(
+    mlir::MLIRContext *mlirContext, const Fortran::semantics::Symbol &sym) {
   fir::FortranVariableFlagsEnum flags = fir::FortranVariableFlagsEnum::None;
   const auto &attrs = sym.attrs();
   if (attrs.test(Fortran::semantics::Attr::ALLOCATABLE))
@@ -1349,7 +1371,7 @@ static void genDeclareSymbol(Fortran::lower::AbstractConverter &converter,
       lenParams.emplace_back(len);
     auto name = Fortran::lower::mangle::mangleName(sym);
     fir::FortranVariableFlagsAttr attributes =
-        translateSymbolAttributes(builder.getContext(), sym);
+        Fortran::lower::translateSymbolAttributes(builder.getContext(), sym);
     auto newBase = builder.create<hlfir::DeclareOp>(
         loc, base, name, shapeOrShift, lenParams, attributes);
     symMap.addVariableDefinition(sym, newBase, force);
@@ -1388,7 +1410,7 @@ static void genDeclareSymbol(Fortran::lower::AbstractConverter &converter,
     fir::FirOpBuilder &builder = converter.getFirOpBuilder();
     const mlir::Location loc = genLocation(converter, sym);
     fir::FortranVariableFlagsAttr attributes =
-        translateSymbolAttributes(builder.getContext(), sym);
+        Fortran::lower::translateSymbolAttributes(builder.getContext(), sym);
     auto name = Fortran::lower::mangle::mangleName(sym);
     hlfir::EntityWithAttributes declare =
         hlfir::genDeclare(loc, builder, exv, name, attributes);
@@ -1405,10 +1427,23 @@ genAllocatableOrPointerDeclare(Fortran::lower::AbstractConverter &converter,
                                Fortran::lower::SymMap &symMap,
                                const Fortran::semantics::Symbol &sym,
                                fir::MutableBoxValue box, bool force = false) {
-  if (converter.getLoweringOptions().getLowerToHighLevelFIR())
-    TODO(genLocation(converter, sym),
-         "generate fir.declare for allocatable or pointers");
-  symMap.addAllocatableOrPointer(sym, box, force);
+  if (!converter.getLoweringOptions().getLowerToHighLevelFIR()) {
+    symMap.addAllocatableOrPointer(sym, box, force);
+    return;
+  }
+  assert(!box.isDescribedByVariables() &&
+         "HLFIR alloctables/pointers must be fir.ref<fir.box>");
+  mlir::Value base = box.getAddr();
+  mlir::Value explictLength;
+  if (box.hasNonDeferredLenParams()) {
+    if (!box.isCharacter())
+      TODO(genLocation(converter, sym),
+           "Pointer or Allocatable parametrized derived type");
+    explictLength = box.nonDeferredLenParams()[0];
+  }
+  genDeclareSymbol(converter, symMap, sym, base, explictLength,
+                   /*shape=*/std::nullopt,
+                   /*lbounds=*/std::nullopt, force);
 }
 
 /// Map a symbol represented with a runtime descriptor to its FIR fir.box and
@@ -1499,7 +1534,9 @@ void Fortran::lower::mapSymbolAttributes(
                "derived type allocatable or pointer with length parameters");
     }
     fir::MutableBoxValue box = Fortran::lower::createMutableBox(
-        converter, loc, var, boxAlloc, nonDeferredLenParams);
+        converter, loc, var, boxAlloc, nonDeferredLenParams,
+        /*alwaysUseBox=*/
+        converter.getLoweringOptions().getLowerToHighLevelFIR());
     genAllocatableOrPointerDeclare(converter, symMap, var.getSymbol(), box,
                                    replace);
     return;

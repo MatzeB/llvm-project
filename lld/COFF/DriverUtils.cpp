@@ -347,9 +347,7 @@ public:
     }
   }
 
-  TemporaryFile(TemporaryFile &&obj) {
-    std::swap(path, obj.path);
-  }
+  TemporaryFile(TemporaryFile &&obj) noexcept { std::swap(path, obj.path); }
 
   ~TemporaryFile() {
     if (path.empty())
@@ -794,7 +792,7 @@ static constexpr llvm::opt::OptTable::Info infoTable[] = {
 #undef OPTION
 };
 
-COFFOptTable::COFFOptTable() : OptTable(infoTable, true) {}
+COFFOptTable::COFFOptTable() : GenericOptTable(infoTable, true) {}
 
 // Set color diagnostics according to --color-diagnostics={auto,always,never}
 // or --no-color-diagnostics flags.
@@ -853,7 +851,7 @@ opt::InputArgList ArgParser::parse(ArrayRef<const char *> argv) {
   if (!args.hasArg(OPT_lldignoreenv))
     addLINK(expandedArgv);
   cl::ExpandResponseFiles(saver(), getQuotingStyle(args), expandedArgv);
-  args = ctx.optTable.ParseArgs(makeArrayRef(expandedArgv).drop_front(),
+  args = ctx.optTable.ParseArgs(ArrayRef(expandedArgv).drop_front(),
                                 missingIndex, missingCount);
 
   // Print the real command line if response files are expanded.
@@ -869,7 +867,7 @@ opt::InputArgList ArgParser::parse(ArrayRef<const char *> argv) {
   ctx.config.argv = {argv[0]};
   for (opt::Arg *arg : args) {
     if (arg->getOption().getKind() != opt::Option::InputClass) {
-      ctx.config.argv.push_back(args.getArgString(arg->getIndex()));
+      ctx.config.argv.emplace_back(args.getArgString(arg->getIndex()));
     }
   }
 

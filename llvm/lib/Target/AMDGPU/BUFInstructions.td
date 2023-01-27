@@ -635,7 +635,7 @@ class getMUBUFAtomicInsDA<RegisterClass vdataClass, bit vdata_in,
   dag MainInputs = (ins SReg_128:$srsrc, SCSrc_b32:$soffset, offset:$offset);
   dag CPol = !if(vdata_in, (ins CPol_GLC1:$cpol), (ins CPol_0:$cpol));
 
-  dag ret = !con(Data, !con(MainInputs, CPol));
+  dag ret = !con(Data, MainInputs, CPol);
 }
 
 class getMUBUFAtomicIns<int addrKind,
@@ -724,23 +724,15 @@ multiclass MUBUF_Pseudo_Atomics_NO_RTN <string opName,
                                         RegisterClass vdataClass,
                                         ValueType vdataType,
                                         bit isFP = isFloatType<vdataType>.ret> {
-  let FPAtomic = isFP in
-  def _OFFSET : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.Offset, vdataClass>,
-                MUBUFAddr64Table <0, NAME>;
-
-  let FPAtomic = isFP in
-  def _ADDR64 : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.Addr64, vdataClass>,
-                MUBUFAddr64Table <1, NAME>;
-
-  let FPAtomic = isFP in
-  def _OFFEN  : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.OffEn,  vdataClass>;
-
-  let FPAtomic = isFP in
-
-  def _IDXEN  : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.IdxEn,  vdataClass>;
-
-  let FPAtomic = isFP in
-  def _BOTHEN : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.BothEn, vdataClass>;
+  let FPAtomic = isFP in {
+    def _OFFSET : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.Offset, vdataClass>,
+                  MUBUFAddr64Table <0, NAME>;
+    def _ADDR64 : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.Addr64, vdataClass>,
+                  MUBUFAddr64Table <1, NAME>;
+    def _OFFEN  : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.OffEn,  vdataClass>;
+    def _IDXEN  : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.IdxEn,  vdataClass>;
+    def _BOTHEN : MUBUF_AtomicNoRet_Pseudo <opName, BUFAddrKind.BothEn, vdataClass>;
+  }
 }
 
 multiclass MUBUF_Pseudo_Atomics_RTN <string opName,
@@ -748,28 +740,23 @@ multiclass MUBUF_Pseudo_Atomics_RTN <string opName,
                                      ValueType vdataType,
                                      SDPatternOperator atomic,
                                      bit isFP = isFloatType<vdataType>.ret> {
-  let FPAtomic = isFP in
-  def _OFFSET_RTN : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.Offset, vdataClass,
-    [(set vdataType:$vdata,
-     (atomic (MUBUFOffset v4i32:$srsrc, i32:$soffset, i16:$offset),
-             vdataType:$vdata_in))]>,
-    MUBUFAddr64Table <0, NAME # "_RTN">;
+  let FPAtomic = isFP in {
+    def _OFFSET_RTN : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.Offset, vdataClass,
+      [(set vdataType:$vdata,
+       (atomic (MUBUFOffset v4i32:$srsrc, i32:$soffset, i16:$offset),
+               vdataType:$vdata_in))]>,
+      MUBUFAddr64Table <0, NAME # "_RTN">;
 
-  let FPAtomic = isFP in
-  def _ADDR64_RTN : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.Addr64, vdataClass,
-    [(set vdataType:$vdata,
-     (atomic (MUBUFAddr64 v4i32:$srsrc, i64:$vaddr, i32:$soffset, i16:$offset),
-              vdataType:$vdata_in))]>,
-    MUBUFAddr64Table <1, NAME # "_RTN">;
+    def _ADDR64_RTN : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.Addr64, vdataClass,
+      [(set vdataType:$vdata,
+       (atomic (MUBUFAddr64 v4i32:$srsrc, i64:$vaddr, i32:$soffset, i16:$offset),
+                vdataType:$vdata_in))]>,
+      MUBUFAddr64Table <1, NAME # "_RTN">;
 
-  let FPAtomic = isFP in
-  def _OFFEN_RTN  : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.OffEn,  vdataClass>;
-
-  let FPAtomic = isFP in
-  def _IDXEN_RTN  : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.IdxEn,  vdataClass>;
-
-  let FPAtomic = isFP in
-  def _BOTHEN_RTN : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.BothEn, vdataClass>;
+    def _OFFEN_RTN  : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.OffEn,  vdataClass>;
+    def _IDXEN_RTN  : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.IdxEn,  vdataClass>;
+    def _BOTHEN_RTN : MUBUF_AtomicRet_Pseudo <opName, BUFAddrKind.BothEn, vdataClass>;
+  }
 }
 
 multiclass MUBUF_Pseudo_Atomics <string opName,
@@ -810,6 +797,7 @@ defm BUFFER_STORE_FORMAT_XYZW : MUBUF_Pseudo_Stores <
 >;
 
 let SubtargetPredicate = HasUnpackedD16VMem, D16Buf = 1 in {
+let TiedSourceNotRead = 1 in {
   defm BUFFER_LOAD_FORMAT_D16_X_gfx80 : MUBUF_Pseudo_Loads <
     "buffer_load_format_d16_x", i32
   >;
@@ -822,6 +810,7 @@ let SubtargetPredicate = HasUnpackedD16VMem, D16Buf = 1 in {
   defm BUFFER_LOAD_FORMAT_D16_XYZW_gfx80 : MUBUF_Pseudo_Loads <
    "buffer_load_format_d16_xyzw", v4i32
   >;
+}
   defm BUFFER_STORE_FORMAT_D16_X_gfx80 : MUBUF_Pseudo_Stores <
     "buffer_store_format_d16_x", i32
   >;
@@ -837,6 +826,7 @@ let SubtargetPredicate = HasUnpackedD16VMem, D16Buf = 1 in {
 } // End HasUnpackedD16VMem.
 
 let SubtargetPredicate = HasPackedD16VMem, D16Buf = 1 in {
+let TiedSourceNotRead = 1 in {
   defm BUFFER_LOAD_FORMAT_D16_X : MUBUF_Pseudo_Loads <
     "buffer_load_format_d16_x", f16
   >;
@@ -849,6 +839,7 @@ let SubtargetPredicate = HasPackedD16VMem, D16Buf = 1 in {
   defm BUFFER_LOAD_FORMAT_D16_XYZW : MUBUF_Pseudo_Loads <
     "buffer_load_format_d16_xyzw", v4f16
   >;
+}
   defm BUFFER_STORE_FORMAT_D16_X : MUBUF_Pseudo_Stores <
     "buffer_store_format_d16_x", f16
   >;
@@ -1067,6 +1058,7 @@ defm BUFFER_ATOMIC_FMAX_X2 : MUBUF_Pseudo_Atomics <
 }
 
 let SubtargetPredicate = HasD16LoadStore in {
+let TiedSourceNotRead = 1 in {
 
 defm BUFFER_LOAD_UBYTE_D16 : MUBUF_Pseudo_Loads <
   "buffer_load_ubyte_d16", i32, 1
@@ -1092,6 +1084,11 @@ defm BUFFER_LOAD_SHORT_D16_HI : MUBUF_Pseudo_Loads <
   "buffer_load_short_d16_hi", i32, 1
 >;
 
+defm BUFFER_LOAD_FORMAT_D16_HI_X : MUBUF_Pseudo_Loads <
+  "buffer_load_format_d16_hi_x", i32
+>;
+} // End TiedSourceNotRead
+
 defm BUFFER_STORE_BYTE_D16_HI : MUBUF_Pseudo_Stores <
   "buffer_store_byte_d16_hi", i32
 >;
@@ -1100,9 +1097,6 @@ defm BUFFER_STORE_SHORT_D16_HI : MUBUF_Pseudo_Stores <
   "buffer_store_short_d16_hi", i32
 >;
 
-defm BUFFER_LOAD_FORMAT_D16_HI_X : MUBUF_Pseudo_Loads <
-  "buffer_load_format_d16_hi_x", i32
->;
 defm BUFFER_STORE_FORMAT_D16_HI_X : MUBUF_Pseudo_Stores <
   "buffer_store_format_d16_hi_x", i32
 >;
@@ -1146,10 +1140,12 @@ defm TBUFFER_STORE_FORMAT_XYZ  : MTBUF_Pseudo_Stores <"tbuffer_store_format_xyz"
 defm TBUFFER_STORE_FORMAT_XYZW : MTBUF_Pseudo_Stores <"tbuffer_store_format_xyzw", VReg_128, 4>;
 
 let SubtargetPredicate = HasUnpackedD16VMem, D16Buf = 1 in {
+let TiedSourceNotRead = 1 in {
   defm TBUFFER_LOAD_FORMAT_D16_X_gfx80     : MTBUF_Pseudo_Loads  <"tbuffer_load_format_d16_x",     VGPR_32,  1>;
   defm TBUFFER_LOAD_FORMAT_D16_XY_gfx80    : MTBUF_Pseudo_Loads  <"tbuffer_load_format_d16_xy",    VReg_64,  2>;
   defm TBUFFER_LOAD_FORMAT_D16_XYZ_gfx80   : MTBUF_Pseudo_Loads  <"tbuffer_load_format_d16_xyz",   VReg_96,  3>;
   defm TBUFFER_LOAD_FORMAT_D16_XYZW_gfx80  : MTBUF_Pseudo_Loads  <"tbuffer_load_format_d16_xyzw",  VReg_128, 4>;
+}
   defm TBUFFER_STORE_FORMAT_D16_X_gfx80    : MTBUF_Pseudo_Stores <"tbuffer_store_format_d16_x",    VGPR_32,  1>;
   defm TBUFFER_STORE_FORMAT_D16_XY_gfx80   : MTBUF_Pseudo_Stores <"tbuffer_store_format_d16_xy",   VReg_64,  2>;
   defm TBUFFER_STORE_FORMAT_D16_XYZ_gfx80  : MTBUF_Pseudo_Stores <"tbuffer_store_format_d16_xyz",  VReg_96,  3>;
@@ -1157,10 +1153,12 @@ let SubtargetPredicate = HasUnpackedD16VMem, D16Buf = 1 in {
 } // End HasUnpackedD16VMem.
 
 let SubtargetPredicate = HasPackedD16VMem, D16Buf = 1 in {
+let TiedSourceNotRead = 1 in {
   defm TBUFFER_LOAD_FORMAT_D16_X     : MTBUF_Pseudo_Loads  <"tbuffer_load_format_d16_x",     VGPR_32, 1>;
   defm TBUFFER_LOAD_FORMAT_D16_XY    : MTBUF_Pseudo_Loads  <"tbuffer_load_format_d16_xy",    VGPR_32, 2>;
   defm TBUFFER_LOAD_FORMAT_D16_XYZ   : MTBUF_Pseudo_Loads  <"tbuffer_load_format_d16_xyz",   VReg_64, 3>;
   defm TBUFFER_LOAD_FORMAT_D16_XYZW  : MTBUF_Pseudo_Loads  <"tbuffer_load_format_d16_xyzw",  VReg_64, 4>;
+}
   defm TBUFFER_STORE_FORMAT_D16_X    : MTBUF_Pseudo_Stores <"tbuffer_store_format_d16_x",    VGPR_32, 1>;
   defm TBUFFER_STORE_FORMAT_D16_XY   : MTBUF_Pseudo_Stores <"tbuffer_store_format_d16_xy",   VGPR_32, 2>;
   defm TBUFFER_STORE_FORMAT_D16_XYZ  : MTBUF_Pseudo_Stores <"tbuffer_store_format_d16_xyz",  VReg_64, 3>;

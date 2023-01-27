@@ -1,5 +1,5 @@
-// RUN: mlir-opt %s -convert-gpu-to-nvvm -split-input-file | FileCheck %s
-// RUN: mlir-opt %s -convert-gpu-to-nvvm='index-bitwidth=32' -split-input-file | FileCheck --check-prefix=CHECK32 %s
+// RUN: mlir-opt %s -convert-gpu-to-nvvm='has-redux=1' -split-input-file | FileCheck %s
+// RUN: mlir-opt %s -convert-gpu-to-nvvm='has-redux=1 index-bitwidth=32' -split-input-file | FileCheck --check-prefix=CHECK32 %s
 
 gpu.module @test_module {
   // CHECK-LABEL: func @gpu_index_ops()
@@ -344,6 +344,25 @@ gpu.module @test_module {
 // -----
 
 gpu.module @test_module {
+  // CHECK: llvm.func @__nv_tanf(f32) -> f32
+  // CHECK: llvm.func @__nv_tan(f64) -> f64
+  // CHECK-LABEL: func @gpu_tan
+  func.func @gpu_tan(%arg_f16 : f16, %arg_f32 : f32, %arg_f64 : f64) -> (f16, f32, f64) {
+    %result16 = math.tan %arg_f16 : f16
+    // CHECK: llvm.fpext %{{.*}} : f16 to f32
+    // CHECK-NEXT: llvm.call @__nv_tanf(%{{.*}}) : (f32) -> f32
+    // CHECK-NEXT: llvm.fptrunc %{{.*}} : f32 to f16
+    %result32 = math.tan %arg_f32 : f32
+    // CHECK: llvm.call @__nv_tanf(%{{.*}}) : (f32) -> f32
+    %result64 = math.tan %arg_f64 : f64
+    // CHECK: llvm.call @__nv_tan(%{{.*}}) : (f64) -> f64
+    func.return %result16, %result32, %result64 : f16, f32, f64
+  }
+}
+
+// -----
+
+gpu.module @test_module {
   // CHECK: llvm.func @__nv_tanhf(f32) -> f32
   // CHECK: llvm.func @__nv_tanh(f64) -> f64
   // CHECK-LABEL: func @gpu_tanh
@@ -551,6 +570,47 @@ gpu.module @test_module {
     // CHECK-NEXT: %[[ARGPTR:.*]] = llvm.bitcast %[[ALLOC]] : !llvm.ptr<struct<(i32, f64)>> to !llvm.ptr<i8>
     // CHECK-NEXT: llvm.call @vprintf(%[[FORMATSTART]], %[[ARGPTR]]) : (!llvm.ptr<i8>, !llvm.ptr<i8>) -> i32
     gpu.printf "Hello: %d\n" %arg0, %arg1 : i32, f32
+    gpu.return
+  }
+}
+
+// -----
+
+gpu.module @test_module {
+  // CHECK-LABEL: func @subgroup_reduce_add
+  gpu.func @subgroup_reduce_add(%arg0 : i32) {
+    // CHECK: nvvm.redux.sync add {{.*}}
+    %result = gpu.subgroup_reduce add %arg0 uniform {} : (i32) -> (i32)
+    gpu.return
+  }
+  // CHECK-LABEL: func @subgroup_reduce_and
+  gpu.func @subgroup_reduce_and(%arg0 : i32) {
+    // CHECK: nvvm.redux.sync and {{.*}}
+    %result = gpu.subgroup_reduce and %arg0 uniform {} : (i32) -> (i32)
+    gpu.return
+  }
+  // CHECK-LABEL:  @subgroup_reduce_max
+  gpu.func @subgroup_reduce_max(%arg0 : i32) {
+    // CHECK: nvvm.redux.sync max {{.*}}
+    %result = gpu.subgroup_reduce max %arg0 uniform {} : (i32) -> (i32)
+    gpu.return
+  }
+  // CHECK-LABEL: @subgroup_reduce_min
+  gpu.func @subgroup_reduce_min(%arg0 : i32) {
+    // CHECK: nvvm.redux.sync min {{.*}}
+    %result = gpu.subgroup_reduce min %arg0 uniform {} : (i32) -> (i32)
+    gpu.return
+  }
+  // CHECK-LABEL:  @subgroup_reduce_or
+  gpu.func @subgroup_reduce_or(%arg0 : i32) {
+    // CHECK: nvvm.redux.sync or {{.*}}
+    %result = gpu.subgroup_reduce or %arg0 uniform {} : (i32) -> (i32)
+    gpu.return
+  }
+  // CHECK-LABEL: @subgroup_reduce_xor
+  gpu.func @subgroup_reduce_xor(%arg0 : i32) {
+    // CHECK nvvm.redux.sync xor {{.*}}
+    %result = gpu.subgroup_reduce xor %arg0 uniform {} : (i32) -> (i32)
     gpu.return
   }
 }

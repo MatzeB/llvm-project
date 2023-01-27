@@ -45,10 +45,6 @@ using namespace llvm;
 
 #define DEBUG_TYPE "riscv-asm-parser"
 
-// Include the auto-generated portion of the compress emitter.
-#define GEN_COMPRESS_INSTR
-#include "RISCVGenCompressInstEmitter.inc"
-
 STATISTIC(RISCVNumInstrsCompressed,
           "Number of RISC-V Compressed instructions emitted");
 
@@ -622,6 +618,16 @@ public:
            VK == RISCVMCExpr::VK_RISCV_None;
   }
 
+  bool isUImm2Lsb0() const {
+    if (!isImm())
+      return false;
+    int64_t Imm;
+    RISCVMCExpr::VariantKind VK = RISCVMCExpr::VK_RISCV_None;
+    bool IsConstantImm = evaluateConstantImm(getImm(), Imm, VK);
+    return IsConstantImm && isShiftedUInt<1, 1>(Imm) &&
+           VK == RISCVMCExpr::VK_RISCV_None;
+  }
+
   bool isUImm7Lsb00() const {
     if (!isImm())
       return false;
@@ -809,7 +815,7 @@ public:
   }
 
   void print(raw_ostream &OS) const override {
-    auto RegName = [](unsigned Reg) {
+    auto RegName = [](MCRegister Reg) {
       if (Reg)
         return RISCVInstPrinter::getRegisterName(Reg);
       else
@@ -1155,6 +1161,9 @@ bool RISCVAsmParser::MatchAndEmitInstruction(SMLoc IDLoc, unsigned &Opcode,
     return generateImmOutOfRangeError(Operands, ErrorInfo, 0, (1 << 4) - 1);
   case Match_InvalidUImm2:
     return generateImmOutOfRangeError(Operands, ErrorInfo, 0, (1 << 2) - 1);
+  case Match_InvalidUImm2Lsb0:
+    return generateImmOutOfRangeError(Operands, ErrorInfo, 0, 2,
+                                      "immediate must be one of");
   case Match_InvalidUImm3:
     return generateImmOutOfRangeError(Operands, ErrorInfo, 0, (1 << 3) - 1);
   case Match_InvalidUImm5:
@@ -2316,7 +2325,7 @@ bool RISCVAsmParser::parseDirectiveVariantCC() {
 
 void RISCVAsmParser::emitToStreamer(MCStreamer &S, const MCInst &Inst) {
   MCInst CInst;
-  bool Res = compressInst(CInst, Inst, getSTI(), S.getContext());
+  bool Res = RISCVRVC::compress(CInst, Inst, getSTI());
   if (Res)
     ++RISCVNumInstrsCompressed;
   S.emitInstruction((Res ? CInst : Inst), getSTI());

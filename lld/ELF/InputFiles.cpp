@@ -1706,9 +1706,9 @@ void BinaryFile::parse() {
   // user programs can access blobs by name. Non-alphanumeric
   // characters in a filename are replaced with underscore.
   std::string s = "_binary_" + mb.getBufferIdentifier().str();
-  for (size_t i = 0; i < s.size(); ++i)
-    if (!isAlnum(s[i]))
-      s[i] = '_';
+  for (char &c : s)
+    if (!isAlnum(c))
+      c = '_';
 
   llvm::StringSaver &saver = lld::saver();
 
@@ -1773,9 +1773,7 @@ bool InputFile::shouldExtractForCommon(StringRef name) {
 }
 
 std::string elf::replaceThinLTOSuffix(StringRef path) {
-  StringRef suffix = config->thinLTOObjectSuffixReplace.first;
-  StringRef repl = config->thinLTOObjectSuffixReplace.second;
-
+  auto [suffix, repl] = config->thinLTOObjectSuffixReplace;
   if (path.consume_back(suffix))
     return (path + repl).str();
   return std::string(path);

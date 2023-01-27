@@ -27,6 +27,7 @@
 #include "llvm/Support/Compiler.h"
 #include <cassert>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -50,13 +51,22 @@ const Stmt &ignoreCFGOmittedNodes(const Stmt &S);
 /// Returns the set of all fields in the type.
 llvm::DenseSet<const FieldDecl *> getObjectFields(QualType Type);
 
+struct ContextSensitiveOptions {
+  /// The maximum depth to analyze. A value of zero is equivalent to disabling
+  /// context-sensitive analysis entirely.
+  unsigned Depth = 2;
+};
+
 /// Owns objects that encompass the state of a program and stores context that
 /// is used during dataflow analysis.
 class DataflowAnalysisContext {
 public:
-  // FIXME: merge with TransferOptions from Transfer.h.
   struct Options {
-    bool EnableContextSensitiveAnalysis;
+    /// Options for analyzing function bodies when present in the translation
+    /// unit, or empty to disable context-sensitive analysis. Note that this is
+    /// fundamentally limited: some constructs, such as recursion, are
+    /// explicitly unsupported.
+    std::optional<ContextSensitiveOptions> ContextSensitiveOpts;
   };
 
   /// Constructs a dataflow analysis context.
@@ -65,10 +75,10 @@ public:
   ///
   ///  `S` must not be null.
   DataflowAnalysisContext(std::unique_ptr<Solver> S,
-                          Options Opts = {
-                              /*EnableContextSensitiveAnalysis=*/false})
+                          Options Opts = Options{
+                              /*ContextSensitiveOpts=*/std::nullopt})
       : S(std::move(S)), TrueVal(createAtomicBoolValue()),
-        FalseVal(createAtomicBoolValue()), Options(Opts) {
+        FalseVal(createAtomicBoolValue()), Opts(Opts) {
     assert(this->S != nullptr);
   }
 
@@ -260,7 +270,7 @@ public:
   /// returns null.
   const ControlFlowContext *getControlFlowContext(const FunctionDecl *F);
 
-  void addFieldsReferencedInScope(llvm::DenseSet<const FieldDecl *> Fields);
+  const Options &getOptions() { return Opts; }
 
 private:
   friend class Environment;
@@ -276,8 +286,11 @@ private:
     using DenseMapInfo::isEqual;
   };
 
-  /// Returns the subset of fields of `Type` that are referenced in the scope of
-  /// the analysis.
+  // Extends the set of modeled field declarations.
+  void addModeledFields(const llvm::DenseSet<const FieldDecl *> &Fields);
+
+  /// Returns the fields of `Type`, limited to the set of fields modeled by this
+  /// context.
   llvm::DenseSet<const FieldDecl *> getReferencedFields(QualType Type);
 
   /// Adds all constraints of the flow condition identified by `Token` and all
@@ -345,7 +358,7 @@ private:
   AtomicBoolValue &TrueVal;
   AtomicBoolValue &FalseVal;
 
-  Options Options;
+  Options Opts;
 
   // Indices that are used to avoid recreating the same composite boolean
   // values.
@@ -377,8 +390,8 @@ private:
 
   llvm::DenseMap<const FunctionDecl *, ControlFlowContext> FunctionContexts;
 
-  // All fields referenced (statically) in the scope of the analysis.
-  llvm::DenseSet<const FieldDecl *> FieldsReferencedInScope;
+  // Fields modeled by environments covered by this context.
+  llvm::DenseSet<const FieldDecl *> ModeledFields;
 };
 
 } // namespace dataflow

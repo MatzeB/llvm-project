@@ -11,7 +11,6 @@
 #include "../clang-tidy/ClangTidyDiagnosticConsumer.h"
 #include "../clang-tidy/ClangTidyModuleRegistry.h"
 #include "AST.h"
-#include "ASTSignals.h"
 #include "Compiler.h"
 #include "Config.h"
 #include "Diagnostics.h"
@@ -24,6 +23,7 @@
 #include "Preamble.h"
 #include "SourceCode.h"
 #include "TidyProvider.h"
+#include "clang-include-cleaner/Record.h"
 #include "index/CanonicalIncludes.h"
 #include "index/Index.h"
 #include "index/Symbol.h"
@@ -543,6 +543,10 @@ ParsedAST::build(llvm::StringRef Filename, const ParseInputs &Inputs,
             // NOLINT comments)?
             return DiagnosticsEngine::Ignored;
           }
+          if (!CTContext->getOptions().SystemHeaders.value_or(false) &&
+              Info.hasSourceManager() &&
+              Info.getSourceManager().isInSystemMacro(Info.getLocation()))
+            return DiagnosticsEngine::Ignored;
 
           // Check for warning-as-error.
           if (DiagLevel == DiagnosticsEngine::Warning &&
@@ -796,6 +800,12 @@ ParsedAST::ParsedAST(PathRef TUPath, llvm::StringRef Version,
   Resolver = std::make_unique<HeuristicResolver>(getASTContext());
   assert(this->Clang);
   assert(this->Action);
+}
+
+const include_cleaner::PragmaIncludes *ParsedAST::getPragmaIncludes() const {
+  if (!Preamble)
+    return nullptr;
+  return &Preamble->Pragmas;
 }
 
 std::optional<llvm::StringRef> ParsedAST::preambleVersion() const {

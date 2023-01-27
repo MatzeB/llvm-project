@@ -5621,6 +5621,10 @@ def t2CSINC : CS<"csinc", 0b1001>;
 def t2CSINV : CS<"csinv", 0b1010>;
 def t2CSNEG : CS<"csneg", 0b1011>;
 
+def ARMcsinc_su : PatFrag<(ops node:$lhs, node:$rhs, node:$cond),
+                          (ARMcsinc node:$lhs, node:$rhs, node:$cond), [{
+  return N->hasOneUse();
+}]>;
 
 let Predicates = [HasV8_1MMainline] in {
   multiclass CSPats<SDNode Node, Instruction Insn> {
@@ -5659,8 +5663,8 @@ let Predicates = [HasV8_1MMainline] in {
   defm : ModifiedV8_1CSEL<t2CSNEG, (sub 0, rGPR:$fval)>;
 
   def : T2Pat<(ARMcmov (topbitsallzero32:$Rn), (i32 1), cmovpred:$imm),
-              (t2CSINC $Rn, ZR, $imm)>;
-  def : T2Pat<(and (topbitsallzero32:$Rn), (ARMcsinc (i32 0), (i32 0), cmovpred:$imm)),
+              (t2CSINC $Rn, ZR, (inv_cond_XFORM imm:$imm))>;
+  def : T2Pat<(and (topbitsallzero32:$Rn), (ARMcsinc_su (i32 0), (i32 0), cmovpred:$imm)),
               (t2CSEL ZR, $Rn, $imm)>;
 }
 

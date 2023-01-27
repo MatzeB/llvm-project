@@ -990,10 +990,11 @@ LazyValueInfoImpl::solveBlockValueOverflowIntrinsic(WithOverflowInst *WO,
 
 std::optional<ValueLatticeElement>
 LazyValueInfoImpl::solveBlockValueIntrinsic(IntrinsicInst *II, BasicBlock *BB) {
+  ValueLatticeElement MetadataVal = getFromRangeMetadata(II);
   if (!ConstantRange::isIntrinsicSupported(II->getIntrinsicID())) {
     LLVM_DEBUG(dbgs() << " compute BB '" << BB->getName()
                       << "' - unknown intrinsic.\n");
-    return getFromRangeMetadata(II);
+    return MetadataVal;
   }
 
   SmallVector<ConstantRange, 2> OpRanges;
@@ -1004,8 +1005,9 @@ LazyValueInfoImpl::solveBlockValueIntrinsic(IntrinsicInst *II, BasicBlock *BB) {
     OpRanges.push_back(*Range);
   }
 
-  return ValueLatticeElement::getRange(
-      ConstantRange::intrinsic(II->getIntrinsicID(), OpRanges));
+  return intersect(ValueLatticeElement::getRange(ConstantRange::intrinsic(
+                       II->getIntrinsicID(), OpRanges)),
+                   MetadataVal);
 }
 
 std::optional<ValueLatticeElement>
@@ -1648,6 +1650,48 @@ ConstantRange LazyValueInfo::getConstantRange(Value *V, Instruction *CxtI,
   assert(!(Result.isConstant() && isa<ConstantInt>(Result.getConstant())) &&
          "ConstantInt value must be represented as constantrange");
   return ConstantRange::getFull(Width);
+}
+
+ConstantRange LazyValueInfo::getConstantRangeAtUse(const Use &U,
+                                                   bool UndefAllowed) {
+  Value *V = U.get();
+  ConstantRange CR =
+      getConstantRange(V, cast<Instruction>(U.getUser()), UndefAllowed);
+
+  // Check whether the only (possibly transitive) use of the value is in a
+  // position where V can be constrained by a select or branch condition.
+  const Use *CurrU = &U;
+  // TODO: Increase limit?
+  const unsigned MaxUsesToInspect = 3;
+  for (unsigned I = 0; I < MaxUsesToInspect; ++I) {
+    std::optional<ValueLatticeElement> CondVal;
+    auto *CurrI = cast<Instruction>(CurrU->getUser());
+    if (auto *SI = dyn_cast<SelectInst>(CurrI)) {
+      if (CurrU->getOperandNo() == 1)
+        CondVal = getValueFromCondition(V, SI->getCondition(), true);
+      else if (CurrU->getOperandNo() == 2)
+        CondVal = getValueFromCondition(V, SI->getCondition(), false);
+    } else if (auto *PHI = dyn_cast<PHINode>(CurrI)) {
+      // TODO: Use non-local query?
+      CondVal =
+          getEdgeValueLocal(V, PHI->getIncomingBlock(*CurrU), PHI->getParent());
+    } else if (!isSafeToSpeculativelyExecute(CurrI)) {
+      // Stop walking if we hit a non-speculatable instruction. Even if the
+      // result is only used under a specific condition, executing the
+      // instruction itself may cause side effects or UB already.
+      break;
+    }
+    if (CondVal && CondVal->isConstantRange())
+      CR = CR.intersectWith(CondVal->getConstantRange());
+
+    // Only follow one-use chain, to allow direct intersection of conditions.
+    // If there are multiple uses, we would have to intersect with the union of
+    // all conditions at different uses.
+    if (!CurrI->hasOneUse())
+      break;
+    CurrU = &*CurrI->use_begin();
+  }
+  return CR;
 }
 
 /// Determine whether the specified value is known to be a

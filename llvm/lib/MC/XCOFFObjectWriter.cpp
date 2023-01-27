@@ -238,6 +238,7 @@ class XCOFFObjectWriter : public MCObjectWriter {
   uint32_t SymbolTableEntryCount = 0;
   uint64_t SymbolTableOffset = 0;
   uint16_t SectionCount = 0;
+  uint32_t PaddingsBeforeDwarf = 0;
   std::vector<std::pair<std::string, size_t>> FileNames;
   bool HasVisibility = false;
 
@@ -416,6 +417,7 @@ void XCOFFObjectWriter::reset() {
   SymbolTableEntryCount = 0;
   SymbolTableOffset = 0;
   SectionCount = 0;
+  PaddingsBeforeDwarf = 0;
   Strings.clear();
 
   MCObjectWriter::reset();
@@ -465,13 +467,12 @@ CsectGroup &XCOFFObjectWriter::getCsectGroup(const MCSectionXCOFF *MCSec) {
     return TOCCsects;
   case XCOFF::XMC_TC:
   case XCOFF::XMC_TE:
+  case XCOFF::XMC_TD:
     assert(XCOFF::XTY_SD == MCSec->getCSectType() &&
            "Only an initialized csect can contain TC entry.");
     assert(!TOCCsects.empty() &&
            "We should at least have a TOC-base in this CsectGroup.");
     return TOCCsects;
-  case XCOFF::XMC_TD:
-    report_fatal_error("toc-data not yet supported when writing object files.");
   default:
     report_fatal_error("Unhandled mapping of csect to section.");
   }
@@ -615,10 +616,6 @@ void XCOFFObjectWriter::recordRelocation(MCAssembler &Asm,
       TargetObjectWriter->getRelocTypeAndSignSize(Target, Fixup, IsPCRel);
 
   const MCSectionXCOFF *SymASec = getContainingCsect(cast<MCSymbolXCOFF>(SymA));
-
-  if (SymASec->isCsect() && SymASec->getMappingClass() == XCOFF::XMC_TD)
-    report_fatal_error("toc-data not yet supported when writing object files.");
-
   assert(SectionMap.find(SymASec) != SectionMap.end() &&
          "Expected containing csect to exist in map.");
 
@@ -634,15 +631,24 @@ void XCOFFObjectWriter::recordRelocation(MCAssembler &Asm,
     FixedValue = 0;
   else if (Type == XCOFF::RelocationType::R_TOC ||
            Type == XCOFF::RelocationType::R_TOCL) {
-    // The FixedValue should be the TOC entry offset from the TOC-base plus any
-    // constant offset value.
-    const int64_t TOCEntryOffset = SectionMap[SymASec]->Address -
-                                   TOCCsects.front().Address +
-                                   Target.getConstant();
-    if (Type == XCOFF::RelocationType::R_TOC && !isInt<16>(TOCEntryOffset))
-      report_fatal_error("TOCEntryOffset overflows in small code model mode");
+    // For non toc-data external symbols, R_TOC type relocation will relocate to
+    // data symbols that have XCOFF::XTY_SD type csect. For toc-data external
+    // symbols, R_TOC type relocation will relocate to data symbols that have
+    // XCOFF_ER type csect. For XCOFF_ER kind symbols, there will be no TOC
+    // entry for them, so the FixedValue should always be 0.
+    if (SymASec->getCSectType() == XCOFF::XTY_ER) {
+      FixedValue = 0;
+    } else {
+      // The FixedValue should be the TOC entry offset from the TOC-base plus
+      // any constant offset value.
+      const int64_t TOCEntryOffset = SectionMap[SymASec]->Address -
+                                     TOCCsects.front().Address +
+                                     Target.getConstant();
+      if (Type == XCOFF::RelocationType::R_TOC && !isInt<16>(TOCEntryOffset))
+        report_fatal_error("TOCEntryOffset overflows in small code model mode");
 
-    FixedValue = TOCEntryOffset;
+      FixedValue = TOCEntryOffset;
+    }
   } else if (Type == XCOFF::RelocationType::R_RBR) {
     MCSectionXCOFF *ParentSec = cast<MCSectionXCOFF>(Fragment->getParent());
     assert((SymASec->getMappingClass() == XCOFF::XMC_PR &&
@@ -1148,7 +1154,6 @@ void XCOFFObjectWriter::finalizeSectionInfo() {
       auxiliaryHeaderSize();
 
   // Calculate the file offset to the section data.
-  uint64_t CurrAddress = 0;
   for (auto *Sec : Sections) {
     if (Sec->Index == SectionEntry::UninitializedIndex || Sec->IsVirtual)
       continue;
@@ -1157,19 +1162,10 @@ void XCOFFObjectWriter::finalizeSectionInfo() {
     RawPointer += Sec->Size;
     if (RawPointer > MaxRawDataSize)
       report_fatal_error("Section raw data overflowed this object file.");
-
-    CurrAddress = Sec->Address + Sec->Size;
   }
 
-  // Sections other than DWARF section use DefaultSectionAlign as the default
-  // alignment, while DWARF sections have their own alignments. If these two
-  // alignments are not the same, we need some padding here and to use this
-  // padding in FileOffsetToData calculation.
   if (!DwarfSections.empty()) {
-    RawPointer +=
-        alignTo(CurrAddress,
-                (*DwarfSections.begin()).DwarfSect->MCSec->getAlign()) -
-        CurrAddress;
+    RawPointer += PaddingsBeforeDwarf;
     for (auto &DwarfSection : DwarfSections) {
       DwarfSection.FileOffsetToData = RawPointer;
       RawPointer += DwarfSection.MemorySize;
@@ -1345,7 +1341,17 @@ void XCOFFObjectWriter::assignAddressesAndIndices(const MCAsmLayout &Layout) {
     Section->Size = Address - Section->Address;
   }
 
-  // Start to generate DWARF sections.
+  // Start to generate DWARF sections. Sections other than DWARF section use
+  // DefaultSectionAlign as the default alignment, while DWARF sections have
+  // their own alignments. If these two alignments are not the same, we need
+  // some paddings here and record the paddings bytes for FileOffsetToData
+  // calculation.
+  if (!DwarfSections.empty())
+    PaddingsBeforeDwarf =
+        alignTo(Address,
+                (*DwarfSections.begin()).DwarfSect->MCSec->getAlign()) -
+        Address;
+
   DwarfSectionEntry *LastDwarfSection = nullptr;
   for (auto &DwarfSection : DwarfSections) {
     assert((SectionIndex <= MaxSectionIndex) && "Section index overflow!");

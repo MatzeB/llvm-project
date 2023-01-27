@@ -637,10 +637,10 @@ void FrameTypeBuilder::addFieldForAllocas(const Function &F,
     return;
   }
 
-  // Because there are pathes from the lifetime.start to coro.end
+  // Because there are paths from the lifetime.start to coro.end
   // for each alloca, the liferanges for every alloca is overlaped
   // in the blocks who contain coro.end and the successor blocks.
-  // So we choose to skip there blocks when we calculates the liferange
+  // So we choose to skip there blocks when we calculate the liferange
   // for each alloca. It should be reasonable since there shouldn't be uses
   // in these blocks and the coroutine frame shouldn't be used outside the
   // coroutine body.
@@ -678,7 +678,7 @@ void FrameTypeBuilder::addFieldForAllocas(const Function &F,
     std::optional<TypeSize> RetSize = A.Alloca->getAllocationSize(DL);
     assert(RetSize && "Variable Length Arrays (VLA) are not supported.\n");
     assert(!RetSize->isScalable() && "Scalable vectors are not yet supported");
-    return RetSize->getFixedSize();
+    return RetSize->getFixedValue();
   };
   // Put larger allocas in the front. So the larger allocas have higher
   // priority to merge, which can save more space potentially. Also each
@@ -911,12 +911,12 @@ static DIType *solveDIType(DIBuilder &Builder, Type *Ty,
     //  };
     RetType =
         Builder.createPointerType(nullptr, Layout.getTypeSizeInBits(Ty),
-                                  Layout.getABITypeAlignment(Ty) * CHAR_BIT,
+                                  Layout.getABITypeAlign(Ty).value() * CHAR_BIT,
                                   /*DWARFAddressSpace=*/std::nullopt, Name);
   } else if (Ty->isStructTy()) {
     auto *DIStruct = Builder.createStructType(
         Scope, Name, Scope->getFile(), LineNum, Layout.getTypeSizeInBits(Ty),
-        Layout.getPrefTypeAlignment(Ty) * CHAR_BIT,
+        Layout.getPrefTypeAlign(Ty).value() * CHAR_BIT,
         llvm::DINode::FlagArtificial, nullptr, llvm::DINodeArray());
 
     auto *StructTy = cast<StructType>(Ty);
@@ -1086,7 +1086,7 @@ static void buildFrameDebugInfo(Function &F, coro::Shape &Shape,
 
     Type *Ty = FrameTy->getElementType(Index);
     assert(Ty->isSized() && "We can't handle type which is not sized.\n");
-    SizeInBits = Layout.getTypeSizeInBits(Ty).getFixedSize();
+    SizeInBits = Layout.getTypeSizeInBits(Ty).getFixedValue();
     AlignInBits = OffsetCache[Index].first * 8;
     OffsetInBits = OffsetCache[Index].second * 8;
 
@@ -1634,7 +1634,7 @@ static void insertSpills(const FrameDataInfo &FrameData, coro::Shape &Shape) {
       //
       // Note: If we change the strategy dealing with alignment, we need to refine
       // this casting.
-      if (GEP->getResultElementType() != Orig->getType())
+      if (GEP->getType() != Orig->getType())
         return Builder.CreateBitCast(GEP, Orig->getType(),
                                      Orig->getName() + Twine(".cast"));
     }

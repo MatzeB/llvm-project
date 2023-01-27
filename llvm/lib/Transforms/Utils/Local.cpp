@@ -62,6 +62,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/IR/ProfDataUtils.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
@@ -200,33 +201,31 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
     bool Changed = false;
 
     // Figure out which case it goes to.
-    for (auto i = SI->case_begin(), e = SI->case_end(); i != e;) {
+    for (auto It = SI->case_begin(), End = SI->case_end(); It != End;) {
       // Found case matching a constant operand?
-      if (i->getCaseValue() == CI) {
-        TheOnlyDest = i->getCaseSuccessor();
+      if (It->getCaseValue() == CI) {
+        TheOnlyDest = It->getCaseSuccessor();
         break;
       }
 
       // Check to see if this branch is going to the same place as the default
       // dest.  If so, eliminate it as an explicit compare.
-      if (i->getCaseSuccessor() == DefaultDest) {
-        MDNode *MD = SI->getMetadata(LLVMContext::MD_prof);
+      if (It->getCaseSuccessor() == DefaultDest) {
+        MDNode *MD = getValidBranchWeightMDNode(*SI);
         unsigned NCases = SI->getNumCases();
         // Fold the case metadata into the default if there will be any branches
         // left, unless the metadata doesn't match the switch.
-        if (NCases > 1 && MD && MD->getNumOperands() == 2 + NCases) {
+        if (NCases > 1 && MD) {
           // Collect branch weights into a vector.
           SmallVector<uint32_t, 8> Weights;
-          for (unsigned MD_i = 1, MD_e = MD->getNumOperands(); MD_i < MD_e;
-               ++MD_i) {
-            auto *CI = mdconst::extract<ConstantInt>(MD->getOperand(MD_i));
-            Weights.push_back(CI->getValue().getZExtValue());
-          }
+          extractBranchWeights(MD, Weights);
+
           // Merge weight of this case to the default weight.
-          unsigned idx = i->getCaseIndex();
-          Weights[0] += Weights[idx+1];
+          unsigned Idx = It->getCaseIndex();
+          // TODO: Add overflow check.
+          Weights[0] += Weights[Idx + 1];
           // Remove weight for this case.
-          std::swap(Weights[idx+1], Weights.back());
+          std::swap(Weights[Idx + 1], Weights.back());
           Weights.pop_back();
           SI->setMetadata(LLVMContext::MD_prof,
                           MDBuilder(BB->getContext()).
@@ -235,14 +234,14 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
         // Remove this entry.
         BasicBlock *ParentBB = SI->getParent();
         DefaultDest->removePredecessor(ParentBB);
-        i = SI->removeCase(i);
-        e = SI->case_end();
+        It = SI->removeCase(It);
+        End = SI->case_end();
 
         // Removing this case may have made the condition constant. In that
         // case, update CI and restart iteration through the cases.
         if (auto *NewCI = dyn_cast<ConstantInt>(SI->getCondition())) {
           CI = NewCI;
-          i = SI->case_begin();
+          It = SI->case_begin();
         }
 
         Changed = true;
@@ -252,11 +251,11 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       // Otherwise, check to see if the switch only branches to one destination.
       // We do this by reseting "TheOnlyDest" to null when we find two non-equal
       // destinations.
-      if (i->getCaseSuccessor() != TheOnlyDest)
+      if (It->getCaseSuccessor() != TheOnlyDest)
         TheOnlyDest = nullptr;
 
       // Increment this iterator as we haven't removed the case.
-      ++i;
+      ++It;
     }
 
     if (CI && !TheOnlyDest) {
@@ -313,18 +312,14 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       BranchInst *NewBr = Builder.CreateCondBr(Cond,
                                                FirstCase.getCaseSuccessor(),
                                                SI->getDefaultDest());
-      MDNode *MD = SI->getMetadata(LLVMContext::MD_prof);
-      if (MD && MD->getNumOperands() == 3) {
-        ConstantInt *SICase =
-            mdconst::dyn_extract<ConstantInt>(MD->getOperand(2));
-        ConstantInt *SIDef =
-            mdconst::dyn_extract<ConstantInt>(MD->getOperand(1));
-        assert(SICase && SIDef);
+      SmallVector<uint32_t> Weights;
+      if (extractBranchWeights(*SI, Weights) && Weights.size() == 2) {
+        uint32_t DefWeight = Weights[0];
+        uint32_t CaseWeight = Weights[1];
         // The TrueWeight should be the weight for the single case of SI.
         NewBr->setMetadata(LLVMContext::MD_prof,
-                        MDBuilder(BB->getContext()).
-                        createBranchWeights(SICase->getValue().getZExtValue(),
-                                            SIDef->getValue().getZExtValue()));
+                           MDBuilder(BB->getContext())
+                               .createBranchWeights(CaseWeight, DefWeight));
       }
 
       // Update make.implicit metadata to the newly-created conditional branch.
@@ -1496,7 +1491,7 @@ static bool valueCoversEntireFragment(Type *ValTy, DbgVariableIntrinsic *DII) {
   if (std::optional<uint64_t> FragmentSize = DII->getFragmentSizeInBits()) {
     assert(!ValueSize.isScalable() &&
            "Fragments don't work on scalable types.");
-    return ValueSize.getFixedSize() >= *FragmentSize;
+    return ValueSize.getFixedValue() >= *FragmentSize;
   }
   // We can't always calculate the size of the DI variable (e.g. if it is a
   // VLA). Try to use the size of the alloca that the dbg intrinsic describes
@@ -1842,7 +1837,7 @@ static void salvageDbgAssignAddress(DbgAssignIntrinsic *DAI) {
     DAI->setAddress(NewV);
     DAI->setAddressExpression(SalvagedExpr);
   } else {
-    DAI->setAddress(UndefValue::get(I->getType()));
+    DAI->setKillAddress();
   }
 }
 
@@ -2557,13 +2552,11 @@ static bool markAliveBlocks(Function &F,
   return Changed;
 }
 
-void llvm::removeUnwindEdge(BasicBlock *BB, DomTreeUpdater *DTU) {
+Instruction *llvm::removeUnwindEdge(BasicBlock *BB, DomTreeUpdater *DTU) {
   Instruction *TI = BB->getTerminator();
 
-  if (auto *II = dyn_cast<InvokeInst>(TI)) {
-    changeToCall(II, DTU);
-    return;
-  }
+  if (auto *II = dyn_cast<InvokeInst>(TI))
+    return changeToCall(II, DTU);
 
   Instruction *NewTI;
   BasicBlock *UnwindDest;
@@ -2591,6 +2584,7 @@ void llvm::removeUnwindEdge(BasicBlock *BB, DomTreeUpdater *DTU) {
   TI->eraseFromParent();
   if (DTU)
     DTU->applyUpdates({{DominatorTree::Delete, BB, UnwindDest}});
+  return NewTI;
 }
 
 /// removeUnreachableBlocks - Remove blocks that are not reachable, even
@@ -2758,6 +2752,7 @@ void llvm::copyMetadataForLoad(LoadInst &Dest, const LoadInst &Source) {
     case LLVMContext::MD_nontemporal:
     case LLVMContext::MD_mem_parallel_loop_access:
     case LLVMContext::MD_access_group:
+    case LLVMContext::MD_noundef:
       // All of these directly apply.
       Dest.setMetadata(ID, N);
       break;
@@ -2921,6 +2916,11 @@ void llvm::copyNonnullMetadata(const LoadInst &OldLI, MDNode *N,
 void llvm::copyRangeMetadata(const DataLayout &DL, const LoadInst &OldLI,
                              MDNode *N, LoadInst &NewLI) {
   auto *NewTy = NewLI.getType();
+  // Simply copy the metadata if the type did not change.
+  if (NewTy == OldLI.getType()) {
+    NewLI.setMetadata(LLVMContext::MD_range, N);
+    return;
+  }
 
   // Give up unless it is converted to a pointer where there is a single very
   // valuable mapping we can do reliably.

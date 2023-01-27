@@ -265,6 +265,7 @@ set(LLVM_TOOLCHAIN_TOOLS
   llvm-lib
   llvm-libtool-darwin
   llvm-lipo
+  llvm-ml
   llvm-mt
   llvm-nm
   llvm-objcopy
@@ -288,7 +289,6 @@ set(LLVM_TOOLCHAIN_TOOLS
 set(LLVM_DISTRIBUTION_COMPONENTS
   clang
   lld
-  LTO
   clang-apply-replacements
   clang-doc
   clang-format
