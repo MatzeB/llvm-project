@@ -1345,6 +1345,9 @@ defm coroutines : BoolFOption<"coroutines",
   PosFlag<SetTrue, [CC1Option], "Enable support for the C++ Coroutines">,
   NegFlag<SetFalse>>;
 
+// facebook T146616245
+def fcoroutines_ts : Flag<["-"], "fcoroutines-ts">, Group<f_Group>, Flags<[CC1Option]>,  Alias<fcoroutines>;
+
 defm coro_aligned_allocation : BoolFOption<"coro-aligned-allocation",
   LangOpts<"CoroAlignedAllocation">, DefaultFalse,
   PosFlag<SetTrue, [CC1Option], "Prefer aligned allocation for C++ Coroutines">,
