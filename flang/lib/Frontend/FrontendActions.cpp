@@ -47,12 +47,14 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Object/OffloadBinary.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Passes/StandardInstrumentations.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h"
 #include <memory>
 
 using namespace Fortran::frontend;
@@ -543,7 +545,8 @@ void CodeGenAction::generateLLVMIR() {
   pm.enableVerifier(/*verifyPasses=*/true);
 
   // Create the pass pipeline
-  fir::createMLIRToLLVMPassPipeline(pm, level);
+  fir::createMLIRToLLVMPassPipeline(pm, level, opts.StackArrays,
+                                    opts.Underscoring);
   mlir::applyPassManagerCLOptions(pm);
 
   // run the pass manager
@@ -558,6 +561,13 @@ void CodeGenAction::generateLLVMIR() {
   llvmModule = mlir::translateModuleToLLVMIR(
       *mlirModule, *llvmCtx, moduleName ? *moduleName : "FIRModule");
 
+  if (!llvmModule) {
+    unsigned diagID = ci.getDiagnostics().getCustomDiagID(
+        clang::DiagnosticsEngine::Error, "failed to create the LLVM module");
+    ci.getDiagnostics().Report(diagID);
+    return;
+  }
+
   // Set PIC/PIE level LLVM module flags.
   if (opts.PICLevel > 0) {
     llvmModule->setPICLevel(static_cast<llvm::PICLevel::Level>(opts.PICLevel));
@@ -566,12 +576,6 @@ void CodeGenAction::generateLLVMIR() {
           static_cast<llvm::PIELevel::Level>(opts.PICLevel));
   }
 
-  if (!llvmModule) {
-    unsigned diagID = ci.getDiagnostics().getCustomDiagID(
-        clang::DiagnosticsEngine::Error, "failed to create the LLVM module");
-    ci.getDiagnostics().Report(diagID);
-    return;
-  }
 }
 
 void CodeGenAction::setUpTargetMachine() {
@@ -727,6 +731,25 @@ void CodeGenAction::runOptimizationPipeline(llvm::raw_pwrite_stream &os) {
   mpm.run(*llvmModule, mam);
 }
 
+void CodeGenAction::embedOffloadObjects() {
+  CompilerInstance &ci = this->getInstance();
+  const auto &cgOpts = ci.getInvocation().getCodeGenOpts();
+
+  for (llvm::StringRef offloadObject : cgOpts.OffloadObjects) {
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> objectOrErr =
+        llvm::MemoryBuffer::getFileOrSTDIN(offloadObject);
+    if (std::error_code ec = objectOrErr.getError()) {
+      auto diagID = ci.getDiagnostics().getCustomDiagID(
+          clang::DiagnosticsEngine::Error, "could not open '%0' for embedding");
+      ci.getDiagnostics().Report(diagID) << offloadObject;
+      return;
+    }
+    llvm::embedBufferInModule(
+        *llvmModule, **objectOrErr, ".llvm.offloading",
+        llvm::Align(llvm::object::OffloadBinary::getAlignment()));
+  }
+}
+
 void CodeGenAction::executeAction() {
   CompilerInstance &ci = this->getInstance();
 
@@ -774,11 +797,16 @@ void CodeGenAction::executeAction() {
     ci.getDiagnostics().Report(clang::diag::warn_fe_override_module)
         << theTriple;
   }
+
   // Always set the triple and data layout, to make sure they match and are set.
   // Note that this overwrites any datalayout stored in the LLVM-IR. This avoids
   // an assert for incompatible data layout when the code-generation happens.
   llvmModule->setTargetTriple(theTriple);
   llvmModule->setDataLayout(tm->createDataLayout());
+
+  // Embed offload objects specified with -fembed-offload-object
+  if (!ci.getInvocation().getCodeGenOpts().OffloadObjects.empty())
+    embedOffloadObjects();
 
   // Run LLVM's middle-end (i.e. the optimizer).
   runOptimizationPipeline(ci.isOutputStreamNull() ? *os : ci.getOutputStream());

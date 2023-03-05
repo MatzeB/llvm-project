@@ -352,8 +352,9 @@ protected:
     return *static_cast<fir::LLVMTypeConverter *>(this->getTypeConverter());
   }
 
-  void attachTBAATag(mlir::Operation *op, mlir::Type baseFIRType,
-                     mlir::Type accessFIRType, mlir::LLVM::GEPOp gep) const {
+  void attachTBAATag(mlir::LLVM::AliasAnalysisOpInterface op,
+                     mlir::Type baseFIRType, mlir::Type accessFIRType,
+                     mlir::LLVM::GEPOp gep) const {
     lowerTy().attachTBAATag(op, baseFIRType, accessFIRType, gep);
   }
 
@@ -2945,14 +2946,32 @@ struct FirEndOpConversion : public FIROpConversion<fir::FirEndOp> {
   }
 };
 
-/// Lower `fir.gentypedesc` to a global constant.
-struct GenTypeDescOpConversion : public FIROpConversion<fir::GenTypeDescOp> {
+/// Lower `fir.type_desc` to a global addr.
+struct TypeDescOpConversion : public FIROpConversion<fir::TypeDescOp> {
   using FIROpConversion::FIROpConversion;
 
   mlir::LogicalResult
-  matchAndRewrite(fir::GenTypeDescOp gentypedesc, OpAdaptor adaptor,
+  matchAndRewrite(fir::TypeDescOp typeDescOp, OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    TODO(gentypedesc.getLoc(), "fir.gentypedesc codegen");
+    mlir::Type inTy = typeDescOp.getInType();
+    assert(inTy.isa<fir::RecordType>() && "expecting fir.type");
+    auto recordType = inTy.dyn_cast<fir::RecordType>();
+    auto module = typeDescOp.getOperation()->getParentOfType<mlir::ModuleOp>();
+    std::string typeDescName =
+        fir::NameUniquer::getTypeDescriptorName(recordType.getName());
+    if (auto global = module.lookupSymbol<mlir::LLVM::GlobalOp>(typeDescName)) {
+      auto ty = mlir::LLVM::LLVMPointerType::get(
+          this->lowerTy().convertType(global.getType()));
+      rewriter.replaceOpWithNewOp<mlir::LLVM::AddressOfOp>(typeDescOp, ty,
+                                                           global.getSymName());
+      return mlir::success();
+    } else if (auto global = module.lookupSymbol<fir::GlobalOp>(typeDescName)) {
+      auto ty = mlir::LLVM::LLVMPointerType::get(
+          this->lowerTy().convertType(global.getType()));
+      rewriter.replaceOpWithNewOp<mlir::LLVM::AddressOfOp>(typeDescOp, ty,
+                                                           global.getSymName());
+      return mlir::success();
+    }
     return mlir::failure();
   }
 };
@@ -3754,6 +3773,11 @@ public:
     mathConvertionPM.addPass(
         mlir::createConvertMathToFuncs(mathToFuncsOptions));
     mathConvertionPM.addPass(mlir::createConvertComplexToStandardPass());
+    // Convert Math dialect operations into LLVM dialect operations.
+    // There is no way to prefer MathToLLVM patterns over MathToLibm
+    // patterns (applied below), so we have to run MathToLLVM conversion here.
+    mathConvertionPM.addNestedPass<mlir::func::FuncOp>(
+        mlir::createConvertMathToLLVMPass());
     if (mlir::failed(runPipeline(mathConvertionPM, mod)))
       return signalPassFailure();
 
@@ -3791,15 +3815,15 @@ public:
         DispatchOpConversion, DispatchTableOpConversion, DTEntryOpConversion,
         DivcOpConversion, EmboxOpConversion, EmboxCharOpConversion,
         EmboxProcOpConversion, ExtractValueOpConversion, FieldIndexOpConversion,
-        FirEndOpConversion, FreeMemOpConversion, GenTypeDescOpConversion,
-        GlobalLenOpConversion, GlobalOpConversion, HasValueOpConversion,
-        InsertOnRangeOpConversion, InsertValueOpConversion,
-        IsPresentOpConversion, LenParamIndexOpConversion, LoadOpConversion,
-        MulcOpConversion, NegcOpConversion, NoReassocOpConversion,
-        SelectCaseOpConversion, SelectOpConversion, SelectRankOpConversion,
-        SelectTypeOpConversion, ShapeOpConversion, ShapeShiftOpConversion,
-        ShiftOpConversion, SliceOpConversion, StoreOpConversion,
-        StringLitOpConversion, SubcOpConversion, UnboxCharOpConversion,
+        FirEndOpConversion, FreeMemOpConversion, GlobalLenOpConversion,
+        GlobalOpConversion, HasValueOpConversion, InsertOnRangeOpConversion,
+        InsertValueOpConversion, IsPresentOpConversion,
+        LenParamIndexOpConversion, LoadOpConversion, MulcOpConversion,
+        NegcOpConversion, NoReassocOpConversion, SelectCaseOpConversion,
+        SelectOpConversion, SelectRankOpConversion, SelectTypeOpConversion,
+        ShapeOpConversion, ShapeShiftOpConversion, ShiftOpConversion,
+        SliceOpConversion, StoreOpConversion, StringLitOpConversion,
+        SubcOpConversion, TypeDescOpConversion, UnboxCharOpConversion,
         UnboxProcOpConversion, UndefOpConversion, UnreachableOpConversion,
         XArrayCoorOpConversion, XEmboxOpConversion, XReboxOpConversion,
         ZeroOpConversion>(typeConverter, options, bindingTables);
@@ -3808,10 +3832,9 @@ public:
     mlir::arith::populateArithToLLVMConversionPatterns(typeConverter, pattern);
     mlir::cf::populateControlFlowToLLVMConversionPatterns(typeConverter,
                                                           pattern);
-    // Convert math-like dialect operations, which can be produced
-    // when late math lowering mode is used, into llvm dialect.
-    mlir::populateMathToLLVMConversionPatterns(typeConverter, pattern);
-    mlir::populateMathToLibmConversionPatterns(pattern, /*benefit=*/0);
+    // Math operations that have not been converted yet must be converted
+    // to Libm.
+    mlir::populateMathToLibmConversionPatterns(pattern);
     mlir::populateComplexToLLVMConversionPatterns(typeConverter, pattern);
     mlir::ConversionTarget target{*context};
     target.addLegalDialect<mlir::LLVM::LLVMDialect>();

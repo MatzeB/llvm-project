@@ -83,7 +83,7 @@ llvm.func internal fastcc @callee() -> (i32) attributes { function_entry_count =
 // CHECK-NEXT: llvm.return %[[CST]]
 llvm.func @caller() -> (i32) {
   // Include all call attributes that don't prevent inlining.
-  %0 = llvm.call @callee() { fastmathFlags = #llvm.fastmath<nnan, ninf> } : () -> (i32)
+  %0 = llvm.call @callee() { fastmathFlags = #llvm.fastmath<nnan, ninf>, branch_weights = dense<42> : vector<1xi32> } : () -> (i32)
   llvm.return %0 : i32
 }
 
@@ -147,32 +147,42 @@ llvm.func @caller() -> (i32) {
 
 // -----
 
-llvm.func @callee() -> (i32) attributes { passthrough = ["foo"] } {
-  %0 = llvm.mlir.constant(42 : i32) : i32
-  llvm.return %0 : i32
+llvm.func @callee() attributes { passthrough = ["foo", "bar"] } {
+  llvm.return
 }
 
 // CHECK-LABEL: llvm.func @caller
-// CHECK-NEXT: llvm.call @callee
-// CHECK-NEXT: return
-llvm.func @caller() -> (i32) {
-  %0 = llvm.call @callee() : () -> (i32)
-  llvm.return %0 : i32
+// CHECK-NEXT: llvm.return
+llvm.func @caller() {
+  llvm.call @callee() : () -> ()
+  llvm.return
 }
 
 // -----
 
-llvm.func @callee() -> (i32) attributes { garbageCollector = "foo" } {
-  %0 = llvm.mlir.constant(42 : i32) : i32
-  llvm.return %0 : i32
-}
+llvm.func @callee_noinline() attributes { passthrough = ["noinline"] }
+llvm.func @callee_optnone() attributes { passthrough = ["optnone"] }
+llvm.func @callee_noduplicate() attributes { passthrough = ["noduplicate"] }
+llvm.func @callee_presplitcoroutine() attributes { passthrough = ["presplitcoroutine"] }
+llvm.func @callee_returns_twice() attributes { passthrough = ["returns_twice"] }
+llvm.func @callee_strictfp() attributes { passthrough = ["strictfp"] }
 
 // CHECK-LABEL: llvm.func @caller
-// CHECK-NEXT: llvm.call @callee
-// CHECK-NEXT: return
-llvm.func @caller() -> (i32) {
-  %0 = llvm.call @callee() : () -> (i32)
-  llvm.return %0 : i32
+// CHECK-NEXT: llvm.call @callee_noinline
+// CHECK-NEXT: llvm.call @callee_optnone
+// CHECK-NEXT: llvm.call @callee_noduplicate
+// CHECK-NEXT: llvm.call @callee_presplitcoroutine
+// CHECK-NEXT: llvm.call @callee_returns_twice
+// CHECK-NEXT: llvm.call @callee_strictfp
+// CHECK-NEXT: llvm.return
+llvm.func @caller() {
+  llvm.call @callee_noinline() : () -> ()
+  llvm.call @callee_optnone() : () -> ()
+  llvm.call @callee_noduplicate() : () -> ()
+  llvm.call @callee_presplitcoroutine() : () -> ()
+  llvm.call @callee_returns_twice() : () -> ()
+  llvm.call @callee_strictfp() : () -> ()
+  llvm.return
 }
 
 // -----
@@ -187,20 +197,6 @@ llvm.func @callee(%ptr : !llvm.ptr {llvm.byval = !llvm.ptr}) -> (!llvm.ptr) {
 llvm.func @caller(%ptr : !llvm.ptr) -> (!llvm.ptr) {
   %0 = llvm.call @callee(%ptr) : (!llvm.ptr) -> (!llvm.ptr)
   llvm.return %0 : !llvm.ptr
-}
-
-// -----
-
-llvm.func @callee() {
-  llvm.return
-}
-
-// CHECK-LABEL: llvm.func @caller
-// CHECK-NEXT: llvm.call @callee
-// CHECK-NEXT: llvm.return
-llvm.func @caller() {
-  llvm.call @callee() { branch_weights = dense<42> : vector<1xi32> } : () -> ()
-  llvm.return
 }
 
 // -----
@@ -231,7 +227,9 @@ llvm.func @test_inline(%cond : i1, %size : i32) -> f32 {
   // CHECK: ^{{.+}}:
 ^bb1:
   // CHECK-NOT: llvm.call @static_alloca
+  // CHECK: llvm.intr.lifetime.start
   %0 = llvm.call @static_alloca() : () -> f32
+  // CHECK: llvm.intr.lifetime.end
   // CHECK: llvm.br
   llvm.br ^bb3(%0: f32)
   // CHECK: ^{{.+}}:
@@ -274,4 +272,80 @@ llvm.func @test_inline(%cond : i1) -> f32 {
   // CHECK: llvm.alloca
   %0 = llvm.call @static_alloca_not_in_entry(%cond) : (i1) -> f32
   llvm.return %0 : f32
+}
+
+// -----
+
+llvm.func @static_alloca(%cond: i1) -> f32 {
+  %0 = llvm.mlir.constant(4 : i32) : i32
+  %1 = llvm.alloca %0 x f32 : (i32) -> !llvm.ptr
+  llvm.cond_br %cond, ^bb1, ^bb2
+^bb1:
+  %2 = llvm.load %1 : !llvm.ptr -> f32
+  llvm.return %2 : f32
+^bb2:
+  %3 = llvm.mlir.constant(3.14192 : f32) : f32
+  llvm.return %3 : f32
+}
+
+// CHECK-LABEL: llvm.func @test_inline
+llvm.func @test_inline(%cond0 : i1, %cond1 : i1, %funcArg : f32) -> f32 {
+  // CHECK-NOT: llvm.cond_br
+  // CHECK: %[[PTR:.+]] = llvm.alloca
+  // CHECK: llvm.cond_br %{{.+}}, ^[[BB1:.+]], ^{{.+}}
+  llvm.cond_br %cond0, ^bb1, ^bb2
+  // CHECK: ^[[BB1]]
+^bb1:
+  // Make sure the lifetime begin intrinsic has been inserted where the call
+  // used to be, even though the alloca has been moved to the entry block.
+  // CHECK-NEXT: llvm.intr.lifetime.start 4, %[[PTR]]
+  %0 = llvm.call @static_alloca(%cond1) : (i1) -> f32
+  // CHECK: llvm.cond_br %{{.+}}, ^[[BB2:.+]], ^[[BB3:.+]]
+  llvm.br ^bb3(%0: f32)
+  // Make sure the lifetime end intrinsic has been inserted at both former
+  // return sites of the callee.
+  // CHECK: ^[[BB2]]:
+  // CHECK-NEXT: llvm.load
+  // CHECK-NEXT: llvm.intr.lifetime.end 4, %[[PTR]]
+  // CHECK: ^[[BB3]]:
+  // CHECK-NEXT: llvm.intr.lifetime.end 4, %[[PTR]]
+^bb2:
+  llvm.br ^bb3(%funcArg: f32)
+^bb3(%blockArg: f32):
+  llvm.return %blockArg : f32
+}
+
+// -----
+
+llvm.func @alloca_with_lifetime(%cond: i1) -> f32 {
+  %0 = llvm.mlir.constant(4 : i32) : i32
+  %1 = llvm.alloca %0 x f32 : (i32) -> !llvm.ptr
+  llvm.intr.lifetime.start 4, %1 : !llvm.ptr
+  %2 = llvm.load %1 : !llvm.ptr -> f32
+  llvm.intr.lifetime.end 4, %1 : !llvm.ptr
+  %3 = llvm.fadd %2, %2 : f32
+  llvm.return %3 : f32
+}
+
+// CHECK-LABEL: llvm.func @test_inline
+llvm.func @test_inline(%cond0 : i1, %cond1 : i1, %funcArg : f32) -> f32 {
+  // CHECK-NOT: llvm.cond_br
+  // CHECK: %[[PTR:.+]] = llvm.alloca
+  // CHECK: llvm.cond_br %{{.+}}, ^[[BB1:.+]], ^{{.+}}
+  llvm.cond_br %cond0, ^bb1, ^bb2
+  // CHECK: ^[[BB1]]
+^bb1:
+  // Make sure the original lifetime intrinsic has been preserved, rather than
+  // inserting a new one with a larger scope.
+  // CHECK: llvm.intr.lifetime.start 4, %[[PTR]]
+  // CHECK-NEXT: llvm.load %[[PTR]]
+  // CHECK-NEXT: llvm.intr.lifetime.end 4, %[[PTR]]
+  // CHECK: llvm.fadd
+  // CHECK-NOT: llvm.intr.lifetime.end
+  %0 = llvm.call @alloca_with_lifetime(%cond1) : (i1) -> f32
+  llvm.br ^bb3(%0: f32)
+^bb2:
+  llvm.br ^bb3(%funcArg: f32)
+^bb3(%blockArg: f32):
+  llvm.return %blockArg : f32
 }

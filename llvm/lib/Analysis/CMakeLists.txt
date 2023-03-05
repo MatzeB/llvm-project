@@ -60,7 +60,6 @@ add_llvm_component_library(LLVMAnalysis
   DomPrinter.cpp
   DomTreeUpdater.cpp
   DominanceFrontier.cpp
-  EHPersonalities.cpp
   FunctionPropertiesAnalysis.cpp
   GlobalsModRef.cpp
   GuardUtils.cpp
@@ -77,6 +76,7 @@ add_llvm_component_library(LLVMAnalysis
   InstCount.cpp
   InstructionPrecedenceTracking.cpp
   InstructionSimplify.cpp
+  InteractiveModelRunner.cpp
   Interval.cpp
   IntervalPartition.cpp
   LazyBranchProbabilityInfo.cpp
@@ -87,6 +87,7 @@ add_llvm_component_library(LLVMAnalysis
   Lint.cpp
   Loads.cpp
   Local.cpp
+  LogicCombine.cpp
   LoopAccessAnalysis.cpp
   LoopAnalysisManager.cpp
   LoopCacheAnalysis.cpp

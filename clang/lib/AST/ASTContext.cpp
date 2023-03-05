@@ -77,7 +77,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Frontend/OpenMP/OMPIRBuilder.h"
 #include "llvm/Support/Capacity.h"
 #include "llvm/Support/Casting.h"
@@ -86,6 +85,7 @@
 #include "llvm/Support/MD5.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Triple.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -349,7 +349,7 @@ RawComment *ASTContext::getRawCommentForDeclNoCacheImpl(
 
   // There should be no other declarations or preprocessor directives between
   // comment and declaration.
-  if (Text.find_first_of(";{}#@") != StringRef::npos)
+  if (Text.find_last_of(";{}#@") != StringRef::npos)
     return nullptr;
 
   return CommentBeforeDecl;
@@ -1507,6 +1507,12 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target,
 #include "clang/Basic/RISCVVTypes.def"
   }
 
+  if (Target.getTriple().isWasm() && Target.hasFeature("reference-types")) {
+#define WASM_TYPE(Name, Id, SingletonId)                                       \
+  InitBuiltinType(SingletonId, BuiltinType::Id);
+#include "clang/Basic/WebAssemblyReferenceTypes.def"
+  }
+
   // Builtin type for __objc_yes and __objc_no
   ObjCBuiltinBoolTy = (Target.useSignedCharForObjCBool() ?
                        SignedCharTy : BoolTy);
@@ -2084,7 +2090,7 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     // If the alignment is not a power of 2, round up to the next power of 2.
     // This happens for non-power-of-2 length vectors.
     if (Align & (Align-1)) {
-      Align = llvm::NextPowerOf2(Align);
+      Align = llvm::bit_ceil(Align);
       Width = llvm::alignTo(Width, Align);
     }
     // Adjust the alignment based on the target max.
@@ -2335,6 +2341,12 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     Align = 8;                                                                 \
     break;
 #include "clang/Basic/RISCVVTypes.def"
+#define WASM_TYPE(Name, Id, SingletonId)                                       \
+  case BuiltinType::Id:                                                        \
+    Width = 0;                                                                 \
+    Align = 8;                                                                 \
+    break;
+#include "clang/Basic/WebAssemblyReferenceTypes.def"
     }
     break;
   case Type::ObjCObjectPointer:
@@ -2393,10 +2405,8 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
   }
   case Type::BitInt: {
     const auto *EIT = cast<BitIntType>(T);
-    Align =
-        std::min(static_cast<unsigned>(std::max(
-                     getCharWidth(), llvm::PowerOf2Ceil(EIT->getNumBits()))),
-                 Target->getLongLongAlign());
+    Align = std::clamp<unsigned>(llvm::PowerOf2Ceil(EIT->getNumBits()),
+                                 getCharWidth(), Target->getLongLongAlign());
     Width = llvm::alignTo(EIT->getNumBits(), Align);
     break;
   }
@@ -2502,8 +2512,7 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
       // favorable to atomic operations:
 
       // Round the size up to a power of 2.
-      if (!llvm::isPowerOf2_64(Width))
-        Width = llvm::NextPowerOf2(Width);
+      Width = llvm::bit_ceil(Width);
 
       // Set the alignment equal to the size.
       Align = static_cast<unsigned>(Width);
@@ -4073,6 +4082,19 @@ ASTContext::getBuiltinVectorTypeInfo(const BuiltinType *Ty) const {
     return {BoolTy, llvm::ElementCount::getScalable(NumEls), 1};
 #include "clang/Basic/RISCVVTypes.def"
   }
+}
+
+/// getExternrefType - Return a WebAssembly externref type, which represents an
+/// opaque reference to a host value.
+QualType ASTContext::getWebAssemblyExternrefType() const {
+  if (Target->getTriple().isWasm() && Target->hasFeature("reference-types")) {
+#define WASM_REF_TYPE(Name, MangledName, Id, SingletonId, AS)                  \
+  if (BuiltinType::Id == BuiltinType::WasmExternRef)                           \
+    return SingletonId;
+#include "clang/Basic/WebAssemblyReferenceTypes.def"
+  }
+  llvm_unreachable(
+      "shouldn't try to generate type externref outside WebAssembly target");
 }
 
 /// getScalableVectorType - Return the unique reference to a scalable vector
@@ -6569,7 +6591,10 @@ bool ASTContext::FriendsDifferByConstraints(const FunctionDecl *X,
 
   // If the two functions share lexical declaration context, they are not in
   // separate instantations, and thus in the same scope.
-  if (X->getLexicalDeclContext() == Y->getLexicalDeclContext())
+  if (declaresSameEntity(cast<Decl>(X->getLexicalDeclContext()
+                             ->getRedeclContext()),
+                         cast<Decl>(Y->getLexicalDeclContext()
+                             ->getRedeclContext())))
     return false;
 
   if (!X->getDescribedFunctionTemplate()) {
@@ -6661,8 +6686,28 @@ bool ASTContext::isSameEntity(const NamedDecl *X, const NamedDecl *Y) const {
         return false;
     }
 
-    if (!isSameConstraintExpr(FuncX->getTrailingRequiresClause(),
-                              FuncY->getTrailingRequiresClause()))
+    // The trailing require clause of instantiated function may change during
+    // the semantic analysis. Trying to get the primary template function (if
+    // exists) to compare the primary trailing require clause.
+    auto TryToGetPrimaryTemplatedFunction =
+        [](const FunctionDecl *FD) -> const FunctionDecl * {
+      switch (FD->getTemplatedKind()) {
+      case FunctionDecl::TK_DependentNonTemplate:
+        return FD->getInstantiatedFromDecl();
+      case FunctionDecl::TK_FunctionTemplate:
+        return FD->getDescribedFunctionTemplate()->getTemplatedDecl();
+      case FunctionDecl::TK_MemberSpecialization:
+        return FD->getInstantiatedFromMemberFunction();
+      case FunctionDecl::TK_FunctionTemplateSpecialization:
+        return FD->getPrimaryTemplate()->getTemplatedDecl();
+      default:
+        return FD;
+      }
+    };
+    const FunctionDecl *PrimaryX = TryToGetPrimaryTemplatedFunction(FuncX);
+    const FunctionDecl *PrimaryY = TryToGetPrimaryTemplatedFunction(FuncY);
+    if (!isSameConstraintExpr(PrimaryX->getTrailingRequiresClause(),
+                              PrimaryY->getTrailingRequiresClause()))
       return false;
 
     // Constrained friends are different in certain cases, see: [temp.friend]p9.
@@ -8114,6 +8159,8 @@ static char getObjCEncodingForPrimitiveType(const ASTContext *C,
 #include "clang/Basic/AArch64SVEACLETypes.def"
 #define RVV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
 #include "clang/Basic/RISCVVTypes.def"
+#define WASM_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/WebAssemblyReferenceTypes.def"
       {
         DiagnosticsEngine &Diags = C->getDiagnostics();
         unsigned DiagID = Diags.getCustomDiagID(DiagnosticsEngine::Error,
@@ -9509,9 +9556,10 @@ static uint64_t getSVETypeSize(ASTContext &Context, const BuiltinType *Ty) {
 
 bool ASTContext::areCompatibleSveTypes(QualType FirstType,
                                        QualType SecondType) {
-  assert(((FirstType->isSizelessBuiltinType() && SecondType->isVectorType()) ||
-          (FirstType->isVectorType() && SecondType->isSizelessBuiltinType())) &&
-         "Expected SVE builtin type and vector type!");
+  assert(
+      ((FirstType->isSVESizelessBuiltinType() && SecondType->isVectorType()) ||
+       (FirstType->isVectorType() && SecondType->isSVESizelessBuiltinType())) &&
+      "Expected SVE builtin type and vector type!");
 
   auto IsValidCast = [this](QualType FirstType, QualType SecondType) {
     if (const auto *BT = FirstType->getAs<BuiltinType>()) {
@@ -9538,9 +9586,10 @@ bool ASTContext::areCompatibleSveTypes(QualType FirstType,
 
 bool ASTContext::areLaxCompatibleSveTypes(QualType FirstType,
                                           QualType SecondType) {
-  assert(((FirstType->isSizelessBuiltinType() && SecondType->isVectorType()) ||
-          (FirstType->isVectorType() && SecondType->isSizelessBuiltinType())) &&
-         "Expected SVE builtin type and vector type!");
+  assert(
+      ((FirstType->isSVESizelessBuiltinType() && SecondType->isVectorType()) ||
+       (FirstType->isVectorType() && SecondType->isSVESizelessBuiltinType())) &&
+      "Expected SVE builtin type and vector type!");
 
   auto IsLaxCompatible = [this](QualType FirstType, QualType SecondType) {
     const auto *BT = FirstType->getAs<BuiltinType>();
@@ -11767,7 +11816,7 @@ static GVALinkage basicGVALinkageForVariable(const ASTContext &Context,
   llvm_unreachable("Invalid Linkage!");
 }
 
-GVALinkage ASTContext::GetGVALinkageForVariable(const VarDecl *VD) {
+GVALinkage ASTContext::GetGVALinkageForVariable(const VarDecl *VD) const {
   return adjustGVALinkageForExternalDefinitionKind(*this, VD,
            adjustGVALinkageForAttributes(*this, VD,
              basicGVALinkageForVariable(*this, VD)));

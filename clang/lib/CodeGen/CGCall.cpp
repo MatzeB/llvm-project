@@ -25,7 +25,6 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/Basic/CodeGenOptions.h"
-#include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/CodeGen/SwiftCallingConv.h"
@@ -322,7 +321,9 @@ CodeGenTypes::arrangeCXXStructorDeclaration(GlobalDecl GD) {
 
   SmallVector<CanQualType, 16> argTypes;
   SmallVector<FunctionProtoType::ExtParameterInfo, 16> paramInfos;
-  argTypes.push_back(DeriveThisType(MD->getParent(), MD));
+
+  const CXXRecordDecl *ThisType = TheCXXABI.getThisArgumentTypeForMethod(GD);
+  argTypes.push_back(DeriveThisType(ThisType, MD));
 
   bool PassParams = true;
 
@@ -2805,7 +2806,7 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
     case ABIArgInfo::IndirectAliased: {
       assert(NumIRArgs == 1);
       Address ParamAddr = Address(Fn->getArg(FirstIRArg), ConvertTypeForMem(Ty),
-                                  ArgI.getIndirectAlign());
+                                  ArgI.getIndirectAlign(), KnownNonNull);
 
       if (!hasScalarEvaluationKind(Ty)) {
         // Aggregates and complex variables are accessed by reference. All we

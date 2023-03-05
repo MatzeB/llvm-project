@@ -2834,7 +2834,7 @@ static void handleAvailabilityAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
 
 static void handleExternalSourceSymbolAttr(Sema &S, Decl *D,
                                            const ParsedAttr &AL) {
-  if (!AL.checkAtLeastNumArgs(S, 1) || !AL.checkAtMostNumArgs(S, 3))
+  if (!AL.checkAtLeastNumArgs(S, 1) || !AL.checkAtMostNumArgs(S, 4))
     return;
 
   StringRef Language;
@@ -2844,9 +2844,12 @@ static void handleExternalSourceSymbolAttr(Sema &S, Decl *D,
   if (const auto *SE = dyn_cast_or_null<StringLiteral>(AL.getArgAsExpr(1)))
     DefinedIn = SE->getString();
   bool IsGeneratedDeclaration = AL.getArgAsIdent(2) != nullptr;
+  StringRef USR;
+  if (const auto *SE = dyn_cast_or_null<StringLiteral>(AL.getArgAsExpr(3)))
+    USR = SE->getString();
 
   D->addAttr(::new (S.Context) ExternalSourceSymbolAttr(
-      S.Context, AL, Language, DefinedIn, IsGeneratedDeclaration));
+      S.Context, AL, Language, DefinedIn, IsGeneratedDeclaration, USR));
 }
 
 template <class T>
@@ -8446,6 +8449,11 @@ static void handleHandleAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(Attr::Create(S.Context, Argument, AL));
 }
 
+template<typename Attr>
+static void handleUnsafeBufferUsage(Sema &S, Decl *D, const ParsedAttr &AL) {
+  D->addAttr(Attr::Create(S.Context, AL));
+}
+
 static void handleCFGuardAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // The guard attribute takes a single identifier argument.
 
@@ -9326,6 +9334,10 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
 
   case ParsedAttr::AT_ReleaseHandle:
     handleHandleAttr<ReleaseHandleAttr>(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_UnsafeBufferUsage:
+    handleUnsafeBufferUsage<UnsafeBufferUsageAttr>(S, D, AL);
     break;
 
   case ParsedAttr::AT_UseHandle:

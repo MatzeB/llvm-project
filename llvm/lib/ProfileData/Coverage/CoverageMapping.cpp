@@ -15,7 +15,9 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallBitVector.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Object/BuildID.h"
 #include "llvm/ProfileData/Coverage/CoverageMappingReader.h"
@@ -25,6 +27,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
@@ -381,12 +384,11 @@ Error CoverageMapping::loadFromFile(
   return Error::success();
 }
 
-Expected<std::unique_ptr<CoverageMapping>>
-CoverageMapping::load(ArrayRef<StringRef> ObjectFilenames,
-                      StringRef ProfileFilename, ArrayRef<StringRef> Arches,
-                      StringRef CompilationDir,
-                      const object::BuildIDFetcher *BIDFetcher) {
-  auto ProfileReaderOrErr = IndexedInstrProfReader::create(ProfileFilename);
+Expected<std::unique_ptr<CoverageMapping>> CoverageMapping::load(
+    ArrayRef<StringRef> ObjectFilenames, StringRef ProfileFilename,
+    vfs::FileSystem &FS, ArrayRef<StringRef> Arches, StringRef CompilationDir,
+    const object::BuildIDFetcher *BIDFetcher, bool CheckBinaryIDs) {
+  auto ProfileReaderOrErr = IndexedInstrProfReader::create(ProfileFilename, FS);
   if (Error E = ProfileReaderOrErr.takeError())
     return createFileError(ProfileFilename, std::move(E));
   auto ProfileReader = std::move(ProfileReaderOrErr.get());
@@ -410,20 +412,17 @@ CoverageMapping::load(ArrayRef<StringRef> ObjectFilenames,
   }
 
   if (BIDFetcher) {
-    const auto &Compare = [](object::BuildIDRef A, object::BuildIDRef B) {
-      return StringRef(reinterpret_cast<const char *>(A.data()), A.size()) <
-             StringRef(reinterpret_cast<const char *>(B.data()), B.size());
-    };
     std::vector<object::BuildID> ProfileBinaryIDs;
     if (Error E = ProfileReader->readBinaryIds(ProfileBinaryIDs))
       return createFileError(ProfileFilename, std::move(E));
-    llvm::sort(ProfileBinaryIDs, Compare);
-    std::unique(ProfileBinaryIDs.begin(), ProfileBinaryIDs.end(), Compare);
 
     SmallVector<object::BuildIDRef> BinaryIDsToFetch;
     if (!ProfileBinaryIDs.empty()) {
+      const auto &Compare = [](object::BuildIDRef A, object::BuildIDRef B) {
+        return std::lexicographical_compare(A.begin(), A.end(), B.begin(),
+                                            B.end());
+      };
       llvm::sort(FoundBinaryIDs, Compare);
-      std::unique(FoundBinaryIDs.begin(), FoundBinaryIDs.end(), Compare);
       std::set_difference(
           ProfileBinaryIDs.begin(), ProfileBinaryIDs.end(),
           FoundBinaryIDs.begin(), FoundBinaryIDs.end(),
@@ -432,13 +431,19 @@ CoverageMapping::load(ArrayRef<StringRef> ObjectFilenames,
 
     for (object::BuildIDRef BinaryID : BinaryIDsToFetch) {
       std::optional<std::string> PathOpt = BIDFetcher->fetch(BinaryID);
-      if (!PathOpt)
-        continue;
-      std::string Path = std::move(*PathOpt);
-      StringRef Arch = Arches.size() == 1 ? Arches.front() : StringRef();
-      if (Error E = loadFromFile(Path, Arch, CompilationDir, *ProfileReader,
-                                 *Coverage, DataFound))
-        return std::move(E);
+      if (PathOpt) {
+        std::string Path = std::move(*PathOpt);
+        StringRef Arch = Arches.size() == 1 ? Arches.front() : StringRef();
+        if (Error E = loadFromFile(Path, Arch, CompilationDir, *ProfileReader,
+                                  *Coverage, DataFound))
+          return std::move(E);
+      } else if (CheckBinaryIDs) {
+        return createFileError(
+            ProfileFilename,
+            createStringError(errc::no_such_file_or_directory,
+                              "Missing binary ID: " +
+                                  llvm::toHex(BinaryID, /*LowerCase=*/true)));
+      }
     }
   }
 

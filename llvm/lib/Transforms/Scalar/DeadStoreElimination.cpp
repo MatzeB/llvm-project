@@ -462,10 +462,10 @@ memoryIsNotModifiedBetween(Instruction *FirstI, Instruction *SecondI,
           "Should not hit the entry block because SI must be dominated by LI");
       for (BasicBlock *Pred : predecessors(B)) {
         PHITransAddr PredAddr = Addr;
-        if (PredAddr.NeedsPHITranslationFromBlock(B)) {
-          if (!PredAddr.IsPotentiallyPHITranslatable())
+        if (PredAddr.needsPHITranslationFromBlock(B)) {
+          if (!PredAddr.isPotentiallyPHITranslatable())
             return false;
-          if (PredAddr.PHITranslateValue(B, Pred, DT, false))
+          if (!PredAddr.translateValue(B, Pred, DT, false))
             return false;
         }
         Value *TranslatedPtr = PredAddr.getAddr();
@@ -730,7 +730,7 @@ tryToMergePartialOverlappingStores(StoreInst *KillingI, StoreInst *DeadI,
 }
 
 namespace {
-// Returns true if \p I is an intrisnic that does not read or write memory.
+// Returns true if \p I is an intrinsic that does not read or write memory.
 bool isNoopIntrinsic(Instruction *I) {
   if (const IntrinsicInst *II = dyn_cast<IntrinsicInst>(I)) {
     switch (II->getIntrinsicID()) {
@@ -740,7 +740,6 @@ bool isNoopIntrinsic(Instruction *I) {
     case Intrinsic::launder_invariant_group:
     case Intrinsic::assume:
       return true;
-    case Intrinsic::dbg_addr:
     case Intrinsic::dbg_declare:
     case Intrinsic::dbg_label:
     case Intrinsic::dbg_value:

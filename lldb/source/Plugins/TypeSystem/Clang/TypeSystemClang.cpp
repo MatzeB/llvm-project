@@ -108,7 +108,6 @@ TypeSystemClangSupportsLanguage(lldb::LanguageType language) {
          lldb_private::Language::LanguageIsPascal(language) ||
          // Use Clang for Rust until there is a proper language plugin for it
          language == eLanguageTypeRust ||
-         language == eLanguageTypeExtRenderScript ||
          // Use Clang for D until there is a proper language plugin for it
          language == eLanguageTypeD ||
          // Open Dylan compiler debug info is designed to be Clang-compatible
@@ -3051,28 +3050,11 @@ bool TypeSystemClang::IsCStringType(lldb::opaque_compiler_type_t type,
 }
 
 bool TypeSystemClang::IsFunctionType(lldb::opaque_compiler_type_t type) {
-  if (type) {
-    clang::QualType qual_type = RemoveWrappingTypes(GetCanonicalQualType(type));
+  auto isFunctionType = [&](clang::QualType qual_type) {
+    return qual_type->isFunctionType();
+  };
 
-    if (qual_type->isFunctionType()) {
-      return true;
-    }
-
-    const clang::Type::TypeClass type_class = qual_type->getTypeClass();
-    switch (type_class) {
-    default:
-      break;
-    case clang::Type::LValueReference:
-    case clang::Type::RValueReference: {
-      const clang::ReferenceType *reference_type =
-          llvm::cast<clang::ReferenceType>(qual_type.getTypePtr());
-      if (reference_type)
-        return IsFunctionType(
-            reference_type->getPointeeType().getAsOpaquePtr());
-    } break;
-    }
-  }
-  return false;
+  return IsTypeImpl(type, isFunctionType);
 }
 
 // Used to detect "Homogeneous Floating-point Aggregates"
@@ -3186,11 +3168,13 @@ TypeSystemClang::GetFunctionArgumentAtIndex(lldb::opaque_compiler_type_t type,
   return CompilerType();
 }
 
-bool TypeSystemClang::IsFunctionPointerType(lldb::opaque_compiler_type_t type) {
+bool TypeSystemClang::IsTypeImpl(
+    lldb::opaque_compiler_type_t type,
+    llvm::function_ref<bool(clang::QualType)> predicate) const {
   if (type) {
     clang::QualType qual_type = RemoveWrappingTypes(GetCanonicalQualType(type));
 
-    if (qual_type->isFunctionPointerType())
+    if (predicate(qual_type))
       return true;
 
     const clang::Type::TypeClass type_class = qual_type->getTypeClass();
@@ -3203,20 +3187,34 @@ bool TypeSystemClang::IsFunctionPointerType(lldb::opaque_compiler_type_t type) {
       const clang::ReferenceType *reference_type =
           llvm::cast<clang::ReferenceType>(qual_type.getTypePtr());
       if (reference_type)
-        return IsFunctionPointerType(
-            reference_type->getPointeeType().getAsOpaquePtr());
+        return IsTypeImpl(reference_type->getPointeeType().getAsOpaquePtr(), predicate);
     } break;
     }
   }
   return false;
 }
 
+bool TypeSystemClang::IsMemberFunctionPointerType(
+    lldb::opaque_compiler_type_t type) {
+  auto isMemberFunctionPointerType = [](clang::QualType qual_type) {
+    return qual_type->isMemberFunctionPointerType();
+  };
+
+  return IsTypeImpl(type, isMemberFunctionPointerType);
+}
+
+bool TypeSystemClang::IsFunctionPointerType(lldb::opaque_compiler_type_t type) {
+  auto isFunctionPointerType = [](clang::QualType qual_type) {
+    return qual_type->isFunctionPointerType();
+  };
+
+  return IsTypeImpl(type, isFunctionPointerType);
+}
+
 bool TypeSystemClang::IsBlockPointerType(
     lldb::opaque_compiler_type_t type,
     CompilerType *function_pointer_type_ptr) {
-  if (type) {
-    clang::QualType qual_type = RemoveWrappingTypes(GetCanonicalQualType(type));
-
+  auto isBlockPointerType = [&](clang::QualType qual_type) {
     if (qual_type->isBlockPointerType()) {
       if (function_pointer_type_ptr) {
         const clang::BlockPointerType *block_pointer_type =
@@ -3229,23 +3227,10 @@ bool TypeSystemClang::IsBlockPointerType(
       return true;
     }
 
-    const clang::Type::TypeClass type_class = qual_type->getTypeClass();
-    switch (type_class) {
-    default:
-      break;
+    return false;
+  };
 
-    case clang::Type::LValueReference:
-    case clang::Type::RValueReference: {
-      const clang::ReferenceType *reference_type =
-          llvm::cast<clang::ReferenceType>(qual_type.getTypePtr());
-      if (reference_type)
-        return IsBlockPointerType(
-            reference_type->getPointeeType().getAsOpaquePtr(),
-            function_pointer_type_ptr);
-    } break;
-    }
-  }
-  return false;
+  return IsTypeImpl(type, isBlockPointerType);
 }
 
 bool TypeSystemClang::IsIntegerType(lldb::opaque_compiler_type_t type,
@@ -5119,6 +5104,10 @@ lldb::Encoding TypeSystemClang::GetEncoding(lldb::opaque_compiler_type_t type,
     case clang::BuiltinType::RvvBool64:
       break;
 
+    // WebAssembly builtin types.
+    case clang::BuiltinType::WasmExternRef:
+      break;
+
     case clang::BuiltinType::IncompleteMatrixIdx:
       break;
     }
@@ -5297,7 +5286,7 @@ lldb::Format TypeSystemClang::GetFormat(lldb::opaque_compiler_type_t type) {
   case clang::Type::RValueReference:
     return lldb::eFormatHex;
   case clang::Type::MemberPointer:
-    break;
+    return lldb::eFormatHex;
   case clang::Type::Complex: {
     if (qual_type->isComplexType())
       return lldb::eFormatComplex;

@@ -30,7 +30,7 @@ void do_exit() {
 int main(int, char**)
 {
 #if TEST_STD_VER >= 11 && TEST_CLANG_VER < 1600
-  // TODO LLVM18: Remove the special-casing
+  // TODO LLVM18: Remove the special-test
   {
     typedef int T;
     typedef std::vector<T, min_allocator<T>> C;
@@ -43,7 +43,7 @@ int main(int, char**)
 #endif
 
 #if TEST_STD_VER >= 11 && TEST_CLANG_VER >= 1600
-  // TODO LLVM18: Remove the TEST_CLANG_VER check
+  // TODO LLVM18: Remove the special-casing
   {
     typedef int T;
     typedef cpp17_input_iterator<T*> MyInputIter;

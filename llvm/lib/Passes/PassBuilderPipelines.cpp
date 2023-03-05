@@ -14,6 +14,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
@@ -29,6 +30,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/PGOOptions.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Transforms/AggressiveInstCombine/AggressiveInstCombine.h"
 #include "llvm/Transforms/Coroutines/CoroCleanup.h"
@@ -118,6 +120,7 @@
 #include "llvm/Transforms/Utils/AddDiscriminators.h"
 #include "llvm/Transforms/Utils/AssumeBundleBuilder.h"
 #include "llvm/Transforms/Utils/CanonicalizeAliases.h"
+#include "llvm/Transforms/Utils/CountVisits.h"
 #include "llvm/Transforms/Utils/InjectTLIMappings.h"
 #include "llvm/Transforms/Utils/LibCallsShrinkWrap.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"
@@ -163,20 +166,9 @@ static cl::opt<bool> PerformMandatoryInliningsFirst(
     cl::desc("Perform mandatory inlinings module-wide, before performing "
              "inlining"));
 
-static cl::opt<bool> EnableO3NonTrivialUnswitching(
-    "enable-npm-O3-nontrivial-unswitch", cl::init(true), cl::Hidden,
-    cl::desc("Enable non-trivial loop unswitching for -O3"));
-
 static cl::opt<bool> EnableEagerlyInvalidateAnalyses(
     "eagerly-invalidate-analyses", cl::init(true), cl::Hidden,
     cl::desc("Eagerly invalidate more analyses in default pipelines"));
-
-static cl::opt<bool> EnableNoRerunSimplificationPipeline(
-    "enable-no-rerun-simplification-pipeline", cl::init(true), cl::Hidden,
-    cl::desc(
-        "Prevent running the simplification pipeline on a function more "
-        "than once in the case that SCC mutations cause a function to be "
-        "visited multiple times as long as the function has not been changed"));
 
 static cl::opt<bool> EnableMergeFunctions(
     "enable-merge-functions", cl::init(false), cl::Hidden,
@@ -263,7 +255,7 @@ static cl::opt<bool>
                  cl::desc("Enable lowering of the matrix intrinsics"));
 
 static cl::opt<bool> EnableConstraintElimination(
-    "enable-constraint-elimination", cl::init(false), cl::Hidden,
+    "enable-constraint-elimination", cl::init(true), cl::Hidden,
     cl::desc(
         "Enable pass to eliminate conditions based on linear constraints"));
 
@@ -321,6 +313,9 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
                                                    ThinOrFullLTOPhase Phase) {
 
   FunctionPassManager FPM;
+
+  if (AreStatisticsEnabled())
+    FPM.addPass(CountVisitsPass());
 
   // Form SSA out of local memory accesses after breaking apart aggregates into
   // scalars.
@@ -472,6 +467,9 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
 
   FunctionPassManager FPM;
 
+  if (AreStatisticsEnabled())
+    FPM.addPass(CountVisitsPass());
+
   // Form SSA out of local memory accesses after breaking apart aggregates into
   // scalars.
   FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
@@ -561,8 +559,7 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   LPM1.addPass(LICMPass(PTO.LicmMssaOptCap, PTO.LicmMssaNoAccForPromotionCap,
                         /*AllowSpeculation=*/true));
   LPM1.addPass(
-      SimpleLoopUnswitchPass(/* NonTrivial */ Level == OptimizationLevel::O3 &&
-                             EnableO3NonTrivialUnswitching));
+      SimpleLoopUnswitchPass(/* NonTrivial */ Level == OptimizationLevel::O3));
   if (EnableLoopFlatten)
     LPM1.addPass(LoopFlattenPass());
 
@@ -671,15 +668,6 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   FPM.addPass(InstCombinePass());
   invokePeepholeEPCallbacks(FPM, Level);
 
-  // Don't add CHR pass for CSIRInstr build in PostLink as the profile
-  // is still the same as the PreLink compilation.
-  if (EnableCHR && Level == OptimizationLevel::O3 && PGOOpt &&
-      ((PGOOpt->Action == PGOOptions::IRUse &&
-        (Phase != ThinOrFullLTOPhase::ThinLTOPostLink ||
-         PGOOpt->CSAction != PGOOptions::CSIRInstr)) ||
-       PGOOpt->Action == PGOOptions::SampleUse))
-    FPM.addPass(ControlHeightReductionPass());
-
   return FPM;
 }
 
@@ -692,7 +680,8 @@ void PassBuilder::addPGOInstrPasses(ModulePassManager &MPM,
                                     OptimizationLevel Level, bool RunProfileGen,
                                     bool IsCS, std::string ProfileFile,
                                     std::string ProfileRemappingFile,
-                                    ThinOrFullLTOPhase LTOPhase) {
+                                    ThinOrFullLTOPhase LTOPhase,
+                                    IntrusiveRefCntPtr<vfs::FileSystem> FS) {
   assert(Level != OptimizationLevel::O0 && "Not expecting O0 here!");
   if (!IsCS && !DisablePreInliner) {
     InlineParams IP;
@@ -730,7 +719,8 @@ void PassBuilder::addPGOInstrPasses(ModulePassManager &MPM,
 
   if (!RunProfileGen) {
     assert(!ProfileFile.empty() && "Profile use expecting a profile file!");
-    MPM.addPass(PGOInstrumentationUse(ProfileFile, ProfileRemappingFile, IsCS));
+    MPM.addPass(
+        PGOInstrumentationUse(ProfileFile, ProfileRemappingFile, IsCS, FS));
     // Cache ProfileSummaryAnalysis once to avoid the potential need to insert
     // RequireAnalysisPass for PSI before subsequent non-module passes.
     MPM.addPass(RequireAnalysisPass<ProfileSummaryAnalysis, Module>());
@@ -760,13 +750,14 @@ void PassBuilder::addPGOInstrPasses(ModulePassManager &MPM,
   MPM.addPass(InstrProfiling(Options, IsCS));
 }
 
-void PassBuilder::addPGOInstrPassesForO0(ModulePassManager &MPM,
-                                         bool RunProfileGen, bool IsCS,
-                                         std::string ProfileFile,
-                                         std::string ProfileRemappingFile) {
+void PassBuilder::addPGOInstrPassesForO0(
+    ModulePassManager &MPM, bool RunProfileGen, bool IsCS,
+    std::string ProfileFile, std::string ProfileRemappingFile,
+    IntrusiveRefCntPtr<vfs::FileSystem> FS) {
   if (!RunProfileGen) {
     assert(!ProfileFile.empty() && "Profile use expecting a profile file!");
-    MPM.addPass(PGOInstrumentationUse(ProfileFile, ProfileRemappingFile, IsCS));
+    MPM.addPass(
+        PGOInstrumentationUse(ProfileFile, ProfileRemappingFile, IsCS, FS));
     // Cache ProfileSummaryAnalysis once to avoid the potential need to insert
     // RequireAnalysisPass for PSI before subsequent non-module passes.
     MPM.addPass(RequireAnalysisPass<ProfileSummaryAnalysis, Module>());
@@ -860,13 +851,12 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
   // CGSCC walk.
   MainCGPipeline.addPass(createCGSCCToFunctionPassAdaptor(
       buildFunctionSimplificationPipeline(Level, Phase),
-      PTO.EagerlyInvalidateAnalyses, EnableNoRerunSimplificationPipeline));
+      PTO.EagerlyInvalidateAnalyses, /*NoRerun=*/true));
 
   MainCGPipeline.addPass(CoroSplitPass(Level != OptimizationLevel::O0));
 
-  if (EnableNoRerunSimplificationPipeline)
-    MIWP.addLateModulePass(createModuleToFunctionPassAdaptor(
-        InvalidateAnalysisPass<ShouldNotRunFunctionPassesAnalysis>()));
+  MIWP.addLateModulePass(createModuleToFunctionPassAdaptor(
+      InvalidateAnalysisPass<ShouldNotRunFunctionPassesAnalysis>()));
 
   return MIWP;
 }
@@ -1027,19 +1017,13 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
   // Optimize globals to try and fold them into constants.
   MPM.addPass(GlobalOptPass());
 
-  // Promote any localized globals to SSA registers.
-  // FIXME: Should this instead by a run of SROA?
-  // FIXME: We should probably run instcombine and simplifycfg afterward to
-  // delete control flows that are dead once globals have been folded to
-  // constants.
-  MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
-
   // Create a small function pass pipeline to cleanup after all the global
   // optimizations.
   FunctionPassManager GlobalCleanupPM;
+  // FIXME: Should this instead by a run of SROA?
+  GlobalCleanupPM.addPass(PromotePass());
   GlobalCleanupPM.addPass(InstCombinePass());
   invokePeepholeEPCallbacks(GlobalCleanupPM, Level);
-
   GlobalCleanupPM.addPass(
       SimplifyCFGPass(SimplifyCFGOptions().convertSwitchRangeToICmp(true)));
   MPM.addPass(createModuleToFunctionPassAdaptor(std::move(GlobalCleanupPM),
@@ -1052,7 +1036,7 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
     addPGOInstrPasses(MPM, Level,
                       /* RunProfileGen */ PGOOpt->Action == PGOOptions::IRInstr,
                       /* IsCS */ false, PGOOpt->ProfileFile,
-                      PGOOpt->ProfileRemappingFile, Phase);
+                      PGOOpt->ProfileRemappingFile, Phase, PGOOpt->FS);
     MPM.addPass(PGOIndirectCallPromotion(false, false));
   }
   if (PGOOpt && Phase != ThinOrFullLTOPhase::ThinLTOPostLink &&
@@ -1266,11 +1250,11 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
     if (PGOOpt->CSAction == PGOOptions::CSIRInstr)
       addPGOInstrPasses(MPM, Level, /* RunProfileGen */ true,
                         /* IsCS */ true, PGOOpt->CSProfileGenFile,
-                        PGOOpt->ProfileRemappingFile, LTOPhase);
+                        PGOOpt->ProfileRemappingFile, LTOPhase, PGOOpt->FS);
     else if (PGOOpt->CSAction == PGOOptions::CSIRUse)
       addPGOInstrPasses(MPM, Level, /* RunProfileGen */ false,
                         /* IsCS */ true, PGOOpt->ProfileFile,
-                        PGOOpt->ProfileRemappingFile, LTOPhase);
+                        PGOOpt->ProfileRemappingFile, LTOPhase, PGOOpt->FS);
   }
 
   // Re-compute GlobalsAA here prior to function passes. This is particularly
@@ -1293,6 +1277,11 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
     OptimizePM.addPass(LowerMatrixIntrinsicsPass());
     OptimizePM.addPass(EarlyCSEPass());
   }
+
+  // CHR pass should only be applied with the profile information.
+  // The check is to check the profile summary information in CHR.
+  if (EnableCHR && Level == OptimizationLevel::O3)
+    OptimizePM.addPass(ControlHeightReductionPass());
 
   // FIXME: We need to run some loop optimizations to re-rotate loops after
   // simplifycfg and others undo their rotation.
@@ -1742,12 +1731,12 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
       addPGOInstrPasses(MPM, Level, /* RunProfileGen */ true,
                         /* IsCS */ true, PGOOpt->CSProfileGenFile,
                         PGOOpt->ProfileRemappingFile,
-                        ThinOrFullLTOPhase::FullLTOPostLink);
+                        ThinOrFullLTOPhase::FullLTOPostLink, PGOOpt->FS);
     else if (PGOOpt->CSAction == PGOOptions::CSIRUse)
       addPGOInstrPasses(MPM, Level, /* RunProfileGen */ false,
                         /* IsCS */ true, PGOOpt->ProfileFile,
                         PGOOpt->ProfileRemappingFile,
-                        ThinOrFullLTOPhase::FullLTOPostLink);
+                        ThinOrFullLTOPhase::FullLTOPostLink, PGOOpt->FS);
   }
 
   // Break up allocas
@@ -1878,7 +1867,8 @@ ModulePassManager PassBuilder::buildO0DefaultPipeline(OptimizationLevel Level,
     addPGOInstrPassesForO0(
         MPM,
         /* RunProfileGen */ (PGOOpt->Action == PGOOptions::IRInstr),
-        /* IsCS */ false, PGOOpt->ProfileFile, PGOOpt->ProfileRemappingFile);
+        /* IsCS */ false, PGOOpt->ProfileFile, PGOOpt->ProfileRemappingFile,
+        PGOOpt->FS);
 
   for (auto &C : PipelineStartEPCallbacks)
     C(MPM, Level);
