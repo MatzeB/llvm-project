@@ -107,7 +107,7 @@ static void replaceOpWithRegion(PatternRewriter &rewriter, Operation *op,
   Block *block = &region.front();
   Operation *terminator = block->getTerminator();
   ValueRange results = terminator->getOperands();
-  rewriter.mergeBlockBefore(block, op, blockArgs);
+  rewriter.inlineBlockBefore(block, op, blockArgs);
   rewriter.replaceOp(op, results);
   rewriter.eraseOp(terminator);
 }
@@ -297,10 +297,11 @@ void ForOp::build(OpBuilder &builder, OperationState &result, Value lb,
   result.addOperands(iterArgs);
   for (Value v : iterArgs)
     result.addTypes(v.getType());
+  Type t = lb.getType();
   Region *bodyRegion = result.addRegion();
   bodyRegion->push_back(new Block);
   Block &bodyBlock = bodyRegion->front();
-  bodyBlock.addArgument(builder.getIndexType(), result.location);
+  bodyBlock.addArgument(t, result.location);
   for (Value v : iterArgs)
     bodyBlock.addArgument(v.getType(), v.getLoc());
 
@@ -337,11 +338,9 @@ LogicalResult ForOp::verify() {
 LogicalResult ForOp::verifyRegions() {
   // Check that the body defines as single block argument for the induction
   // variable.
-  auto *body = getBody();
-  if (!body->getArgument(0).getType().isIndex())
+  if (getInductionVar().getType() != getLowerBound().getType())
     return emitOpError(
-        "expected body first argument to be an index argument for "
-        "the induction variable");
+        "expected induction variable to be same type as bounds and step");
 
   auto opNumResults = getNumResults();
   if (opNumResults == 0)
@@ -363,7 +362,7 @@ LogicalResult ForOp::verifyRegions() {
       return emitOpError() << "types mismatch between " << i
                            << "th iter region arg and defined value";
 
-    i++;
+    ++i;
   }
   return success();
 }
@@ -413,6 +412,8 @@ void ForOp::print(OpAsmPrinter &p) {
   if (!getIterOperands().empty())
     p << " -> (" << getIterOperands().getTypes() << ')';
   p << ' ';
+  if (Type t = getInductionVar().getType(); !t.isIndex())
+    p << " : " << t << ' ';
   p.printRegion(getRegion(),
                 /*printEntryBlockArgs=*/false,
                 /*printBlockTerminators=*/hasIterOperands());
@@ -421,21 +422,17 @@ void ForOp::print(OpAsmPrinter &p) {
 
 ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
   auto &builder = parser.getBuilder();
-  Type indexType = builder.getIndexType();
+  Type type;
 
   OpAsmParser::Argument inductionVariable;
-  inductionVariable.type = indexType;
   OpAsmParser::UnresolvedOperand lb, ub, step;
 
   // Parse the induction variable followed by '='.
-  if (parser.parseArgument(inductionVariable) || parser.parseEqual() ||
+  if (parser.parseOperand(inductionVariable.ssaName) || parser.parseEqual() ||
       // Parse loop bounds.
-      parser.parseOperand(lb) ||
-      parser.resolveOperand(lb, indexType, result.operands) ||
-      parser.parseKeyword("to") || parser.parseOperand(ub) ||
-      parser.resolveOperand(ub, indexType, result.operands) ||
-      parser.parseKeyword("step") || parser.parseOperand(step) ||
-      parser.resolveOperand(step, indexType, result.operands))
+      parser.parseOperand(lb) || parser.parseKeyword("to") ||
+      parser.parseOperand(ub) || parser.parseKeyword("step") ||
+      parser.parseOperand(step))
     return failure();
 
   // Parse the optional initial iteration arguments.
@@ -443,13 +440,32 @@ ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
   SmallVector<OpAsmParser::UnresolvedOperand, 4> operands;
   regionArgs.push_back(inductionVariable);
 
-  if (succeeded(parser.parseOptionalKeyword("iter_args"))) {
+  bool hasIterArgs = succeeded(parser.parseOptionalKeyword("iter_args"));
+  if (hasIterArgs) {
     // Parse assignment list and results type list.
     if (parser.parseAssignmentList(regionArgs, operands) ||
         parser.parseArrowTypeList(result.types))
       return failure();
+  }
 
-    // Resolve input operands.
+  if (regionArgs.size() != result.types.size() + 1)
+    return parser.emitError(
+        parser.getNameLoc(),
+        "mismatch in number of loop-carried values and defined values");
+
+  // Parse optional type, else assume Index.
+  if (parser.parseOptionalColon())
+    type = builder.getIndexType();
+  else if (parser.parseType(type))
+    return failure();
+
+  // Resolve input operands.
+  regionArgs.front().type = type;
+  if (parser.resolveOperand(lb, type, result.operands) ||
+      parser.resolveOperand(ub, type, result.operands) ||
+      parser.resolveOperand(step, type, result.operands))
+    return failure();
+  if (hasIterArgs) {
     for (auto argOperandType :
          llvm::zip(llvm::drop_begin(regionArgs), operands, result.types)) {
       Type type = std::get<2>(argOperandType);
@@ -459,11 +475,6 @@ ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
         return failure();
     }
   }
-
-  if (regionArgs.size() != result.types.size() + 1)
-    return parser.emitError(
-        parser.getNameLoc(),
-        "mismatch in number of loop-carried values and defined values");
 
   // Parse the body region.
   Region *body = result.addRegion();
@@ -623,7 +634,7 @@ namespace {
 // the ForOp region and can just be forwarded after simplifying the op inits,
 // yields and returns.
 //
-// The implementation uses `mergeBlockBefore` to steal the content of the
+// The implementation uses `inlineBlockBefore` to steal the content of the
 // original ForOp and avoid cloning.
 struct ForOpIterArgsFolder : public OpRewritePattern<scf::ForOp> {
   using OpRewritePattern<scf::ForOp>::OpRewritePattern;
@@ -638,7 +649,7 @@ struct ForOpIterArgsFolder : public OpRewritePattern<scf::ForOp> {
     // arguments `newBlockTransferArgs` keeps the 1-1 mapping of original to
     // transformed block argument mappings. This plays the role of a
     // IRMapping for the particular use case of calling into
-    // `mergeBlockBefore`.
+    // `inlineBlockBefore`.
     SmallVector<bool, 4> keepMask;
     keepMask.reserve(yieldOp.getNumOperands());
     SmallVector<Value, 4> newBlockTransferArgs, newIterArgs, newYieldValues,
@@ -708,7 +719,7 @@ struct ForOpIterArgsFolder : public OpRewritePattern<scf::ForOp> {
     // original terminator that has been merged in.
     if (newIterArgs.empty()) {
       auto newYieldOp = cast<scf::YieldOp>(newBlock.getTerminator());
-      rewriter.mergeBlockBefore(&oldBlock, newYieldOp, newBlockTransferArgs);
+      rewriter.inlineBlockBefore(&oldBlock, newYieldOp, newBlockTransferArgs);
       rewriter.eraseOp(newBlock.getTerminator()->getPrevNode());
       rewriter.replaceOp(forOp, newResultValues);
       return success();
@@ -1384,23 +1395,6 @@ InParallelOp ForallOp::getTerminator() {
   return cast<InParallelOp>(getBody()->getTerminator());
 }
 
-/// Helper to sort `values` according to matching `keys`.
-SmallVector<Value> ForallOp::getValuesSortedByKey(
-    ArrayRef<Attribute> keys, ValueRange values,
-    llvm::function_ref<bool(Attribute, Attribute)> compare) {
-  if (keys.empty())
-    return values;
-  assert(keys.size() == values.size() && "unexpected mismatching sizes");
-  auto indices = llvm::to_vector(llvm::seq<int64_t>(0, values.size()));
-  std::sort(indices.begin(), indices.end(),
-            [&](int64_t i, int64_t j) { return compare(keys[i], keys[j]); });
-  SmallVector<Value> res;
-  res.reserve(values.size());
-  for (int64_t i = 0, e = indices.size(); i < e; ++i)
-    res.push_back(values[indices[i]]);
-  return res;
-}
-
 ForallOp mlir::scf::getForallOpThreadIndexOwner(Value val) {
   auto tidxArg = val.dyn_cast<BlockArgument>();
   if (!tidxArg)
@@ -1901,10 +1895,7 @@ struct ConvertTrivialIfToSelect : public OpRewritePattern<IfOp> {
     auto elseYieldArgs = op.elseYield().getOperands();
 
     SmallVector<Type> nonHoistable;
-    for (const auto &it :
-         llvm::enumerate(llvm::zip(thenYieldArgs, elseYieldArgs))) {
-      Value trueVal = std::get<0>(it.value());
-      Value falseVal = std::get<1>(it.value());
+    for (auto [trueVal, falseVal] : llvm::zip(thenYieldArgs, elseYieldArgs)) {
       if (&op.getThenRegion() == trueVal.getParentRegion() ||
           &op.getElseRegion() == falseVal.getParentRegion())
         nonHoistable.push_back(trueVal.getType());
@@ -3673,7 +3664,7 @@ LogicalResult scf::IndexSwitchOp::verify() {
 
   if (failed(verifyRegion(getDefaultRegion(), "default region")))
     return failure();
-  for (auto &[idx, caseRegion] : llvm::enumerate(getCaseRegions()))
+  for (auto [idx, caseRegion] : llvm::enumerate(getCaseRegions()))
     if (failed(verifyRegion(caseRegion, "case region #" + Twine(idx))))
       return failure();
 
