@@ -23,16 +23,16 @@ define i32 @Part_Create(ptr %Anchor, i32 %TypeNum, i32 %F, i32 %Z, ptr %Status, 
 ; CHECK-NEXT:    .cfi_offset %rbx, -24
 ; CHECK-NEXT:    .cfi_offset %rbp, -16
 ; CHECK-NEXT:    movq NullToken@GOTPCREL(%rip), %rax
-; CHECK-NEXT:    movq PartClass@GOTPCREL(%rip), %r10
 ; CHECK-NEXT:    xorl %edx, %edx
 ; CHECK-NEXT:    xorl %ecx, %ecx
 ; CHECK-NEXT:    movq %rdi, %rbx
 ; CHECK-NEXT:    movq (%rax), %rax
-; CHECK-NEXT:    movl (%r10), %ebp
 ; CHECK-NEXT:    movq %rax, {{[0-9]+}}(%rsp)
+; CHECK-NEXT:    movq PartClass@GOTPCREL(%rip), %rax
+; CHECK-NEXT:    movl (%rax), %ebp
 ; CHECK-NEXT:    leaq {{[0-9]+}}(%rsp), %rax
-; CHECK-NEXT:    movl %ebp, %esi
 ; CHECK-NEXT:    movq %rax, (%rsp)
+; CHECK-NEXT:    movl %ebp, %esi
 ; CHECK-NEXT:    callq Image@PLT
 ; CHECK-NEXT:    movq %rbx, %rdi
 ; CHECK-NEXT:    callq Create@PLT

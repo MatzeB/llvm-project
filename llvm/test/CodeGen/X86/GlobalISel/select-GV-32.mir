@@ -29,7 +29,7 @@ regBankSelected: true
 # X32-NEXT:              - { id: 1, class: gr32, preferred-register: '' }
 #
 # X32ABI:              registers:
-# X32ABI-NEXT:           - { id: 0, class: low32_addr_access, preferred-register: '' }
+# X32ABI-NEXT:           - { id: 0, class: gr32, preferred-register: '' }
 # X32ABI-NEXT:           - { id: 1, class: gr32, preferred-register: '' }
 registers:
   - { id: 0, class: gpr, preferred-register: '' }
@@ -39,7 +39,7 @@ registers:
 # X32-NEXT:                MOV32mr %0, 1, $noreg, 0, $noreg, %1 :: (store (p0) into `ptr undef`)
 # X32-NEXT:                RET 0
 #
-# X32ABI:                  %0:low32_addr_access = IMPLICIT_DEF
+# X32ABI:                  %0:gr32 = IMPLICIT_DEF
 # X32ABI-NEXT:             %1:gr32 = LEA64_32r $noreg, 1, $noreg, @g_int, $noreg
 # X32ABI-NEXT:             MOV32mr %0, 1, $noreg, 0, $noreg, %1 :: (store (p0) into `ptr undef`)
 # X32ABI-NEXT:             RET 0

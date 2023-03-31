@@ -92,7 +92,7 @@ body:             |
     ; ALL-LABEL: name: test_ashr_i64
     ; ALL: liveins: $rdi, $rsi
     ; ALL: [[COPY:%[0-9]+]]:gr64 = COPY $rdi
-    ; ALL: [[COPY1:%[0-9]+]]:gr64_with_sub_8bit = COPY $rsi
+    ; ALL: [[COPY1:%[0-9]+]]:gr64 = COPY $rsi
     ; ALL: [[COPY2:%[0-9]+]]:gr8 = COPY [[COPY1]].sub_8bit
     ; ALL: $cl = COPY [[COPY2]]
     ; ALL: [[SAR64rCL:%[0-9]+]]:gr64 = SAR64rCL [[COPY]], implicit-def $eflags, implicit $cl

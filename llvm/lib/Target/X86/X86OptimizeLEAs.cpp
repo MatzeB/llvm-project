@@ -360,8 +360,9 @@ bool X86OptimizeLEAPass::chooseBestLEA(
     // example MOV8mr_NOREX. We could constrain the register class of the LEA
     // def to suit MI, however since this case is very rare and hard to
     // reproduce in a test it's just more reliable to skip the LEA.
-    if (TII->getRegClass(Desc, MemOpNo + X86::AddrBaseReg, TRI, *MF) !=
-        MRI->getRegClass(DefMI->getOperand(0).getReg()))
+    const TargetRegisterClass *BaseRC = TII->getRegClass(Desc, MemOpNo + X86::AddrBaseReg, TRI, *MF);
+    const TargetRegisterClass *OpRC = MRI->getRegClass(DefMI->getOperand(0).getReg());
+    if (BaseRC != OpRC && !BaseRC->hasSubClassEq(OpRC))
       continue;
 
     // Choose the closest LEA instruction from the list, prior to MI if

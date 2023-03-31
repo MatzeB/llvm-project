@@ -3649,7 +3649,7 @@ static unsigned getLoadStoreRegOpcode(Register Reg,
       return getLoadStoreOpcodeForFP16(Load, STI);
     llvm_unreachable("Unknown 4-byte regclass");
   case 8:
-    if (X86::GR64RegClass.hasSubClassEq(RC))
+    if (X86::GR64_RIPRegClass.hasSubClassEq(RC))
       return Load ? X86::MOV64rm : X86::MOV64mr;
     if (X86::FR64XRegClass.hasSubClassEq(RC))
       return Load ?

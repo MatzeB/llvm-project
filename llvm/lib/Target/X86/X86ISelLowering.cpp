@@ -58152,7 +58152,7 @@ static bool isGRClass(const TargetRegisterClass &RC) {
   return RC.hasSuperClassEq(&X86::GR8RegClass) ||
          RC.hasSuperClassEq(&X86::GR16RegClass) ||
          RC.hasSuperClassEq(&X86::GR32RegClass) ||
-         RC.hasSuperClassEq(&X86::GR64RegClass) ||
+         RC.hasSuperClassEq(&X86::GR64_RIPRegClass) ||
          RC.hasSuperClassEq(&X86::LOW32_ADDR_ACCESS_RBPRegClass);
 }
 

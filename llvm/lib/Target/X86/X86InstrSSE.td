@@ -6694,15 +6694,15 @@ let Constraints = "$src1 = $dst" in {
                                  int_x86_sse42_crc32_32_32>, OpSize32;
   def CRC32r32r32 : SS42I_crc32r<0xF1, "crc32{l}", GR32, GR32,
                                  int_x86_sse42_crc32_32_32>, OpSize32;
-  def CRC32r64m64 : SS42I_crc32m<0xF1, "crc32{q}", GR64_no_rip, i64mem,
+  def CRC32r64m64 : SS42I_crc32m<0xF1, "crc32{q}", GR64, i64mem,
                                  int_x86_sse42_crc32_64_64>, REX_W;
-  def CRC32r64r64 : SS42I_crc32r<0xF1, "crc32{q}", GR64_no_rip, GR64_no_rip,
+  def CRC32r64r64 : SS42I_crc32r<0xF1, "crc32{q}", GR64, GR64,
                                  int_x86_sse42_crc32_64_64>, REX_W;
   let hasSideEffects = 0 in {
     let mayLoad = 1 in
-    def CRC32r64m8 : SS42I_crc32m<0xF0, "crc32{b}", GR64_no_rip, i8mem,
+    def CRC32r64m8 : SS42I_crc32m<0xF0, "crc32{b}", GR64, i8mem,
                                    null_frag>, REX_W;
-    def CRC32r64r8 : SS42I_crc32r<0xF0, "crc32{b}", GR64_no_rip, GR8,
+    def CRC32r64r8 : SS42I_crc32r<0xF0, "crc32{b}", GR64, GR8,
                                    null_frag>, REX_W;
   }
 }

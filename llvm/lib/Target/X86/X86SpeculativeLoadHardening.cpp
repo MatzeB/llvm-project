@@ -1888,7 +1888,7 @@ bool X86SpeculativeLoadHardeningPass::canHardenRegister(Register Reg) {
 
   const TargetRegisterClass *GPRRegClasses[] = {
       &X86::GR8RegClass, &X86::GR16RegClass, &X86::GR32RegClass,
-      &X86::GR64RegClass};
+      &X86::GR64_RIPRegClass};
   return RC->hasSuperClassEq(GPRRegClasses[RegIdx]);
 }
 

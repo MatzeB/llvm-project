@@ -116,7 +116,7 @@ body:             |
     liveins: $rdi
 
     ; CHECK-LABEL: name: trunc_i64toi8
-    ; CHECK: [[COPY:%[0-9]+]]:gr64_with_sub_8bit = COPY $rdi
+    ; CHECK: [[COPY:%[0-9]+]]:gr64 = COPY $rdi
     ; CHECK: [[COPY1:%[0-9]+]]:gr8 = COPY [[COPY]].sub_8bit
     ; CHECK: $al = COPY [[COPY1]]
     ; CHECK: RET 0, implicit $al

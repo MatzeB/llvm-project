@@ -425,11 +425,11 @@ def GR32 : RegisterClass<"X86", [i32], 32,
 // tests because of the inclusion of RIP in this register class.
 def GR64 : RegisterClass<"X86", [i64], 64,
                          (add RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
-                              RBX, R14, R15, R12, R13, RBP, RSP, RIP)>;
-
-def GR64_no_rip : RegisterClass<"X86", [i64], 64,
-                         (add RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
                               RBX, R14, R15, R12, R13, RBP, RSP)>;
+
+def GR64_RIP : RegisterClass<"X86", [i64], 64,
+                         (add RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
+                              RBX, R14, R15, R12, R13, RBP, RSP, RIP)>;
 
 // GR64PLTSafe - 64-bit GPRs without R10, R11, RSP and RIP. Could be used when
 // emitting code for intrinsics, which use implict input registers.
@@ -499,8 +499,8 @@ def GR64_NOREX : RegisterClass<"X86", [i64], 64,
 // GR32_NOSP - GR32 registers except ESP.
 def GR32_NOSP : RegisterClass<"X86", [i32], 32, (sub GR32, ESP)>;
 
-// GR64_NOSP - GR64 registers except RSP (and RIP).
-def GR64_NOSP : RegisterClass<"X86", [i64], 64, (sub GR64, RSP, RIP)>;
+// GR64_NOSP - GR64 registers except RSP.
+def GR64_NOSP : RegisterClass<"X86", [i64], 64, (sub GR64, RSP)>;
 
 // GR32_NOREX_NOSP - GR32 registers which do not require a REX prefix except
 // ESP.
@@ -663,4 +663,4 @@ def TILE : RegisterClass<"X86", [x86amx], 8192,
 def FixedRegisters : RegisterCategory<[DEBUG_REG, CONTROL_REG, CCR, FPCCR,
                                        DFCCR, TILE, VK1PAIR, VK2PAIR, VK4PAIR,
                                        VK8PAIR, VK16PAIR]>;
-def GeneralPurposeRegisters : RegisterCategory<[GR64, GR32, GR16, GR8]>;
+def GeneralPurposeRegisters : RegisterCategory<[GR64_RIP, GR32, GR16, GR8]>;

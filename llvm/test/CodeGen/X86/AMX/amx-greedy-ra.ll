@@ -9,7 +9,7 @@ define i16 @foo(i32 noundef %t, i16 %row, i16 %col) nounwind {
   ; CHECK-NEXT:   liveins: $esi, $edx
   ; CHECK-NEXT: {{  $}}
   ; CHECK-NEXT:   undef %12.sub_32bit:gr64_nosp = COPY $edx
-  ; CHECK-NEXT:   undef %13.sub_32bit:gr64_with_sub_8bit = COPY $esi
+  ; CHECK-NEXT:   undef %13.sub_32bit:gr64 = COPY $esi
   ; CHECK-NEXT:   [[AVX512_512_SET0_:%[0-9]+]]:vr512 = AVX512_512_SET0
   ; CHECK-NEXT:   VMOVUPSZmr %stack.0, 1, $noreg, 0, $noreg, [[AVX512_512_SET0_]] :: (store (s512) into %stack.0, align 4)
   ; CHECK-NEXT:   MOV8mi %stack.0, 1, $noreg, 0, $noreg, 1 :: (store (s512) into %stack.0, align 4)

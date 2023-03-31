@@ -797,14 +797,14 @@ def i64u8imm : Operand<i64> {
 
 def lea64_32mem : Operand<i32> {
   let PrintMethod = "printMemReference";
-  let MIOperandInfo = (ops GR64, i8imm, GR64_NOSP, i32imm, SEGMENT_REG);
+  let MIOperandInfo = (ops GR64_RIP, i8imm, GR64_NOSP, i32imm, SEGMENT_REG);
   let ParserMatchClass = X86MemAsmOperand;
 }
 
 // Memory operands that use 64-bit pointers in both ILP32 and LP64.
 def lea64mem : Operand<i64> {
   let PrintMethod = "printMemReference";
-  let MIOperandInfo = (ops GR64, i8imm, GR64_NOSP, i32imm, SEGMENT_REG);
+  let MIOperandInfo = (ops GR64_RIP, i8imm, GR64_NOSP, i32imm, SEGMENT_REG);
   let ParserMatchClass = X86MemAsmOperand;
 }
 

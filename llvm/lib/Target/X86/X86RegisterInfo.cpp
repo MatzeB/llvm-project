@@ -181,7 +181,7 @@ X86RegisterInfo::getPointerRegClass(const MachineFunction &MF,
   default: llvm_unreachable("Unexpected Kind in getPointerRegClass!");
   case 0: // Normal GPRs.
     if (Subtarget.isTarget64BitLP64())
-      return &X86::GR64RegClass;
+      return &X86::GR64_RIPRegClass;
     // If the target is 64bit but we have been told to use 32bit addresses,
     // we can still use 64-bit register as long as we know the high bits
     // are zeros.
