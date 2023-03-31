@@ -427,6 +427,10 @@ def GR64 : RegisterClass<"X86", [i64], 64,
                          (add RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
                               RBX, R14, R15, R12, R13, RBP, RSP, RIP)>;
 
+def GR64_no_rip : RegisterClass<"X86", [i64], 64,
+                         (add RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11,
+                              RBX, R14, R15, R12, R13, RBP, RSP)>;
+
 // GR64PLTSafe - 64-bit GPRs without R10, R11, RSP and RIP. Could be used when
 // emitting code for intrinsics, which use implict input registers.
 def GR64PLTSafe : RegisterClass<"X86", [i64], 64,
