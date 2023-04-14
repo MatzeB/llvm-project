@@ -107,7 +107,6 @@ namespace std {
 #include <__utility/move.h>
 #include <__utility/unreachable.h>
 #include <__verbose_abort>
-#include <cstdlib>
 #include <initializer_list>
 #include <typeinfo>
 #include <version>
@@ -135,7 +134,7 @@ void __throw_bad_any_cast()
 #ifndef _LIBCPP_HAS_NO_EXCEPTIONS
     throw bad_any_cast();
 #else
-    std::__libcpp_verbose_abort("bad_any_cast was thrown in -fno-exceptions mode");
+    _LIBCPP_VERBOSE_ABORT("bad_any_cast was thrown in -fno-exceptions mode");
 #endif
 }
 
@@ -718,6 +717,7 @@ _LIBCPP_END_NAMESPACE_STD
 #if !defined(_LIBCPP_REMOVE_TRANSITIVE_INCLUDES) && _LIBCPP_STD_VER <= 20
 #  include <atomic>
 #  include <concepts>
+#  include <cstdlib>
 #  include <iosfwd>
 #  include <iterator>
 #  include <memory>

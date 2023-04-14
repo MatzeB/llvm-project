@@ -139,7 +139,8 @@ class ConstraintInfo {
   const DataLayout &DL;
 
 public:
-  ConstraintInfo(const DataLayout &DL) : DL(DL) {}
+  ConstraintInfo(const DataLayout &DL, ArrayRef<Value *> FunctionArgs)
+      : UnsignedCS(FunctionArgs), SignedCS(FunctionArgs), DL(DL) {}
 
   DenseMap<Value *, unsigned> &getValue2Index(bool Signed) {
     return Signed ? SignedCS.getValue2Index() : UnsignedCS.getValue2Index();
@@ -242,9 +243,8 @@ static bool canUseSExt(ConstantInt *CI) {
 }
 
 static Decomposition
-decomposeGEP(GetElementPtrInst &GEP,
-             SmallVectorImpl<PreconditionTy> &Preconditions, bool IsSigned,
-             const DataLayout &DL) {
+decomposeGEP(GEPOperator &GEP, SmallVectorImpl<PreconditionTy> &Preconditions,
+             bool IsSigned, const DataLayout &DL) {
   // Do not reason about pointers where the index size is larger than 64 bits,
   // as the coefficients used to encode constraints are 64 bit integers.
   if (DL.getIndexTypeSizeInBits(GEP.getPointerOperand()->getType()) > 64)
@@ -264,7 +264,7 @@ decomposeGEP(GetElementPtrInst &GEP,
 
   // Handle the (gep (gep ....), C) case by incrementing the constant
   // coefficient of the inner GEP, if C is a constant.
-  auto *InnerGEP = dyn_cast<GetElementPtrInst>(GEP.getPointerOperand());
+  auto *InnerGEP = dyn_cast<GEPOperator>(GEP.getPointerOperand());
   if (VariableOffsets.empty() && InnerGEP && InnerGEP->getNumOperands() == 2) {
     auto Result = decompose(InnerGEP, Preconditions, IsSigned, DL);
     Result.add(ConstantOffset.getSExtValue());
@@ -336,7 +336,7 @@ static Decomposition decompose(Value *V,
     return int64_t(CI->getZExtValue());
   }
 
-  if (auto *GEP = dyn_cast<GetElementPtrInst>(V))
+  if (auto *GEP = dyn_cast<GEPOperator>(V))
     return decomposeGEP(*GEP, Preconditions, IsSigned, DL);
 
   Value *Op0;
@@ -808,7 +808,7 @@ static void generateReproducer(CmpInst *Cond, Module *M,
 
       auto *I = dyn_cast<Instruction>(V);
       if (Value2Index.contains(V) || !I ||
-          !isa<CmpInst, BinaryOperator, GetElementPtrInst, CastInst>(V)) {
+          !isa<CmpInst, BinaryOperator, GEPOperator, CastInst>(V)) {
         Old2New[V] = V;
         Args.push_back(V);
         LLVM_DEBUG(dbgs() << "  found external input " << *V << "\n");
@@ -1088,8 +1088,10 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT,
                                  OptimizationRemarkEmitter &ORE) {
   bool Changed = false;
   DT.updateDFSNumbers();
-
-  ConstraintInfo Info(F.getParent()->getDataLayout());
+  SmallVector<Value *> FunctionArgs;
+  for (Value &Arg : F.args())
+    FunctionArgs.push_back(&Arg);
+  ConstraintInfo Info(F.getParent()->getDataLayout(), FunctionArgs);
   State S(DT);
   std::unique_ptr<Module> ReproducerModule(
       DumpReproducers ? new Module(F.getName(), F.getContext()) : nullptr);

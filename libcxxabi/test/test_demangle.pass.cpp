@@ -7,12 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 // The demangler does not pass all these tests with the system dylibs on macOS.
-// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
+// XFAIL: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
 
 // https://llvm.org/PR51407 was not fixed in some previously-released
 // demanglers, which causes them to run into the infinite loop.
-// UNSUPPORTED: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
-// UNSUPPORTED: use_system_cxx_lib && target={{.+}}-apple-macosx11.0
+// UNSUPPORTED: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
+// UNSUPPORTED: stdlib=apple-libc++ && target={{.+}}-apple-macosx11.0
 
 #include "support/timer.h"
 #include <algorithm>
@@ -30112,6 +30112,8 @@ const char* cases[][2] =
      "::basic_ostream()"},
     {"_ZNSsC1Ev", "std::basic_string<char, std::char_traits<char>,"
      " std::allocator<char>>::basic_string()"},
+    {"_ZN1SB8ctor_tagC2Ev", "S[abi:ctor_tag]::S()"},
+    {"_ZN1SB8ctor_tagD2Ev", "S[abi:ctor_tag]::~S()"},
 };
 
 const unsigned N = sizeof(cases) / sizeof(cases[0]);

@@ -219,9 +219,16 @@ Intrinsic::ID getIntrinsicForCallSite(const CallBase &CB,
 
 /// Returns a pair of values, which if passed to llvm.is.fpclass, returns the
 /// same result as an fcmp with the given operands.
+///
+/// If \p LookThroughSrc is true, consider the input value when computing the
+/// mask.
+///
+/// If \p LookThroughSrc is false, ignore the source value (i.e. the first pair
+/// element will always be LHS.
 std::pair<Value *, FPClassTest> fcmpToClassTest(CmpInst::Predicate Pred,
-                                                const Function &F,
-                                                Value *LHS, Value *RHS);
+                                                const Function &F, Value *LHS,
+                                                Value *RHS,
+                                                bool LookThroughSrc = true);
 
 struct KnownFPClass {
   /// Floating-point classes the value could be one of.
@@ -230,6 +237,46 @@ struct KnownFPClass {
   /// std::nullopt if the sign bit is unknown, true if the sign bit is
   /// definitely set or false if the sign bit is definitely unset.
   std::optional<bool> SignBit;
+
+
+  /// Return true if it's known this can never be a nan.
+  bool isKnownNeverNaN() const {
+    return (KnownFPClasses & fcNan) == fcNone;
+  }
+
+  /// Return true if it's known this can never be an infinity.
+  bool isKnownNeverInfinity() const {
+    return (KnownFPClasses & fcInf) == fcNone;
+  }
+
+  /// Return true if it's known this can never be a subnormal
+  bool isKnownNeverSubnormal() const {
+    return (KnownFPClasses & fcSubnormal) == fcNone;
+  }
+
+  /// Return true if it's known this can never be a zero. This means a literal
+  /// [+-]0, and does not include denormal inputs implicitly treated as [+-]0.
+  bool isKnownNeverZero() const {
+    return (KnownFPClasses & fcZero) == fcNone;
+  }
+
+  /// Return true if it's know this can never be interpreted as a zero. This
+  /// extends isKnownNeverZero to cover the case where the assumed
+  /// floating-point mode for the function interprets denormals as zero.
+  bool isKnownNeverLogicalZero(const Function &F, Type *Ty) const;
+
+  /// Return true if we can prove that the analyzed floating-point value is
+  /// either NaN or never less than -0.0.
+  ///
+  ///      NaN --> true
+  ///       +0 --> true
+  ///       -0 --> true
+  ///   x > +0 --> true
+  ///   x < -0 --> false
+  bool cannotBeOrderedLessThanZero() const {
+    const FPClassTest OrderedNegMask = fcNegSubnormal | fcNegNormal | fcNegInf;
+    return (KnownFPClasses & OrderedNegMask) == fcNone;
+  }
 
   KnownFPClass &operator|=(const KnownFPClass &RHS) {
     KnownFPClasses = KnownFPClasses | RHS.KnownFPClasses;
@@ -654,6 +701,10 @@ OverflowResult computeOverflowForSignedSub(const Value *LHS, const Value *RHS,
 bool isOverflowIntrinsicNoWrap(const WithOverflowInst *WO,
                                const DominatorTree &DT);
 
+/// Determine the possible constant range of vscale with the given bit width,
+/// based on the vscale_range function attribute.
+ConstantRange getVScaleRange(const Function *F, unsigned BitWidth);
+
 /// Determine the possible constant range of an integer or vector of integer
 /// value. This is intended as a cheap, non-recursive check.
 ConstantRange computeConstantRange(const Value *V, bool ForSigned,
@@ -785,6 +836,17 @@ bool isGuaranteedNotToBePoison(const Value *V, AssumptionCache *AC = nullptr,
                                const Instruction *CtxI = nullptr,
                                const DominatorTree *DT = nullptr,
                                unsigned Depth = 0);
+
+/// Return true if undefined behavior would provable be executed on the path to
+/// OnPathTo if Root produced a posion result.  Note that this doesn't say
+/// anything about whether OnPathTo is actually executed or whether Root is
+/// actually poison.  This can be used to assess whether a new use of Root can
+/// be added at a location which is control equivalent with OnPathTo (such as
+/// immediately before it) without introducing UB which didn't previously
+/// exist.  Note that a false result conveys no information.
+bool mustExecuteUBIfPoisonOnPathTo(Instruction *Root,
+                                   Instruction *OnPathTo,
+                                   DominatorTree *DT);
 
 /// Specific patterns of select instructions we can match.
 enum SelectPatternFlavor {

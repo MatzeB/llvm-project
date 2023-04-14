@@ -532,9 +532,8 @@ void AggExprEmitter::EmitArrayInit(Address DestPtr, llvm::ArrayType *AType,
             Emitter.tryEmitForInitializer(ExprToVisit, AS, ArrayQTy)) {
       auto GV = new llvm::GlobalVariable(
           CGM.getModule(), C->getType(),
-          CGM.isTypeConstant(ArrayQTy, /* ExcludeCtor= */ true,
-                             /* ExcludeDtor= */ false),
-          llvm::GlobalValue::PrivateLinkage, C, "constinit",
+          /* isConstant= */ true, llvm::GlobalValue::PrivateLinkage, C,
+          "constinit",
           /* InsertBefore= */ nullptr, llvm::GlobalVariable::NotThreadLocal,
           CGM.getContext().getTargetAddressSpace(AS));
       Emitter.finalize(GV);
@@ -1659,10 +1658,18 @@ void AggExprEmitter::VisitCXXParenListOrInitListExpr(
   LValue DestLV = CGF.MakeAddrLValue(Dest.getAddress(), ExprToVisit->getType());
 
   // Handle initialization of an array.
-  if (ExprToVisit->getType()->isArrayType()) {
+  if (ExprToVisit->getType()->isConstantArrayType()) {
     auto AType = cast<llvm::ArrayType>(Dest.getAddress().getElementType());
     EmitArrayInit(Dest.getAddress(), AType, ExprToVisit->getType(), ExprToVisit,
                   InitExprs, ArrayFiller);
+    return;
+  } else if (ExprToVisit->getType()->isVariableArrayType()) {
+    // A variable array type that has an initializer can only do empty
+    // initialization. And because this feature is not exposed as an extension
+    // in C++, we can safely memset the array memory to zero.
+    assert(InitExprs.size() == 0 &&
+           "you can only use an empty initializer with VLAs");
+    CGF.EmitNullInitialization(Dest.getAddress(), ExprToVisit->getType());
     return;
   }
 

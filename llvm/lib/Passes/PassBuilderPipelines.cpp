@@ -57,6 +57,7 @@
 #include "llvm/Transforms/IPO/InferFunctionAttrs.h"
 #include "llvm/Transforms/IPO/Inliner.h"
 #include "llvm/Transforms/IPO/LowerTypeTests.h"
+#include "llvm/Transforms/IPO/MemProfContextDisambiguation.h"
 #include "llvm/Transforms/IPO/MergeFunctions.h"
 #include "llvm/Transforms/IPO/ModuleInliner.h"
 #include "llvm/Transforms/IPO/OpenMPOpt.h"
@@ -270,6 +271,10 @@ static cl::opt<AttributorRunOption> AttributorRun(
                           "enable call graph SCC attributor runs"),
                clEnumValN(AttributorRunOption::NONE, "none",
                           "disable attributor runs")));
+
+cl::opt<bool> EnableMemProfContextDisambiguation(
+    "enable-memprof-context-disambiguation", cl::init(false), cl::Hidden,
+    cl::ZeroOrMore, cl::desc("Enable MemProf context disambiguation"));
 
 PipelineTuningOptions::PipelineTuningOptions() {
   LoopInterleaving = true;
@@ -500,8 +505,7 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   FPM.addPass(
       SimplifyCFGPass(SimplifyCFGOptions().convertSwitchRangeToICmp(true)));
   FPM.addPass(InstCombinePass());
-  if (Level == OptimizationLevel::O3)
-    FPM.addPass(AggressiveInstCombinePass());
+  FPM.addPass(AggressiveInstCombinePass());
 
   if (EnableConstraintElimination)
     FPM.addPass(ConstraintEliminationPass());
@@ -917,6 +921,8 @@ PassBuilder::buildModuleInlinerPipeline(OptimizationLevel Level,
 ModulePassManager
 PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
                                                ThinOrFullLTOPhase Phase) {
+  assert(Level != OptimizationLevel::O0 &&
+         "Should not be used for O0 pipeline");
   ModulePassManager MPM;
 
   // Place pseudo probe instrumentation as the first pass of the pipeline to
@@ -981,8 +987,7 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
     MPM.addPass(RequireAnalysisPass<ProfileSummaryAnalysis, Module>());
     // Do not invoke ICP in the LTOPrelink phase as it makes it hard
     // for the profile annotation to be accurate in the LTO backend.
-    if (Phase != ThinOrFullLTOPhase::ThinLTOPreLink &&
-        Phase != ThinOrFullLTOPhase::FullLTOPreLink)
+    if (!isLTOPreLink(Phase))
       // We perform early indirect call promotion here, before globalopt.
       // This is important for the ThinLTO backend phase because otherwise
       // imported available_externally functions look unreferenced and are
@@ -993,8 +998,7 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
 
   // Try to perform OpenMP specific optimizations on the module. This is a
   // (quick!) no-op if there are no OpenMP runtime calls present in the module.
-  if (Level != OptimizationLevel::O0)
-    MPM.addPass(OpenMPOptPass());
+  MPM.addPass(OpenMPOptPass());
 
   if (AttributorRun & AttributorRunOption::MODULE)
     MPM.addPass(AttributorPass());
@@ -1016,8 +1020,7 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
               IPSCCPOptions(/*AllowFuncSpec=*/
                             Level != OptimizationLevel::Os &&
                             Level != OptimizationLevel::Oz &&
-                            Phase != ThinOrFullLTOPhase::ThinLTOPreLink &&
-                            Phase != ThinOrFullLTOPhase::FullLTOPreLink)));
+                            !isLTOPreLink(Phase))));
 
   // Attach metadata to indirect call sites indicating the set of functions
   // they may target at run-time. This should follow IPSCCP.
@@ -1226,8 +1229,7 @@ void PassBuilder::addVectorPasses(OptimizationLevel Level,
 ModulePassManager
 PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
                                              ThinOrFullLTOPhase LTOPhase) {
-  const bool LTOPreLink = (LTOPhase == ThinOrFullLTOPhase::ThinLTOPreLink ||
-                           LTOPhase == ThinOrFullLTOPhase::FullLTOPreLink);
+  const bool LTOPreLink = isLTOPreLink(LTOPhase);
   ModulePassManager MPM;
 
   // Run partial inlining pass to partially inline functions that have
@@ -1398,8 +1400,8 @@ PassBuilder::buildModuleOptimizationPipeline(OptimizationLevel Level,
 ModulePassManager
 PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
                                            bool LTOPreLink) {
-  assert(Level != OptimizationLevel::O0 &&
-         "Must request optimizations for the default pipeline!");
+  if (Level == OptimizationLevel::O0)
+    return buildO0DefaultPipeline(Level, LTOPreLink);
 
   ModulePassManager MPM;
 
@@ -1409,12 +1411,12 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
   // Force any function attributes we want the rest of the pipeline to observe.
   MPM.addPass(ForceFunctionAttrsPass());
 
+  if (PGOOpt && PGOOpt->DebugInfoForProfiling)
+    MPM.addPass(createModuleToFunctionPassAdaptor(AddDiscriminatorsPass()));
+
   // Apply module pipeline start EP callback.
   for (auto &C : PipelineStartEPCallbacks)
     C(MPM, Level);
-
-  if (PGOOpt && PGOOpt->DebugInfoForProfiling)
-    MPM.addPass(createModuleToFunctionPassAdaptor(AddDiscriminatorsPass()));
 
   const ThinOrFullLTOPhase LTOPhase = LTOPreLink
                                           ? ThinOrFullLTOPhase::FullLTOPreLink
@@ -1440,8 +1442,8 @@ PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel Level,
 
 ModulePassManager
 PassBuilder::buildThinLTOPreLinkDefaultPipeline(OptimizationLevel Level) {
-  assert(Level != OptimizationLevel::O0 &&
-         "Must request optimizations for the default pipeline!");
+  if (Level == OptimizationLevel::O0)
+    return buildO0DefaultPipeline(Level, /*LTOPreLink*/true);
 
   ModulePassManager MPM;
 
@@ -1498,9 +1500,6 @@ ModulePassManager PassBuilder::buildThinLTODefaultPipeline(
     OptimizationLevel Level, const ModuleSummaryIndex *ImportSummary) {
   ModulePassManager MPM;
 
-  // Convert @llvm.global.annotations to !annotation metadata.
-  MPM.addPass(Annotation2MetadataPass());
-
   if (ImportSummary) {
     // These passes import type identifier resolutions for whole-program
     // devirtualization and CFI. They must run early because other passes may
@@ -1552,8 +1551,6 @@ ModulePassManager PassBuilder::buildThinLTODefaultPipeline(
 
 ModulePassManager
 PassBuilder::buildLTOPreLinkDefaultPipeline(OptimizationLevel Level) {
-  assert(Level != OptimizationLevel::O0 &&
-         "Must request optimizations for the default pipeline!");
   // FIXME: We should use a customized pre-link pipeline!
   return buildPerModuleDefaultPipeline(Level,
                                        /* LTOPreLink */ true);
@@ -1563,9 +1560,6 @@ ModulePassManager
 PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
                                      ModuleSummaryIndex *ExportSummary) {
   ModulePassManager MPM;
-
-  // Convert @llvm.global.annotations to !annotation metadata.
-  MPM.addPass(Annotation2MetadataPass());
 
   for (auto &C : FullLinkTimeOptimizationEarlyEPCallbacks)
     C(MPM, Level);
@@ -1693,7 +1687,7 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
   // calls, etc, so let instcombine do this.
   FunctionPassManager PeepholeFPM;
   PeepholeFPM.addPass(InstCombinePass());
-  if (Level == OptimizationLevel::O3)
+  if (Level.getSpeedupLevel() > 1)
     PeepholeFPM.addPass(AggressiveInstCombinePass());
   invokePeepholeEPCallbacks(PeepholeFPM, Level);
 
@@ -1705,11 +1699,23 @@ PassBuilder::buildLTODefaultPipeline(OptimizationLevel Level,
   // valuable as the inliner doesn't currently care whether it is inlining an
   // invoke or a call.
   // Run the inliner now.
-  MPM.addPass(ModuleInlinerWrapperPass(
-      getInlineParamsFromOptLevel(Level),
-      /* MandatoryFirst */ true,
-      InlineContext{ThinOrFullLTOPhase::FullLTOPostLink,
-                    InlinePass::CGSCCInliner}));
+  if (EnableModuleInliner) {
+    MPM.addPass(ModuleInlinerPass(getInlineParamsFromOptLevel(Level),
+                                  UseInlineAdvisor,
+                                  ThinOrFullLTOPhase::FullLTOPostLink));
+  } else {
+    MPM.addPass(ModuleInlinerWrapperPass(
+        getInlineParamsFromOptLevel(Level),
+        /* MandatoryFirst */ true,
+        InlineContext{ThinOrFullLTOPhase::FullLTOPostLink,
+                      InlinePass::CGSCCInliner}));
+  }
+
+  // Perform context disambiguation after inlining, since that would reduce the
+  // amount of additional cloning required to distinguish the allocation
+  // contexts.
+  if (EnableMemProfContextDisambiguation)
+    MPM.addPass(MemProfContextDisambiguation());
 
   // Optimize globals again after we ran the inliner.
   MPM.addPass(GlobalOptPass());

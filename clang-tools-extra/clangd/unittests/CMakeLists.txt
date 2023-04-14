@@ -171,6 +171,7 @@ target_link_libraries(ClangdTests
 
   clangDaemon
   clangIncludeCleaner
+  clangTesting
   clangTidy
   clangdSupport
   )

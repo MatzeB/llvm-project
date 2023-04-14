@@ -1152,6 +1152,25 @@ KnownBits llvm::analyzeKnownBitsFromAndXorOr(
       Query(DL, AC, safeCxtI(I, CxtI), DT, UseInstrInfo, ORE));
 }
 
+ConstantRange llvm::getVScaleRange(const Function *F, unsigned BitWidth) {
+  Attribute Attr = F->getFnAttribute(Attribute::VScaleRange);
+  // Without vscale_range, we only know that vscale is non-zero.
+  if (!Attr.isValid())
+    return ConstantRange(APInt(BitWidth, 1), APInt::getZero(BitWidth));
+
+  unsigned AttrMin = Attr.getVScaleRangeMin();
+  // Minimum is larger than vscale width, result is always poison.
+  if ((unsigned)llvm::bit_width(AttrMin) > BitWidth)
+    return ConstantRange::getEmpty(BitWidth);
+
+  APInt Min(BitWidth, AttrMin);
+  std::optional<unsigned> AttrMax = Attr.getVScaleRangeMax();
+  if (!AttrMax || (unsigned)llvm::bit_width(*AttrMax) > BitWidth)
+    return ConstantRange(Min, APInt::getZero(BitWidth));
+
+  return ConstantRange(Min, APInt(BitWidth, *AttrMax) + 1);
+}
+
 static void computeKnownBitsFromOperator(const Operator *I,
                                          const APInt &DemandedElts,
                                          KnownBits &Known, unsigned Depth,
@@ -1820,31 +1839,10 @@ static void computeKnownBitsFromOperator(const Operator *I,
           Known.Zero.setBitsFrom(17);
         break;
       case Intrinsic::vscale: {
-        if (!II->getParent() || !II->getFunction() ||
-            !II->getFunction()->hasFnAttribute(Attribute::VScaleRange))
+        if (!II->getParent() || !II->getFunction())
           break;
 
-        auto Attr = II->getFunction()->getFnAttribute(Attribute::VScaleRange);
-        std::optional<unsigned> VScaleMax = Attr.getVScaleRangeMax();
-
-        if (!VScaleMax)
-          break;
-
-        unsigned VScaleMin = Attr.getVScaleRangeMin();
-
-        // If vscale min = max then we know the exact value at compile time
-        // and hence we know the exact bits.
-        if (VScaleMin == VScaleMax) {
-          Known.One = VScaleMin;
-          Known.Zero = VScaleMin;
-          Known.Zero.flipAllBits();
-          break;
-        }
-
-        unsigned FirstZeroHighBit = llvm::bit_width(*VScaleMax);
-        if (FirstZeroHighBit < BitWidth)
-          Known.Zero.setBitsFrom(FirstZeroHighBit);
-
+        Known = getVScaleRange(II->getFunction(), BitWidth).toKnownBits();
         break;
       }
       }
@@ -4127,16 +4125,22 @@ bool llvm::isKnownNeverNaN(const Value *V, const TargetLibraryInfo *TLI,
 
 /// Return true if it's possible to assume IEEE treatment of input denormals in
 /// \p F for \p Val.
-static bool inputDenormalIsIEEE(const Function &F, const Value *Val) {
-  Type *Ty = Val->getType()->getScalarType();
+static bool inputDenormalIsIEEE(const Function &F, const Type *Ty) {
+  Ty = Ty->getScalarType();
   return F.getDenormalMode(Ty->getFltSemantics()).Input == DenormalMode::IEEE;
+}
+
+bool KnownFPClass::isKnownNeverLogicalZero(const Function &F, Type *Ty) const {
+  return isKnownNeverZero() &&
+         (isKnownNeverSubnormal() || inputDenormalIsIEEE(F, Ty));
 }
 
 /// Returns a pair of values, which if passed to llvm.is.fpclass, returns the
 /// same result as an fcmp with the given operands.
 std::pair<Value *, FPClassTest> llvm::fcmpToClassTest(FCmpInst::Predicate Pred,
                                                       const Function &F,
-                                                      Value *LHS, Value *RHS) {
+                                                      Value *LHS, Value *RHS,
+                                                      bool LookThroughSrc) {
   const APFloat *ConstRHS;
   if (!match(RHS, m_APFloat(ConstRHS)))
     return {nullptr, fcNone};
@@ -4144,7 +4148,7 @@ std::pair<Value *, FPClassTest> llvm::fcmpToClassTest(FCmpInst::Predicate Pred,
   if (ConstRHS->isZero()) {
     // Compares with fcNone are only exactly equal to fcZero if input denormals are
     // not flushed.
-    if (FCmpInst::isEquality(Pred) && !inputDenormalIsIEEE(F, LHS))
+    if (FCmpInst::isEquality(Pred) && !inputDenormalIsIEEE(F, LHS->getType()))
       return {nullptr, fcNone};
 
     switch (Pred) {
@@ -4170,7 +4174,7 @@ std::pair<Value *, FPClassTest> llvm::fcmpToClassTest(FCmpInst::Predicate Pred,
   }
 
   Value *Src = LHS;
-  const bool IsFabs = match(LHS, m_FAbs(m_Value(Src)));
+  const bool IsFabs = LookThroughSrc && match(LHS, m_FAbs(m_Value(Src)));
 
   // Compute the test mask that would return true for the ordered comparisons.
   FPClassTest Mask;
@@ -4297,6 +4301,53 @@ std::pair<Value *, FPClassTest> llvm::fcmpToClassTest(FCmpInst::Predicate Pred,
   return {Src, Mask};
 }
 
+static FPClassTest computeKnownFPClassFromAssumes(const Value *V,
+                                                  const Query &Q) {
+  FPClassTest KnownFromAssume = fcNone;
+
+  // Try to restrict the floating-point classes based on information from
+  // assumptions.
+  for (auto &AssumeVH : Q.AC->assumptionsFor(V)) {
+    if (!AssumeVH)
+      continue;
+    CallInst *I = cast<CallInst>(AssumeVH);
+    const Function *F = I->getFunction();
+
+    assert(F == Q.CxtI->getParent()->getParent() &&
+           "Got assumption for the wrong function!");
+    assert(I->getCalledFunction()->getIntrinsicID() == Intrinsic::assume &&
+           "must be an assume intrinsic");
+
+    if (!isValidAssumeForContext(I, Q.CxtI, Q.DT))
+      continue;
+
+    CmpInst::Predicate Pred;
+    Value *LHS, *RHS;
+    uint64_t ClassVal = 0;
+    if (match(I->getArgOperand(0), m_FCmp(Pred, m_Value(LHS), m_Value(RHS)))) {
+      auto [TestedValue, TestedMask] =
+          fcmpToClassTest(Pred, *F, LHS, RHS, true);
+      // First see if we can fold in fabs/fneg into the test.
+      if (TestedValue == V)
+        KnownFromAssume |= TestedMask;
+      else {
+        // Try again without the lookthrough if we found a different source
+        // value.
+        auto [TestedValue, TestedMask] =
+            fcmpToClassTest(Pred, *F, LHS, RHS, false);
+        if (TestedValue == V)
+          KnownFromAssume |= TestedMask;
+      }
+    } else if (match(I->getArgOperand(0),
+                     m_Intrinsic<Intrinsic::is_fpclass>(
+                         m_Value(LHS), m_ConstantInt(ClassVal)))) {
+      KnownFromAssume |= static_cast<FPClassTest>(ClassVal);
+    }
+  }
+
+  return KnownFromAssume;
+}
+
 // TODO: Merge implementations of isKnownNeverNaN, isKnownNeverInfinity,
 // CannotBeNegativeZero, cannotBeOrderedLessThanZero into here.
 void computeKnownFPClass(const Value *V, const APInt &DemandedElts,
@@ -4333,6 +4384,9 @@ void computeKnownFPClass(const Value *V, const APInt &DemandedElts,
     if (FPOp->hasNoInfs())
       KnownNotFromFlags |= fcInf;
   }
+
+  if (Q.AC)
+    KnownNotFromFlags |= computeKnownFPClassFromAssumes(V, Q);
 
   // We no longer need to find out about these bits from inputs if we can
   // assume this from flags/attributes.
@@ -4390,6 +4444,51 @@ void computeKnownFPClass(const Value *V, const APInt &DemandedElts,
 
     break;
   }
+  case Instruction::FAdd:
+  case Instruction::FSub: {
+    KnownFPClass KnownLHS, KnownRHS;
+    computeKnownFPClass(Op->getOperand(1), DemandedElts, fcNan | fcInf,
+                        KnownRHS, Depth + 1, Q, TLI);
+    if (KnownRHS.isKnownNeverNaN()) {
+      // RHS is canonically cheaper to compute. Skip inspecting the LHS if
+      // there's no point.
+      computeKnownFPClass(Op->getOperand(0), DemandedElts, fcNan | fcInf,
+                          KnownLHS, Depth + 1, Q, TLI);
+      // Adding positive and negative infinity produces NaN.
+      // TODO: Check sign of infinities.
+      if (KnownLHS.isKnownNeverNaN() &&
+          (KnownLHS.isKnownNeverInfinity() || KnownRHS.isKnownNeverInfinity()))
+        Known.knownNot(fcNan);
+    }
+
+    break;
+  }
+  case Instruction::FMul: {
+    KnownFPClass KnownLHS, KnownRHS;
+    computeKnownFPClass(Op->getOperand(1), DemandedElts,
+                        fcNan | fcInf | fcZero | fcSubnormal, KnownRHS,
+                        Depth + 1, Q, TLI);
+    if (KnownRHS.isKnownNeverNaN() &&
+        (KnownRHS.isKnownNeverInfinity() || KnownRHS.isKnownNeverZero())) {
+      computeKnownFPClass(Op->getOperand(0), DemandedElts,
+                          fcNan | fcInf | fcZero, KnownLHS, Depth + 1, Q, TLI);
+      if (!KnownLHS.isKnownNeverNaN())
+        break;
+
+      const Function *F = cast<Instruction>(Op)->getFunction();
+
+      // If neither side can be zero (or nan) fmul never produces NaN.
+      // TODO: Check operand combinations.
+      // e.g. fmul nofpclass(inf nan zero), nofpclass(nan) -> nofpclass(nan)
+      if ((KnownLHS.isKnownNeverInfinity() ||
+           KnownLHS.isKnownNeverLogicalZero(*F, Op->getType())) &&
+          (KnownRHS.isKnownNeverInfinity() ||
+           KnownRHS.isKnownNeverLogicalZero(*F, Op->getType())))
+        Known.knownNot(fcNan);
+    }
+
+    break;
+  }
   case Instruction::SIToFP:
   case Instruction::UIToFP: {
     // Cannot produce nan
@@ -4417,8 +4516,6 @@ void computeKnownFPClass(const Value *V, const APInt &DemandedElts,
   default:
     break;
   }
-
-  // TODO: Handle assumes
 }
 
 KnownFPClass llvm::computeKnownFPClass(
@@ -5395,7 +5492,7 @@ static ConstantRange computeConstantRangeIncludingKnownBits(
   KnownBits Known = computeKnownBits(
       V, DL, Depth, AC, CxtI, DT, ORE, UseInstrInfo);
   ConstantRange CR1 = ConstantRange::fromKnownBits(Known, ForSigned);
-  ConstantRange CR2 = computeConstantRange(V, UseInstrInfo);
+  ConstantRange CR2 = computeConstantRange(V, ForSigned, UseInstrInfo);
   ConstantRange::PreferredRangeType RangeType =
       ForSigned ? ConstantRange::Signed : ConstantRange::Unsigned;
   return CR1.intersectWith(CR2, RangeType);
@@ -6040,6 +6137,50 @@ bool llvm::isGuaranteedNotToBePoison(const Value *V, AssumptionCache *AC,
                                      const Instruction *CtxI,
                                      const DominatorTree *DT, unsigned Depth) {
   return ::isGuaranteedNotToBeUndefOrPoison(V, AC, CtxI, DT, Depth, true);
+}
+
+/// Return true if undefined behavior would provable be executed on the path to
+/// OnPathTo if Root produced a posion result.  Note that this doesn't say
+/// anything about whether OnPathTo is actually executed or whether Root is
+/// actually poison.  This can be used to assess whether a new use of Root can
+/// be added at a location which is control equivalent with OnPathTo (such as
+/// immediately before it) without introducing UB which didn't previously
+/// exist.  Note that a false result conveys no information.
+bool llvm::mustExecuteUBIfPoisonOnPathTo(Instruction *Root,
+                                         Instruction *OnPathTo,
+                                         DominatorTree *DT) {
+  // Basic approach is to assume Root is poison, propagate poison forward
+  // through all users we can easily track, and then check whether any of those
+  // users are provable UB and must execute before out exiting block might
+  // exit.
+
+  // The set of all recursive users we've visited (which are assumed to all be
+  // poison because of said visit)
+  SmallSet<const Value *, 16> KnownPoison;
+  SmallVector<const Instruction*, 16> Worklist;
+  Worklist.push_back(Root);
+  while (!Worklist.empty()) {
+    const Instruction *I = Worklist.pop_back_val();
+
+    // If we know this must trigger UB on a path leading our target.
+    if (mustTriggerUB(I, KnownPoison) && DT->dominates(I, OnPathTo))
+      return true;
+
+    // If we can't analyze propagation through this instruction, just skip it
+    // and transitive users.  Safe as false is a conservative result.
+    if (I != Root && !any_of(I->operands(), [&KnownPoison](const Use &U) {
+          return KnownPoison.contains(U) && propagatesPoison(U);
+        }))
+      continue;
+
+    if (KnownPoison.insert(I).second)
+      for (const User *User : I->users())
+        Worklist.push_back(cast<Instruction>(User));
+  }
+
+  // Might be non-UB, or might have a path we couldn't prove must execute on
+  // way to exiting bb.
+  return false;
 }
 
 OverflowResult llvm::computeOverflowForSignedAdd(const AddOperator *Add,
@@ -7773,6 +7914,10 @@ static ConstantRange getRangeForIntrinsic(const IntrinsicInst &II) {
 
     return ConstantRange(APInt::getZero(Width),
                          APInt::getSignedMinValue(Width) + 1);
+  case Intrinsic::vscale:
+    if (!II.getParent() || !II.getFunction())
+      break;
+    return getVScaleRange(II.getFunction(), Width);
   default:
     break;
   }

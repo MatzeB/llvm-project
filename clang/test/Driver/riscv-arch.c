@@ -1,6 +1,6 @@
 // RUN: %clang --target=riscv32-unknown-elf -march=rv32i -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck %s
-// RUN: %clang --target=riscv32-unknown-elf -march=rv32i2p0 -### %s \
+// RUN: %clang --target=riscv32-unknown-elf -march=rv32i2p1 -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck %s
 // RUN: %clang --target=riscv32-unknown-elf -march=rv32im -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck %s
@@ -70,7 +70,7 @@
 
 // RUN: %clang --target=riscv64-unknown-elf -march=rv64i -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck %s
-// RUN: %clang --target=riscv64-unknown-elf -march=rv64i2p0 -### %s \
+// RUN: %clang --target=riscv64-unknown-elf -march=rv64i2p1 -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck %s
 // RUN: %clang --target=riscv64-unknown-elf -march=rv64im -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck %s
@@ -198,11 +198,6 @@
 
 // Testing specific messages and unsupported extensions.
 
-// RUN: %clang --target=riscv64-unknown-elf -march=rv64e -### %s \
-// RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV64E %s
-// RV64E: error: invalid arch name 'rv64e',
-// RV64E: standard user-level extension 'e' requires 'rv32'
-
 // RUN: %clang --target=riscv32-unknown-elf -march=rv32imC -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-LOWER %s
 // RV32-LOWER: error: invalid arch name 'rv32imC',
@@ -211,7 +206,7 @@
 // RUN: %clang --target=riscv32-unknown-elf -march=unknown -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-STR %s
 // RV32-STR: error: invalid arch name 'unknown',
-// RV32-STR: string must begin with rv32{i,e,g} or rv64{i,g}
+// RV32-STR: string must begin with rv32{i,e,g} or rv64{i,e,g}
 
 // RUN: %clang --target=riscv32-unknown-elf -march=rv32q -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-LETTER %s
@@ -222,11 +217,6 @@
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-ORDER %s
 // RV32-ORDER: error: invalid arch name 'rv32imcq',
 // RV32-ORDER: standard user-level extension not given in canonical order 'q'
-
-// RUN: %clang --target=riscv32-unknown-elf -march=rv64e -### %s \
-// RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV64-EER %s
-// RV64-EER: error: invalid arch name 'rv64e',
-// RV64-EER: standard user-level extension 'e' requires 'rv32'
 
 // RUN: %clang --target=riscv32-unknown-elf -march=rv32izve32f -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-ZVE32F-ER %s
@@ -331,10 +321,10 @@
 // RV32-IMINOR-MISS: error: invalid arch name 'rv32i2p',
 // RV32-IMINOR-MISS: minor version number missing after 'p' for extension 'i'
 
-// RUN: %clang --target=riscv32-unknown-elf -march=rv32i2p1 -### %s \
+// RUN: %clang --target=riscv32-unknown-elf -march=rv32i2p2 -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-IMINOR1 %s
-// RV32-IMINOR1: error: invalid arch name 'rv32i2p1', unsupported
-// RV32-IMINOR1: version number 2.1 for extension 'i'
+// RV32-IMINOR1: error: invalid arch name 'rv32i2p2', unsupported
+// RV32-IMINOR1: version number 2.2 for extension 'i'
 
 // RUN: %clang --target=riscv32-unknown-elf -march=rv32ixt2p -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-XMINOR-MISS %s
@@ -575,12 +565,12 @@
 // RV32-ZHINX-BADVERS: error: invalid arch name 'rv32izhinx0p1'
 // RV32-ZHINX-BADVERS: unsupported version number 0.1 for extension 'zhinx'
 
-// RUN: %clang -target riscv32-unknown-elf -march=rv32i_zmmul2p0 -### %s \
+// RUN: %clang --target=riscv32-unknown-elf -march=rv32i_zmmul2p0 -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-ZMMUL-BADVERS %s
 // RV32-ZMMUL-BADVERS: error: invalid arch name 'rv32i_zmmul2p0'
 // RV32-ZMMUL-BADVERS: unsupported version number 2.0 for extension
 
-// RUN: %clang -target riscv32-unknown-elf -march=rv32i_zmmul1p0 -### %s \
+// RUN: %clang --target=riscv32-unknown-elf -march=rv32i_zmmul1p0 -### %s \
 // RUN: -fsyntax-only 2>&1 | FileCheck -check-prefix=RV32-ZMMUL-GOODVERS %s
 // RV32-ZMMUL-GOODVERS: "-target-feature" "+zmmul"
 

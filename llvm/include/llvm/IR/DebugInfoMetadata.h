@@ -2786,6 +2786,9 @@ public:
 
   /// Holds the characteristics of one fragment of a larger variable.
   struct FragmentInfo {
+    FragmentInfo() = default;
+    FragmentInfo(uint64_t SizeInBits, uint64_t OffsetInBits)
+        : SizeInBits(SizeInBits), OffsetInBits(OffsetInBits) {}
     uint64_t SizeInBits;
     uint64_t OffsetInBits;
     /// Return the index of the first bit of the fragment.
@@ -3817,6 +3820,18 @@ template <> struct DenseMapInfo<DebugVariable> {
   }
 };
 
+/// Identifies a unique instance of a whole variable (discards/ignores fragment
+/// information).
+class DebugVariableAggregate : public DebugVariable {
+public:
+  DebugVariableAggregate(const DbgVariableIntrinsic *DVI);
+  DebugVariableAggregate(const DebugVariable &V)
+      : DebugVariable(V.getVariable(), std::nullopt, V.getInlinedAt()) {}
+};
+
+template <>
+struct DenseMapInfo<DebugVariableAggregate>
+    : public DenseMapInfo<DebugVariable> {};
 } // end namespace llvm
 
 #undef DEFINE_MDNODE_GET_UNPACK_IMPL

@@ -284,6 +284,7 @@ Clang-Tidy Checks
    `modernize-replace-random-shuffle <modernize/replace-random-shuffle.html>`_, "Yes"
    `modernize-return-braced-init-list <modernize/return-braced-init-list.html>`_, "Yes"
    `modernize-shrink-to-fit <modernize/shrink-to-fit.html>`_, "Yes"
+   `modernize-type-traits <modernize/type-traits.html>`_, "Yes"
    `modernize-unary-static-assert <modernize/unary-static-assert.html>`_, "Yes"
    `modernize-use-auto <modernize/use-auto.html>`_, "Yes"
    `modernize-use-bool-literals <modernize/use-bool-literals.html>`_, "Yes"
@@ -331,6 +332,7 @@ Clang-Tidy Checks
    `portability-simd-intrinsics <portability/simd-intrinsics.html>`_,
    `portability-std-allocator-const <portability/std-allocator-const.html>`_,
    `readability-avoid-const-params-in-decls <readability/avoid-const-params-in-decls.html>`_, "Yes"
+   `readability-avoid-unconditional-preprocessor-if <readability/avoid-unconditional-preprocessor-if.html>`_,
    `readability-braces-around-statements <readability/braces-around-statements.html>`_, "Yes"
    `readability-const-return-type <readability/const-return-type.html>`_, "Yes"
    `readability-container-contains <readability/container-contains.html>`_, "Yes"
@@ -353,6 +355,7 @@ Clang-Tidy Checks
    `readability-misplaced-array-index <readability/misplaced-array-index.html>`_, "Yes"
    `readability-named-parameter <readability/named-parameter.html>`_, "Yes"
    `readability-non-const-parameter <readability/non-const-parameter.html>`_, "Yes"
+   `readability-operators-representation <readability/operators-representation.html>`_, "Yes"
    `readability-qualified-auto <readability/qualified-auto.html>`_, "Yes"
    `readability-redundant-access-specifiers <readability/redundant-access-specifiers.html>`_, "Yes"
    `readability-redundant-control-flow <readability/redundant-control-flow.html>`_, "Yes"

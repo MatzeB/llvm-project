@@ -840,11 +840,29 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   SI.registerCallbacks(PIC, &MAM);
   PassBuilder PB(TM.get(), PTO, PGOOpt, &PIC);
 
-  if (CodeGenOpts.EnableAssignmentTracking) {
+  // Handle the assignment tracking feature options.
+  switch (CodeGenOpts.getAssignmentTrackingMode()) {
+  case CodeGenOptions::AssignmentTrackingOpts::Forced:
     PB.registerPipelineStartEPCallback(
         [&](ModulePassManager &MPM, OptimizationLevel Level) {
           MPM.addPass(AssignmentTrackingPass());
         });
+    break;
+  case CodeGenOptions::AssignmentTrackingOpts::Enabled:
+    // Disable assignment tracking in LTO builds for now as the performance
+    // cost is too high. Disable for LLDB tuning due to llvm.org/PR43126.
+    if (!CodeGenOpts.PrepareForThinLTO && !CodeGenOpts.PrepareForLTO &&
+        CodeGenOpts.getDebuggerTuning() != llvm::DebuggerKind::LLDB) {
+      PB.registerPipelineStartEPCallback(
+          [&](ModulePassManager &MPM, OptimizationLevel Level) {
+            // Only use assignment tracking if optimisations are enabled.
+            if (Level != OptimizationLevel::O0)
+              MPM.addPass(AssignmentTrackingPass());
+          });
+    }
+    break;
+  case CodeGenOptions::AssignmentTrackingOpts::Disabled:
+    break;
   }
 
   // Enable verify-debuginfo-preserve-each for new PM.
@@ -973,9 +991,7 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
             MPM.addPass(InstrProfiling(*Options, false));
           });
 
-    if (CodeGenOpts.OptimizationLevel == 0) {
-      MPM = PB.buildO0DefaultPipeline(Level, IsLTO || IsThinLTO);
-    } else if (IsThinLTO) {
+    if (IsThinLTO) {
       MPM = PB.buildThinLTOPreLinkDefaultPipeline(Level);
     } else if (IsLTO) {
       MPM = PB.buildLTOPreLinkDefaultPipeline(Level);

@@ -85,6 +85,26 @@ define <2 x double> @returned_negzero_vector() {
   ret <2 x double> <double -0.0, double -0.0>
 }
 
+; Test a vector element that's a constant but not ConstantFP.
+define <2 x double> @returned_strange_constant_vector_elt() {
+; CHECK-LABEL: define <2 x double> @returned_strange_constant_vector_elt() {
+; CHECK-NEXT:    call void @unknown()
+; CHECK-NEXT:    ret <2 x double> <double -0.000000e+00, double bitcast (i64 ptrtoint (ptr @unknown to i64) to double)>
+;
+  call void @unknown()
+  ret <2 x double> <double -0.0, double bitcast (i64 ptrtoint (ptr @unknown to i64) to double)>
+}
+
+; Test a vector element that's an undef/poison
+define <3 x double> @returned_undef_constant_vector_elt() {
+; CHECK-LABEL: define <3 x double> @returned_undef_constant_vector_elt() {
+; CHECK-NEXT:    call void @unknown()
+; CHECK-NEXT:    ret <3 x double> <double -0.000000e+00, double poison, double undef>
+;
+  call void @unknown()
+  ret <3 x double> <double -0.0, double poison, double undef>
+}
+
 define <2 x double> @returned_qnan_zero_vector() {
 ; CHECK-LABEL: define noundef <2 x double> @returned_qnan_zero_vector() {
 ; CHECK-NEXT:    call void @unknown()
@@ -167,7 +187,7 @@ define void @arg_used_by_nofpclass_nan_callsite(float %arg) {
 define void @ninf_arg_used_by_nofpclass_nan_callsite(float nofpclass(inf) %arg) {
 ; CHECK-LABEL: define void @ninf_arg_used_by_nofpclass_nan_callsite
 ; CHECK-SAME: (float nofpclass(inf) [[ARG:%.*]]) {
-; CHECK-NEXT:    call void @extern.use(float nofpclass(nan) [[ARG]])
+; CHECK-NEXT:    call void @extern.use(float nofpclass(nan inf) [[ARG]])
 ; CHECK-NEXT:    ret void
 ;
   call void @extern.use(float nofpclass(nan) %arg)
@@ -181,6 +201,18 @@ define void @ninf_arg_used_by_callsite_array([2 x [3 x float]] nofpclass(inf) %a
 ; CHECK-NEXT:    ret void
 ;
   call void @extern.use.array([2 x [3 x float]]  %arg)
+  ret void
+}
+
+define void @nofpclass_call_use_after_unannotated_use(float %arg) {
+; CHECK-LABEL: define void @nofpclass_call_use_after_unannotated_use
+; CHECK-SAME: (float [[ARG:%.*]]) {
+; CHECK-NEXT:    call void @extern(float [[ARG]]) #[[ATTR5:[0-9]+]]
+; CHECK-NEXT:    call void @extern(float nofpclass(nan inf) [[ARG]])
+; CHECK-NEXT:    ret void
+;
+  call void @extern(float %arg) willreturn nounwind ; < annotate this use
+  call void @extern(float nofpclass(nan inf) %arg)
   ret void
 }
 
@@ -248,7 +280,7 @@ define float @fcmp_uno_check(float %arg) local_unnamed_addr {
 ; CHECK-NEXT:    [[ISNAN:%.*]] = fcmp uno float [[ARG]], 0.000000e+00
 ; CHECK-NEXT:    br i1 [[ISNAN]], label [[BB0:%.*]], label [[BB1:%.*]]
 ; CHECK:       bb0:
-; CHECK-NEXT:    [[CALL:%.*]] = call float @ret_nofpclass_nan()
+; CHECK-NEXT:    [[CALL:%.*]] = call nofpclass(nan) float @ret_nofpclass_nan()
 ; CHECK-NEXT:    br label [[BB1]]
 ; CHECK:       bb1:
 ; CHECK-NEXT:    [[PHI:%.*]] = phi float [ [[CALL]], [[BB0]] ], [ [[ARG]], [[ENTRY:%.*]] ]
@@ -294,12 +326,12 @@ bb1:
 
 ; Should be able to infer nofpclass on both %arg uses
 define float @fcmp_ord_assume_callsite_arg_return(float %arg) {
-; CHECK-LABEL: define float @fcmp_ord_assume_callsite_arg_return
-; CHECK-SAME: (float returned [[ARG:%.*]]) {
+; CHECK-LABEL: define nofpclass(inf zero sub norm) float @fcmp_ord_assume_callsite_arg_return
+; CHECK-SAME: (float returned nofpclass(inf zero sub norm) [[ARG:%.*]]) {
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    [[IS_NOT_NAN:%.*]] = fcmp ord float [[ARG]], 0.000000e+00
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_NOT_NAN]]) #[[ATTR4:[0-9]+]]
-; CHECK-NEXT:    call void @extern.use(float [[ARG]])
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_NOT_NAN]]) #[[ATTR6:[0-9]+]]
+; CHECK-NEXT:    call void @extern.use(float nofpclass(inf zero sub norm) [[ARG]])
 ; CHECK-NEXT:    ret float [[ARG]]
 ;
 entry:
@@ -342,13 +374,13 @@ define float @call_noinf_0(float nofpclass(inf) %arg) {
 ; TUNIT: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
 ; TUNIT-LABEL: define float @call_noinf_0
 ; TUNIT-SAME: (float nofpclass(inf) [[ARG:%.*]]) #[[ATTR2]] {
-; TUNIT-NEXT:    [[RESULT:%.*]] = call float @only_nofpclass_inf_callers(float nofpclass(inf) [[ARG]]) #[[ATTR5:[0-9]+]]
+; TUNIT-NEXT:    [[RESULT:%.*]] = call float @only_nofpclass_inf_callers(float nofpclass(inf) [[ARG]]) #[[ATTR7:[0-9]+]]
 ; TUNIT-NEXT:    ret float [[RESULT]]
 ;
 ; CGSCC: Function Attrs: nofree nosync nounwind willreturn memory(none)
 ; CGSCC-LABEL: define float @call_noinf_0
 ; CGSCC-SAME: (float nofpclass(inf) [[ARG:%.*]]) #[[ATTR3:[0-9]+]] {
-; CGSCC-NEXT:    [[RESULT:%.*]] = call float @only_nofpclass_inf_callers(float nofpclass(inf) [[ARG]]) #[[ATTR4]]
+; CGSCC-NEXT:    [[RESULT:%.*]] = call float @only_nofpclass_inf_callers(float nofpclass(inf) [[ARG]]) #[[ATTR6]]
 ; CGSCC-NEXT:    ret float [[RESULT]]
 ;
   %result = call float @only_nofpclass_inf_callers(float %arg)
@@ -359,13 +391,13 @@ define float @call_noinf_1(float %arg) {
 ; TUNIT: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
 ; TUNIT-LABEL: define float @call_noinf_1
 ; TUNIT-SAME: (float [[ARG:%.*]]) #[[ATTR2]] {
-; TUNIT-NEXT:    [[RESULT:%.*]] = call float @only_nofpclass_inf_callers(float nofpclass(inf) [[ARG]]) #[[ATTR5]]
+; TUNIT-NEXT:    [[RESULT:%.*]] = call float @only_nofpclass_inf_callers(float nofpclass(inf) [[ARG]]) #[[ATTR7]]
 ; TUNIT-NEXT:    ret float [[RESULT]]
 ;
 ; CGSCC: Function Attrs: nofree nosync nounwind willreturn memory(none)
 ; CGSCC-LABEL: define float @call_noinf_1
 ; CGSCC-SAME: (float [[ARG:%.*]]) #[[ATTR3]] {
-; CGSCC-NEXT:    [[RESULT:%.*]] = call float @only_nofpclass_inf_callers(float nofpclass(inf) [[ARG]]) #[[ATTR4]]
+; CGSCC-NEXT:    [[RESULT:%.*]] = call float @only_nofpclass_inf_callers(float nofpclass(inf) [[ARG]]) #[[ATTR6]]
 ; CGSCC-NEXT:    ret float [[RESULT]]
 ;
   %result = call float @only_nofpclass_inf_callers(float nofpclass(inf) %arg)
@@ -388,13 +420,13 @@ define float @call_noinf_return_0(float %arg) {
 ; TUNIT: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
 ; TUNIT-LABEL: define nofpclass(inf) float @call_noinf_return_0
 ; TUNIT-SAME: (float [[ARG:%.*]]) #[[ATTR2]] {
-; TUNIT-NEXT:    [[RESULT:%.*]] = call nofpclass(inf) float @only_nofpclass_inf_return_users(float [[ARG]]) #[[ATTR5]]
+; TUNIT-NEXT:    [[RESULT:%.*]] = call nofpclass(inf) float @only_nofpclass_inf_return_users(float [[ARG]]) #[[ATTR7]]
 ; TUNIT-NEXT:    ret float [[RESULT]]
 ;
 ; CGSCC: Function Attrs: nofree nosync nounwind willreturn memory(none)
 ; CGSCC-LABEL: define nofpclass(inf) float @call_noinf_return_0
 ; CGSCC-SAME: (float [[ARG:%.*]]) #[[ATTR3]] {
-; CGSCC-NEXT:    [[RESULT:%.*]] = call nofpclass(inf) float @only_nofpclass_inf_return_users(float [[ARG]]) #[[ATTR4]]
+; CGSCC-NEXT:    [[RESULT:%.*]] = call nofpclass(inf) float @only_nofpclass_inf_return_users(float [[ARG]]) #[[ATTR6]]
 ; CGSCC-NEXT:    ret float [[RESULT]]
 ;
   %result = call nofpclass(inf) float @only_nofpclass_inf_return_users(float %arg)
@@ -405,13 +437,13 @@ define float @call_noinf_return_1(float %arg) {
 ; TUNIT: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
 ; TUNIT-LABEL: define nofpclass(inf) float @call_noinf_return_1
 ; TUNIT-SAME: (float [[ARG:%.*]]) #[[ATTR2]] {
-; TUNIT-NEXT:    [[RESULT:%.*]] = call nofpclass(inf) float @only_nofpclass_inf_return_users(float [[ARG]]) #[[ATTR5]]
+; TUNIT-NEXT:    [[RESULT:%.*]] = call nofpclass(inf) float @only_nofpclass_inf_return_users(float [[ARG]]) #[[ATTR7]]
 ; TUNIT-NEXT:    ret float [[RESULT]]
 ;
 ; CGSCC: Function Attrs: nofree nosync nounwind willreturn memory(none)
 ; CGSCC-LABEL: define nofpclass(inf) float @call_noinf_return_1
 ; CGSCC-SAME: (float [[ARG:%.*]]) #[[ATTR3]] {
-; CGSCC-NEXT:    [[RESULT:%.*]] = call nofpclass(inf) float @only_nofpclass_inf_return_users(float [[ARG]]) #[[ATTR4]]
+; CGSCC-NEXT:    [[RESULT:%.*]] = call nofpclass(inf) float @only_nofpclass_inf_return_users(float [[ARG]]) #[[ATTR6]]
 ; CGSCC-NEXT:    ret float [[RESULT]]
 ;
   %result = call nofpclass(inf) float @only_nofpclass_inf_return_users(float %arg)
@@ -419,12 +451,12 @@ define float @call_noinf_return_1(float %arg) {
 }
 
 define float @fcmp_olt_assume_one_0_callsite_arg_return(float %arg) {
-; CHECK-LABEL: define float @fcmp_olt_assume_one_0_callsite_arg_return
-; CHECK-SAME: (float returned [[ARG:%.*]]) {
+; CHECK-LABEL: define nofpclass(inf sub norm) float @fcmp_olt_assume_one_0_callsite_arg_return
+; CHECK-SAME: (float returned nofpclass(inf sub norm) [[ARG:%.*]]) {
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    [[IS_NOT_ZERO_OR_NAN:%.*]] = fcmp one float [[ARG]], 0.000000e+00
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_NOT_ZERO_OR_NAN]]) #[[ATTR4]]
-; CHECK-NEXT:    call void @extern.use(float [[ARG]])
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_NOT_ZERO_OR_NAN]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use(float nofpclass(inf sub norm) [[ARG]])
 ; CHECK-NEXT:    ret float [[ARG]]
 ;
 entry:
@@ -435,12 +467,12 @@ entry:
 }
 
 define float @fcmp_olt_assume_une_0_callsite_arg_return(float %arg) {
-; CHECK-LABEL: define float @fcmp_olt_assume_une_0_callsite_arg_return
-; CHECK-SAME: (float returned [[ARG:%.*]]) {
+; CHECK-LABEL: define nofpclass(nan inf sub norm) float @fcmp_olt_assume_une_0_callsite_arg_return
+; CHECK-SAME: (float returned nofpclass(nan inf sub norm) [[ARG:%.*]]) {
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    [[IS_NOT_ZERO_OR_NAN:%.*]] = fcmp une float [[ARG]], 0.000000e+00
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_NOT_ZERO_OR_NAN]]) #[[ATTR4]]
-; CHECK-NEXT:    call void @extern.use(float [[ARG]])
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_NOT_ZERO_OR_NAN]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use(float nofpclass(nan inf sub norm) [[ARG]])
 ; CHECK-NEXT:    ret float [[ARG]]
 ;
 entry:
@@ -451,13 +483,13 @@ entry:
 }
 
 define half @fcmp_assume_issubnormal_callsite_arg_return(half %arg) {
-; CHECK-LABEL: define half @fcmp_assume_issubnormal_callsite_arg_return
-; CHECK-SAME: (half returned [[ARG:%.*]]) {
+; CHECK-LABEL: define nofpclass(zero sub) half @fcmp_assume_issubnormal_callsite_arg_return
+; CHECK-SAME: (half returned nofpclass(zero sub) [[ARG:%.*]]) {
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[FABS:%.*]] = call half @llvm.fabs.f16(half [[ARG]]) #[[ATTR4]]
+; CHECK-NEXT:    [[FABS:%.*]] = call half @llvm.fabs.f16(half nofpclass(zero sub) [[ARG]]) #[[ATTR6]]
 ; CHECK-NEXT:    [[IS_SUBNORMAL:%.*]] = fcmp olt half [[FABS]], 0xH0400
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_SUBNORMAL]]) #[[ATTR4]]
-; CHECK-NEXT:    call void @extern.use.f16(half [[ARG]])
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_SUBNORMAL]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use.f16(half nofpclass(zero sub) [[ARG]])
 ; CHECK-NEXT:    ret half [[ARG]]
 ;
 entry:
@@ -487,15 +519,15 @@ entry:
 
 ; Assume not subnormal or zero, and not infinity
 define half @fcmp_assume2_callsite_arg_return(half %arg) {
-; CHECK-LABEL: define half @fcmp_assume2_callsite_arg_return
-; CHECK-SAME: (half returned [[ARG:%.*]]) {
+; CHECK-LABEL: define nofpclass(inf norm) half @fcmp_assume2_callsite_arg_return
+; CHECK-SAME: (half returned nofpclass(inf norm) [[ARG:%.*]]) {
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[FABS:%.*]] = call half @llvm.fabs.f16(half [[ARG]]) #[[ATTR4]]
+; CHECK-NEXT:    [[FABS:%.*]] = call nofpclass(inf) half @llvm.fabs.f16(half nofpclass(inf norm) [[ARG]]) #[[ATTR6]]
 ; CHECK-NEXT:    [[NOT_SUBNORMAL_OR_ZERO:%.*]] = fcmp oge half [[FABS]], 0xH0400
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[NOT_SUBNORMAL_OR_ZERO]]) #[[ATTR4]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[NOT_SUBNORMAL_OR_ZERO]]) #[[ATTR6]]
 ; CHECK-NEXT:    [[NOT_INF:%.*]] = fcmp oeq half [[ARG]], 0xH7C00
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[NOT_INF]]) #[[ATTR4]]
-; CHECK-NEXT:    call void @extern.use.f16(half [[ARG]])
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[NOT_INF]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use.f16(half nofpclass(inf norm) [[ARG]])
 ; CHECK-NEXT:    ret half [[ARG]]
 ;
 entry:
@@ -511,12 +543,12 @@ entry:
 }
 
 define float @is_fpclass_assume_arg_return(float %arg) {
-; CHECK-LABEL: define float @is_fpclass_assume_arg_return
-; CHECK-SAME: (float returned [[ARG:%.*]]) {
+; CHECK-LABEL: define nofpclass(ninf nzero pnorm) float @is_fpclass_assume_arg_return
+; CHECK-SAME: (float returned nofpclass(ninf nzero pnorm) [[ARG:%.*]]) {
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[CLASS_TEST:%.*]] = call i1 @llvm.is.fpclass.f32(float [[ARG]], i32 noundef 292) #[[ATTR4]]
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[CLASS_TEST]]) #[[ATTR4]]
-; CHECK-NEXT:    call void @extern.use(float [[ARG]])
+; CHECK-NEXT:    [[CLASS_TEST:%.*]] = call i1 @llvm.is.fpclass.f32(float nofpclass(ninf nzero pnorm) [[ARG]], i32 noundef 292) #[[ATTR6]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[CLASS_TEST]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use(float nofpclass(ninf nzero pnorm) [[ARG]])
 ; CHECK-NEXT:    ret float [[ARG]]
 ;
 entry:
@@ -529,16 +561,16 @@ entry:
 ; Make sure we don't get confused by looking at an unrelated assume
 ; based on the fabs of the value.
 define half @assume_fcmp_fabs_with_other_fabs_assume(half %arg) {
-; CHECK-LABEL: define half @assume_fcmp_fabs_with_other_fabs_assume
-; CHECK-SAME: (half returned [[ARG:%.*]]) {
+; CHECK-LABEL: define nofpclass(zero sub) half @assume_fcmp_fabs_with_other_fabs_assume
+; CHECK-SAME: (half returned nofpclass(zero sub) [[ARG:%.*]]) {
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[FABS:%.*]] = call half @llvm.fabs.f16(half [[ARG]]) #[[ATTR4]]
+; CHECK-NEXT:    [[FABS:%.*]] = call nofpclass(inf zero sub norm) half @llvm.fabs.f16(half nofpclass(zero sub) [[ARG]]) #[[ATTR6]]
 ; CHECK-NEXT:    [[UNRELATED_FABS:%.*]] = fcmp one half [[FABS]], 0xH0000
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[UNRELATED_FABS]]) #[[ATTR4]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[UNRELATED_FABS]]) #[[ATTR6]]
 ; CHECK-NEXT:    [[IS_SUBNORMAL:%.*]] = fcmp olt half [[FABS]], 0xH0400
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_SUBNORMAL]]) #[[ATTR4]]
-; CHECK-NEXT:    call void @extern.use.f16(half [[ARG]])
-; CHECK-NEXT:    call void @extern.use.f16(half [[FABS]])
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_SUBNORMAL]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use.f16(half nofpclass(zero sub) [[ARG]])
+; CHECK-NEXT:    call void @extern.use.f16(half nofpclass(inf zero sub norm) [[FABS]])
 ; CHECK-NEXT:    ret half [[ARG]]
 ;
 entry:
@@ -556,18 +588,18 @@ entry:
 ; Make sure if looking through the fabs finds a different source
 ; value, we still identify a test mask by ignoring the fabs
 define half @assume_fcmp_fabs_with_other_fabs_assume_fallback(half %arg) {
-; CHECK-LABEL: define half @assume_fcmp_fabs_with_other_fabs_assume_fallback
-; CHECK-SAME: (half returned [[ARG:%.*]]) {
+; CHECK-LABEL: define nofpclass(pinf zero sub) half @assume_fcmp_fabs_with_other_fabs_assume_fallback
+; CHECK-SAME: (half returned nofpclass(pinf zero sub) [[ARG:%.*]]) {
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[FABS:%.*]] = call half @llvm.fabs.f16(half [[ARG]]) #[[ATTR4]]
+; CHECK-NEXT:    [[FABS:%.*]] = call nofpclass(inf zero sub nnorm) half @llvm.fabs.f16(half nofpclass(pinf zero sub) [[ARG]]) #[[ATTR6]]
 ; CHECK-NEXT:    [[ONE_INF:%.*]] = fcmp oeq half [[ARG]], 0xH7C00
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[ONE_INF]]) #[[ATTR4]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[ONE_INF]]) #[[ATTR6]]
 ; CHECK-NEXT:    [[UNRELATED_FABS:%.*]] = fcmp oeq half [[FABS]], 0xH0000
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[UNRELATED_FABS]]) #[[ATTR4]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[UNRELATED_FABS]]) #[[ATTR6]]
 ; CHECK-NEXT:    [[IS_SUBNORMAL:%.*]] = fcmp olt half [[FABS]], 0xH0400
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_SUBNORMAL]]) #[[ATTR4]]
-; CHECK-NEXT:    call void @extern.use.f16(half [[ARG]])
-; CHECK-NEXT:    call void @extern.use.f16(half [[FABS]])
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_SUBNORMAL]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use.f16(half nofpclass(pinf zero sub) [[ARG]])
+; CHECK-NEXT:    call void @extern.use.f16(half nofpclass(inf zero sub nnorm) [[FABS]])
 ; CHECK-NEXT:    ret half [[ARG]]
 ;
 entry:
@@ -593,7 +625,7 @@ define float @assume_bundles(i1 %c, float %ret) {
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    br i1 [[C]], label [[A:%.*]], label [[B:%.*]]
 ; CHECK:       A:
-; CHECK-NEXT:    call void @llvm.assume(i1 noundef true) #[[ATTR4]] [ "nofpclass"(float [[RET]], i32 3) ]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef true) #[[ATTR6]] [ "nofpclass"(float [[RET]], i32 3) ]
 ; CHECK-NEXT:    call void @extern.use(float nofpclass(nan) [[RET]])
 ; CHECK-NEXT:    ret float [[RET]]
 ; CHECK:       B:
@@ -613,4 +645,187 @@ B:
   call void @llvm.assume(i1 true) [ "nofpclass"(float %ret, i32 12) ]
   call void @extern.use(float %ret)
   ret float %ret
+}
+
+define float @returned_load(ptr %ptr) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(argmem: read)
+; CHECK-LABEL: define float @returned_load
+; CHECK-SAME: (ptr nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[PTR:%.*]]) #[[ATTR4:[0-9]+]] {
+; CHECK-NEXT:    [[LOAD:%.*]] = load float, ptr [[PTR]], align 4
+; CHECK-NEXT:    ret float [[LOAD]]
+;
+  %load = load float, ptr %ptr
+  ret float %load
+}
+
+define float @pass_nofpclass_inf_through_memory(float nofpclass(inf) %arg) {
+; TUNIT: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; TUNIT-LABEL: define float @pass_nofpclass_inf_through_memory
+; TUNIT-SAME: (float nofpclass(inf) [[ARG:%.*]]) #[[ATTR2]] {
+; TUNIT-NEXT:    [[ALLOCA:%.*]] = alloca float, align 4
+; TUNIT-NEXT:    store float [[ARG]], ptr [[ALLOCA]], align 4
+; TUNIT-NEXT:    [[RET:%.*]] = call float @returned_load(ptr noalias nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[ALLOCA]]) #[[ATTR7]]
+; TUNIT-NEXT:    ret float [[RET]]
+;
+; CGSCC: Function Attrs: nofree nosync nounwind willreturn memory(none)
+; CGSCC-LABEL: define float @pass_nofpclass_inf_through_memory
+; CGSCC-SAME: (float nofpclass(inf) [[ARG:%.*]]) #[[ATTR3]] {
+; CGSCC-NEXT:    [[ALLOCA:%.*]] = alloca float, align 4
+; CGSCC-NEXT:    store float [[ARG]], ptr [[ALLOCA]], align 4
+; CGSCC-NEXT:    [[RET:%.*]] = call float @returned_load(ptr noalias nocapture nofree noundef nonnull readonly align 4 dereferenceable(4) [[ALLOCA]]) #[[ATTR6]]
+; CGSCC-NEXT:    ret float [[RET]]
+;
+  %alloca = alloca float
+  store float %arg, ptr %alloca
+  %ret = call float @returned_load(ptr %alloca)
+  ret float %ret
+}
+
+define float @uitofp_i32_to_f32(i32 %arg) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; CHECK-LABEL: define nofpclass(nan inf nzero nsub nnorm) float @uitofp_i32_to_f32
+; CHECK-SAME: (i32 [[ARG:%.*]]) #[[ATTR2]] {
+; CHECK-NEXT:    [[CVT:%.*]] = uitofp i32 [[ARG]] to float
+; CHECK-NEXT:    ret float [[CVT]]
+;
+  %cvt = uitofp i32 %arg to float
+  ret float %cvt
+}
+
+define float @sitofp_i32_to_f32(i32 %arg) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; CHECK-LABEL: define nofpclass(nan inf) float @sitofp_i32_to_f32
+; CHECK-SAME: (i32 [[ARG:%.*]]) #[[ATTR2]] {
+; CHECK-NEXT:    [[CVT:%.*]] = sitofp i32 [[ARG]] to float
+; CHECK-NEXT:    ret float [[CVT]]
+;
+  %cvt = sitofp i32 %arg to float
+  ret float %cvt
+}
+
+define <2 x float> @uitofp_v2i32_to_v2f32(<2 x i32> %arg) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; CHECK-LABEL: define nofpclass(nan inf nzero nsub nnorm) <2 x float> @uitofp_v2i32_to_v2f32
+; CHECK-SAME: (<2 x i32> [[ARG:%.*]]) #[[ATTR2]] {
+; CHECK-NEXT:    [[CVT:%.*]] = uitofp <2 x i32> [[ARG]] to <2 x float>
+; CHECK-NEXT:    ret <2 x float> [[CVT]]
+;
+  %cvt = uitofp <2 x i32> %arg to <2 x float>
+  ret <2 x float> %cvt
+}
+
+define <2 x float> @sitofp_v2i32_to_v2i32(<2 x i32> %arg) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; CHECK-LABEL: define nofpclass(nan inf) <2 x float> @sitofp_v2i32_to_v2i32
+; CHECK-SAME: (<2 x i32> [[ARG:%.*]]) #[[ATTR2]] {
+; CHECK-NEXT:    [[CVT:%.*]] = sitofp <2 x i32> [[ARG]] to <2 x float>
+; CHECK-NEXT:    ret <2 x float> [[CVT]]
+;
+  %cvt = sitofp <2 x i32> %arg to <2 x float>
+  ret <2 x float> %cvt
+}
+
+define half @uitofp_i17_to_f16(i17 %arg) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; CHECK-LABEL: define nofpclass(nan ninf nzero nsub nnorm) half @uitofp_i17_to_f16
+; CHECK-SAME: (i17 [[ARG:%.*]]) #[[ATTR2]] {
+; CHECK-NEXT:    [[CVT:%.*]] = uitofp i17 [[ARG]] to half
+; CHECK-NEXT:    ret half [[CVT]]
+;
+  %cvt = uitofp i17 %arg to half
+  ret half %cvt
+}
+
+define half @sitofp_i17_to_f16(i17 %arg) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; CHECK-LABEL: define nofpclass(nan) half @sitofp_i17_to_f16
+; CHECK-SAME: (i17 [[ARG:%.*]]) #[[ATTR2]] {
+; CHECK-NEXT:    [[CVT:%.*]] = sitofp i17 [[ARG]] to half
+; CHECK-NEXT:    ret half [[CVT]]
+;
+  %cvt = sitofp i17 %arg to half
+  ret half %cvt
+}
+
+define <2 x half> @uitofp_v2i17_to_v2f16(<2 x i17> %arg) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; CHECK-LABEL: define nofpclass(nan ninf nzero nsub nnorm) <2 x half> @uitofp_v2i17_to_v2f16
+; CHECK-SAME: (<2 x i17> [[ARG:%.*]]) #[[ATTR2]] {
+; CHECK-NEXT:    [[CVT:%.*]] = uitofp <2 x i17> [[ARG]] to <2 x half>
+; CHECK-NEXT:    ret <2 x half> [[CVT]]
+;
+  %cvt = uitofp <2 x i17> %arg to <2 x half>
+  ret <2 x half> %cvt
+}
+
+define <2 x half> @sitofp_v2i17_to_v2i17(<2 x i17> %arg) {
+; CHECK: Function Attrs: nofree norecurse nosync nounwind willreturn memory(none)
+; CHECK-LABEL: define nofpclass(nan) <2 x half> @sitofp_v2i17_to_v2i17
+; CHECK-SAME: (<2 x i17> [[ARG:%.*]]) #[[ATTR2]] {
+; CHECK-NEXT:    [[CVT:%.*]] = sitofp <2 x i17> [[ARG]] to <2 x half>
+; CHECK-NEXT:    ret <2 x half> [[CVT]]
+;
+  %cvt = sitofp <2 x i17> %arg to <2 x half>
+  ret <2 x half> %cvt
+}
+
+define float @assume_intersection_not_zero_and_not_nan(float %arg) {
+; CHECK-LABEL: define nofpclass(all) float @assume_intersection_not_zero_and_not_nan
+; CHECK-SAME: (float returned nofpclass(all) [[ARG:%.*]]) {
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[IS_NOT_ZERO_OR_NAN:%.*]] = fcmp une float [[ARG]], 0.000000e+00
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_NOT_ZERO_OR_NAN]]) #[[ATTR6]]
+; CHECK-NEXT:    [[IS_ORD:%.*]] = fcmp ord float [[ARG]], 0.000000e+00
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_ORD]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use(float nofpclass(all) [[ARG]])
+; CHECK-NEXT:    ret float [[ARG]]
+;
+entry:
+  %is.not.zero.or.nan = fcmp une float %arg, 0.0
+  call void @llvm.assume(i1 %is.not.zero.or.nan)
+  %is.ord = fcmp ord float %arg, 0.0
+  call void @llvm.assume(i1 %is.ord)
+  call void @extern.use(float %arg)
+  ret float %arg
+}
+
+define float @assume_intersection_class(float %arg) {
+; CHECK-LABEL: define nofpclass(psub norm) float @assume_intersection_class
+; CHECK-SAME: (float returned nofpclass(psub norm) [[ARG:%.*]]) {
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[POS_NORMAL_OR_POS_SUBNORMAL:%.*]] = call i1 @llvm.is.fpclass.f32(float nofpclass(psub norm) [[ARG]], i32 noundef 384) #[[ATTR6]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[POS_NORMAL_OR_POS_SUBNORMAL]]) #[[ATTR6]]
+; CHECK-NEXT:    [[IS_NORMAL:%.*]] = call i1 @llvm.is.fpclass.f32(float nofpclass(psub norm) [[ARG]], i32 noundef 264) #[[ATTR6]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[IS_NORMAL]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use(float nofpclass(psub norm) [[ARG]])
+; CHECK-NEXT:    ret float [[ARG]]
+;
+entry:
+  %pos.normal.or.pos.subnormal = call i1 @llvm.is.fpclass.f32(float %arg, i32 384)
+  call void @llvm.assume(i1 %pos.normal.or.pos.subnormal)
+  %is.normal = call i1 @llvm.is.fpclass.f32(float %arg, i32 264)
+  call void @llvm.assume(i1 %is.normal)
+
+  call void @extern.use(float %arg)
+  ret float %arg
+}
+
+define float @assume_intersection_none(float %arg) {
+; CHECK-LABEL: define nofpclass(all) float @assume_intersection_none
+; CHECK-SAME: (float returned nofpclass(all) [[ARG:%.*]]) {
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[CLASS1:%.*]] = call i1 @llvm.is.fpclass.f32(float nofpclass(all) [[ARG]], i32 noundef 682) #[[ATTR6]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[CLASS1]]) #[[ATTR6]]
+; CHECK-NEXT:    [[CLASS2:%.*]] = call i1 @llvm.is.fpclass.f32(float nofpclass(all) [[ARG]], i32 noundef 341) #[[ATTR6]]
+; CHECK-NEXT:    call void @llvm.assume(i1 noundef [[CLASS2]]) #[[ATTR6]]
+; CHECK-NEXT:    call void @extern.use(float nofpclass(all) [[ARG]])
+; CHECK-NEXT:    ret float [[ARG]]
+;
+entry:
+  %class1 = call i1 @llvm.is.fpclass.f32(float %arg, i32 682)
+  call void @llvm.assume(i1 %class1)
+  %class2 = call i1 @llvm.is.fpclass.f32(float %arg, i32 341)
+  call void @llvm.assume(i1 %class2)
+  call void @extern.use(float %arg)
+  ret float %arg
 }

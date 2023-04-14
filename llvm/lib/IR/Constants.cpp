@@ -899,14 +899,6 @@ ConstantInt *ConstantInt::get(IntegerType *Ty, uint64_t V, bool isSigned) {
   return get(Ty->getContext(), APInt(Ty->getBitWidth(), V, isSigned));
 }
 
-ConstantInt *ConstantInt::getSigned(IntegerType *Ty, int64_t V) {
-  return get(Ty, V, true);
-}
-
-Constant *ConstantInt::getSigned(Type *Ty, int64_t V) {
-  return get(Ty, V, true);
-}
-
 Constant *ConstantInt::get(Type *Ty, const APInt& V) {
   ConstantInt *C = get(Ty->getContext(), V);
   assert(C->getType() == Ty->getScalarType() &&
@@ -1015,13 +1007,6 @@ Constant *ConstantFP::getZero(Type *Ty, bool Negative) {
     return ConstantVector::getSplat(VTy->getElementCount(), C);
 
   return C;
-}
-
-Constant *ConstantFP::getZeroValueForNegation(Type *Ty) {
-  if (Ty->isFPOrFPVectorTy())
-    return getNegativeZero(Ty);
-
-  return Constant::getNullValue(Ty);
 }
 
 
@@ -2609,8 +2594,7 @@ Constant *ConstantExpr::getShuffleVector(Constant *V1, Constant *V2,
 Constant *ConstantExpr::getNeg(Constant *C, bool HasNUW, bool HasNSW) {
   assert(C->getType()->isIntOrIntVectorTy() &&
          "Cannot NEG a nonintegral value!");
-  return getSub(ConstantFP::getZeroValueForNegation(C->getType()),
-                C, HasNUW, HasNSW);
+  return getSub(ConstantInt::get(C->getType(), 0), C, HasNUW, HasNSW);
 }
 
 Constant *ConstantExpr::getNot(Constant *C) {

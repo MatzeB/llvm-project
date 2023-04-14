@@ -981,10 +981,9 @@ bool CompilerInstance::InitializeSourceManager(const FrontendInputFile &Input,
                        ? FileMgr.getSTDIN()
                        : FileMgr.getFileRef(InputFile, /*OpenFile=*/true);
   if (!FileOrErr) {
-    // FIXME: include the error in the diagnostic even when it's not stdin.
     auto EC = llvm::errorToErrorCode(FileOrErr.takeError());
     if (InputFile != "-")
-      Diags.Report(diag::err_fe_error_reading) << InputFile;
+      Diags.Report(diag::err_fe_error_reading) << InputFile << EC.message();
     else
       Diags.Report(diag::err_fe_error_reading_stdin) << EC.message();
     return false;
@@ -2027,8 +2026,12 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
           PrivateModule, PP->getIdentifierInfo(Module->Name)->getTokenID());
       PrivPath.push_back(std::make_pair(&II, Path[0].second));
 
+      std::string FileName;
+      // If there is a modulemap module or prebuilt module, load it.
       if (PP->getHeaderSearchInfo().lookupModule(PrivateModule, ImportLoc, true,
-                                                 !IsInclusionDirective))
+                                                 !IsInclusionDirective) ||
+          selectModuleSource(nullptr, PrivateModule, FileName, BuiltModules,
+                             PP->getHeaderSearchInfo()) != MS_ModuleNotFound)
         Sub = loadModule(ImportLoc, PrivPath, Visibility, IsInclusionDirective);
       if (Sub) {
         MapPrivateSubModToTopLevel = true;

@@ -1018,7 +1018,7 @@ void __throw_regex_error()
 #ifndef _LIBCPP_HAS_NO_EXCEPTIONS
     throw regex_error(_Ev);
 #else
-    std::__libcpp_verbose_abort("regex_error was thrown in -fno-exceptions mode");
+    _LIBCPP_VERBOSE_ABORT("regex_error was thrown in -fno-exceptions mode");
 #endif
 }
 
@@ -6879,6 +6879,7 @@ _LIBCPP_POP_MACROS
 #if !defined(_LIBCPP_REMOVE_TRANSITIVE_INCLUDES) && _LIBCPP_STD_VER <= 20
 #  include <atomic>
 #  include <concepts>
+#  include <cstdlib>
 #  include <iosfwd>
 #  include <iterator>
 #  include <new>

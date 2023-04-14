@@ -14,6 +14,7 @@ include "TestInterfaces.td"
 include "mlir/Dialect/DLTI/DLTIBase.td"
 include "mlir/Dialect/Linalg/IR/LinalgInterfaces.td"
 include "mlir/IR/EnumAttr.td"
+include "mlir/IR/FunctionInterfaces.td"
 include "mlir/IR/OpBase.td"
 include "mlir/IR/OpAsmInterface.td"
 include "mlir/IR/PatternBase.td"
@@ -276,6 +277,13 @@ def TypedAttrOp : TEST_Op<"typed_attr"> {
   }];
 }
 
+def TypeAttrOfOp : TEST_Op<"type_attr_of"> {
+  let arguments = (ins TypeAttrOf<I64>:$type);
+  let assemblyFormat = [{
+    attr-dict $type
+  }];
+}
+
 def DenseArrayAttrOp : TEST_Op<"dense_array_attr"> {
   let arguments = (ins
     DenseBoolArrayAttr:$i1attr,
@@ -482,6 +490,66 @@ def ConversionCallOp : TEST_Op<"conversion_call_op",
   }];
 }
 
+def ConversionFuncOp : TEST_Op<"conversion_func_op", [CallableOpInterface,
+                                                      FunctionOpInterface]> {
+  let arguments = (ins SymbolNameAttr:$sym_name,
+                       TypeAttrOf<FunctionType>:$function_type,
+                       OptionalAttr<DictArrayAttr>:$arg_attrs,
+                       OptionalAttr<DictArrayAttr>:$res_attrs,
+                       OptionalAttr<StrAttr>:$sym_visibility);
+  let regions = (region AnyRegion:$body);
+
+  let extraClassDeclaration = [{
+    //===------------------------------------------------------------------===//
+    // CallableOpInterface
+    //===------------------------------------------------------------------===//
+
+    /// Returns the region on the current operation that is callable. This may
+    /// return null in the case of an external callable object, e.g. an external
+    /// function.
+    ::mlir::Region *getCallableRegion() {
+      return isExternal() ? nullptr : &getBody();
+    }
+
+    /// Returns the results types that the callable region produces when
+    /// executed.
+    ::mlir::ArrayRef<::mlir::Type> getCallableResults() {
+      return getFunctionType().getResults();
+    }
+
+    /// Returns the argument attributes for all callable region arguments or
+    /// null if there are none.
+    ::mlir::ArrayAttr getCallableArgAttrs() {
+      return getArgAttrs().value_or(nullptr);
+    }
+
+    /// Returns the result attributes for all callable region results or
+    /// null if there are none.
+    ::mlir::ArrayAttr getCallableResAttrs() {
+      return getResAttrs().value_or(nullptr);
+    }
+
+    //===------------------------------------------------------------------===//
+    // FunctionOpInterface Methods
+    //===------------------------------------------------------------------===//
+
+    /// Returns the argument types of this async function.
+    ::mlir::ArrayRef<::mlir::Type> getArgumentTypes() {
+      return getFunctionType().getInputs();
+    }
+
+    /// Returns the result types of this async function.
+    ::mlir::ArrayRef<::mlir::Type> getResultTypes() {
+      return getFunctionType().getResults();
+    }
+
+    /// Returns the number of results of this async function
+    unsigned getNumResults() {return getResultTypes().size();}
+  }];
+
+  let hasCustomAssemblyFormat = 1;
+}
+
 def FunctionalRegionOp : TEST_Op<"functional_region_op",
     [CallableOpInterface]> {
   let regions = (region AnyRegion:$body);
@@ -491,6 +559,12 @@ def FunctionalRegionOp : TEST_Op<"functional_region_op",
     ::mlir::Region *getCallableRegion() { return &getBody(); }
     ::llvm::ArrayRef<::mlir::Type> getCallableResults() {
       return getType().cast<::mlir::FunctionType>().getResults();
+    }
+    ::mlir::ArrayAttr getCallableArgAttrs() {
+      return nullptr;
+    }
+    ::mlir::ArrayAttr getCallableResAttrs() {
+      return nullptr;
     }
   }];
 }
@@ -2225,6 +2299,11 @@ def FormatNestedAttr : TEST_Op<"format_nested_attr"> {
 def FormatNestedCompoundAttr : TEST_Op<"format_cpmd_nested_attr"> {
   let arguments = (ins CompoundNestedOuter:$nested);
   let assemblyFormat = "`nested` $nested attr-dict-with-keyword";
+}
+
+def FormatMaybeEmptyType : TEST_Op<"format_maybe_empty_type"> {
+  let arguments = (ins TestTypeOptionalValueType:$in);
+  let assemblyFormat = "$in `:` type($in) attr-dict";
 }
 
 def FormatQualifiedCompoundAttr : TEST_Op<"format_qual_cpmd_nested_attr"> {

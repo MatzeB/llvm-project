@@ -14,6 +14,8 @@
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
 #include "mlir/Bytecode/BytecodeWriter.h"
 #include "mlir/Debug/Counter.h"
+#include "mlir/Debug/ExecutionContext.h"
+#include "mlir/Debug/Observers/ActionLogging.h"
 #include "mlir/IR/AsmState.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -28,6 +30,8 @@
 #include "mlir/Support/Timing.h"
 #include "mlir/Support/ToolUtilities.h"
 #include "mlir/Tools/ParseUtilities.h"
+#include "mlir/Tools/Plugins/DialectPlugin.h"
+#include "mlir/Tools/Plugins/PassPlugin.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/InitLLVM.h"
@@ -71,6 +75,12 @@ struct MlirOptMainConfigCLOptions : public MlirOptMainConfig {
                  "parsing"),
         cl::location(useExplicitModuleFlag), cl::init(false));
 
+    static cl::opt<std::string, /*ExternalStorage=*/true> logActionsTo{
+        "log-actions-to",
+        cl::desc("Log action execution to a file, or stderr if "
+                 " '-' is passed"),
+        cl::location(logActionsToFlag)};
+
     static cl::opt<bool, /*ExternalStorage=*/true> showDialects(
         "show-dialects",
         cl::desc("Print the list of registered dialects and exit"),
@@ -93,15 +103,41 @@ struct MlirOptMainConfigCLOptions : public MlirOptMainConfig {
         cl::desc("Run the verifier after each transformation pass"),
         cl::location(verifyPassesFlag), cl::init(true));
 
+    static cl::list<std::string> passPlugins(
+        "load-pass-plugin", cl::desc("Load passes from plugin library"));
+    /// Set the callback to load a pass plugin.
+    passPlugins.setCallback([&](const std::string &pluginPath) {
+      auto plugin = PassPlugin::load(pluginPath);
+      if (!plugin) {
+        errs() << "Failed to load passes from '" << pluginPath
+               << "'. Request ignored.\n";
+        return;
+      }
+      plugin.get().registerPassRegistryCallbacks();
+    });
+
+    static cl::list<std::string> dialectPlugins(
+        "load-dialect-plugin", cl::desc("Load dialects from plugin library"));
+    this->dialectPlugins = std::addressof(dialectPlugins);
+
     static PassPipelineCLParser passPipeline("", "Compiler passes to run", "p");
     setPassPipelineParser(passPipeline);
   }
+
+  /// Set the callback to load a dialect plugin.
+  void setDialectPluginsCallback(DialectRegistry &registry);
+
+  /// Pointer to static dialectPlugins variable in constructor, needed by
+  /// setDialectPluginsCallback(DialectRegistry&).
+  cl::list<std::string> *dialectPlugins = nullptr;
 };
 } // namespace
 
 ManagedStatic<MlirOptMainConfigCLOptions> clOptionsConfig;
 
-void MlirOptMainConfig::registerCLOptions() { *clOptionsConfig; }
+void MlirOptMainConfig::registerCLOptions(DialectRegistry &registry) {
+  clOptionsConfig->setDialectPluginsCallback(registry);
+}
 
 MlirOptMainConfig MlirOptMainConfig::createFromCLOptions() {
   return *clOptionsConfig;
@@ -125,6 +161,54 @@ MlirOptMainConfig &MlirOptMainConfig::setPassPipelineParser(
   };
   return *this;
 }
+
+void MlirOptMainConfigCLOptions::setDialectPluginsCallback(
+    DialectRegistry &registry) {
+  dialectPlugins->setCallback([&](const std::string &pluginPath) {
+    auto plugin = DialectPlugin::load(pluginPath);
+    if (!plugin) {
+      errs() << "Failed to load dialect plugin from '" << pluginPath
+             << "'. Request ignored.\n";
+      return;
+    };
+    plugin.get().registerDialectRegistryCallbacks(registry);
+  });
+}
+
+/// Set the ExecutionContext on the context and handle the observers.
+class InstallDebugHandler {
+public:
+  InstallDebugHandler(MLIRContext &context, const MlirOptMainConfig &config) {
+    if (config.getLogActionsTo().empty()) {
+      if (tracing::DebugCounter::isActivated())
+        context.registerActionHandler(tracing::DebugCounter());
+      return;
+    }
+    if (tracing::DebugCounter::isActivated())
+      emitError(UnknownLoc::get(&context),
+                "Debug counters are incompatible with --log-actions-to option "
+                "and are disabled");
+    std::string errorMessage;
+    logActionsFile = openOutputFile(config.getLogActionsTo(), &errorMessage);
+    if (!logActionsFile) {
+      emitError(UnknownLoc::get(&context),
+                "Opening file for --log-actions-to failed: ")
+          << errorMessage << "\n";
+      return;
+    }
+    logActionsFile->keep();
+    raw_fd_ostream &logActionsStream = logActionsFile->os();
+    actionLogger = std::make_unique<tracing::ActionLogger>(logActionsStream);
+
+    executionContext.registerObserver(actionLogger.get());
+    context.registerActionHandler(executionContext);
+  }
+
+private:
+  std::unique_ptr<llvm::ToolOutputFile> logActionsFile;
+  std::unique_ptr<tracing::ActionLogger> actionLogger;
+  tracing::ExecutionContext executionContext;
+};
 
 /// Perform the actions on the input file indicated by the command line flags
 /// within the specified context.
@@ -167,7 +251,8 @@ performActions(raw_ostream &os,
   // Prepare the pass manager, applying command-line and reproducer options.
   PassManager pm(op.get()->getName(), PassManager::Nesting::Implicit);
   pm.enableVerifier(config.shouldVerifyPasses());
-  applyPassManagerCLOptions(pm);
+  if (failed(applyPassManagerCLOptions(pm)))
+    return failure();
   pm.enableTiming(timing);
   if (failed(reproOptions.apply(pm)) || failed(config.setupPassPipeline(pm)))
     return failure();
@@ -213,7 +298,8 @@ static LogicalResult processBuffer(raw_ostream &os,
   context.allowUnregisteredDialects(config.shouldAllowUnregisteredDialects());
   if (config.shouldVerifyDiagnostics())
     context.printOpOnDiagnostic(false);
-  context.registerActionHandler(tracing::DebugCounter());
+
+  InstallDebugHandler installDebugHandler(context, config);
 
   // If we are in verify diagnostics mode then we have a lot of work to do,
   // otherwise just perform the actions without worrying about it.
@@ -320,7 +406,7 @@ LogicalResult mlir::MlirOptMain(int argc, char **argv, llvm::StringRef toolName,
   InitLLVM y(argc, argv);
 
   // Register any command line options.
-  MlirOptMainConfig::registerCLOptions();
+  MlirOptMainConfig::registerCLOptions(registry);
   registerAsmPrinterCLOptions();
   registerMLIRContextCLOptions();
   registerPassManagerCLOptions();

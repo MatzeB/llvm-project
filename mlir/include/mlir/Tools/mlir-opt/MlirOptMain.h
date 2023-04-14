@@ -35,12 +35,12 @@ class PassManager;
 /// supported options.
 /// The API is fluent, and the options are sorted in alphabetical order below.
 /// The options can be exposed to the LLVM command line by registering them
-/// with `MlirOptMainConfig::registerCLOptions();` and creating a config using
-/// `auto config = MlirOptMainConfig::createFromCLOptions();`.
+/// with `MlirOptMainConfig::registerCLOptions(DialectRegistry &);` and creating
+/// a config using `auto config = MlirOptMainConfig::createFromCLOptions();`.
 class MlirOptMainConfig {
 public:
   /// Register the options as global LLVM command line options.
-  static void registerCLOptions();
+  static void registerCLOptions(DialectRegistry &dialectRegistry);
 
   /// Create a new config with the default set from the CL options.
   static MlirOptMainConfig createFromCLOptions();
@@ -73,6 +73,14 @@ public:
     return *this;
   }
   bool shouldEmitBytecode() const { return emitBytecodeFlag; }
+
+  /// Set the filename to use for logging actions, use "-" for stdout.
+  MlirOptMainConfig &logActionsTo(StringRef filename) {
+    logActionsToFlag = filename;
+    return *this;
+  }
+  /// Get the filename to use for logging actions.
+  StringRef getLogActionsTo() const { return logActionsToFlag; }
 
   /// Set the callback to populate the pass manager.
   MlirOptMainConfig &
@@ -148,6 +156,9 @@ protected:
 
   /// Emit bytecode instead of textual assembly when generating output.
   bool emitBytecodeFlag = false;
+
+  /// Log action execution to the given file (or "-" for stdout)
+  std::string logActionsToFlag;
 
   /// The callback to populate the pass manager.
   std::function<LogicalResult(PassManager &)> passPipelineCallback;

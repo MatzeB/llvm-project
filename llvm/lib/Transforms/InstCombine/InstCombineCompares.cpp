@@ -277,14 +277,14 @@ Instruction *InstCombinerImpl::foldCmpLoadFromIndexedGlobal(
   // order the state machines in complexity of the generated code.
   Value *Idx = GEP->getOperand(2);
 
-  // If the index is larger than the pointer size of the target, truncate the
-  // index down like the GEP would do implicitly.  We don't have to do this for
-  // an inbounds GEP because the index can't be out of range.
+  // If the index is larger than the pointer offset size of the target, truncate
+  // the index down like the GEP would do implicitly.  We don't have to do this
+  // for an inbounds GEP because the index can't be out of range.
   if (!GEP->isInBounds()) {
-    Type *IntPtrTy = DL.getIntPtrType(GEP->getType());
-    unsigned PtrSize = IntPtrTy->getIntegerBitWidth();
-    if (Idx->getType()->getPrimitiveSizeInBits().getFixedValue() > PtrSize)
-      Idx = Builder.CreateTrunc(Idx, IntPtrTy);
+    Type *PtrIdxTy = DL.getIndexType(GEP->getType());
+    unsigned OffsetSize = PtrIdxTy->getIntegerBitWidth();
+    if (Idx->getType()->getPrimitiveSizeInBits().getFixedValue() > OffsetSize)
+      Idx = Builder.CreateTrunc(Idx, PtrIdxTy);
   }
 
   // If inbounds keyword is not present, Idx * ElementSize can overflow.
@@ -741,7 +741,7 @@ Instruction *InstCombinerImpl::foldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
     RHS = RHS->stripPointerCasts();
 
   Value *PtrBase = GEPLHS->getOperand(0);
-  if (PtrBase == RHS && GEPLHS->isInBounds()) {
+  if (PtrBase == RHS && (GEPLHS->isInBounds() || ICmpInst::isEquality(Cond))) {
     // ((gep Ptr, OFFSET) cmp Ptr)   ---> (OFFSET cmp 0).
     Value *Offset = EmitGEPOffset(GEPLHS);
     return new ICmpInst(ICmpInst::getSignedPredicate(Cond), Offset,
@@ -884,7 +884,8 @@ Instruction *InstCombinerImpl::foldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
 
     // Only lower this if the icmp is the only user of the GEP or if we expect
     // the result to fold to a constant!
-    if (GEPsInBounds && (isa<ConstantExpr>(GEPLHS) || GEPLHS->hasOneUse()) &&
+    if ((GEPsInBounds || CmpInst::isEquality(Cond)) &&
+        (isa<ConstantExpr>(GEPLHS) || GEPLHS->hasOneUse()) &&
         (isa<ConstantExpr>(GEPRHS) || GEPRHS->hasOneUse())) {
       // ((gep Ptr, OFFSET1) cmp (gep Ptr, OFFSET2)  --->  (OFFSET1 cmp OFFSET2)
       Value *L = EmitGEPOffset(GEPLHS);
@@ -1950,6 +1951,30 @@ Instruction *InstCombinerImpl::foldICmpOrConstant(ICmpInst &Cmp,
     auto NewPred = TrueIfSigned ? ICmpInst::ICMP_SLT : ICmpInst::ICMP_SGT;
     Constant *NewC = ConstantInt::get(X->getType(), TrueIfSigned ? 1 : 0);
     return new ICmpInst(NewPred, X, NewC);
+  }
+
+  const APInt *OrC;
+  // icmp(X | OrC, C) --> icmp(X, 0)
+  if (C.isNonNegative() && match(Or, m_Or(m_Value(X), m_APInt(OrC)))) {
+    switch (Pred) {
+    // X | OrC s< C --> X s< 0 iff OrC s>= C s>= 0
+    case ICmpInst::ICMP_SLT:
+    // X | OrC s>= C --> X s>= 0 iff OrC s>= C s>= 0
+    case ICmpInst::ICMP_SGE:
+      if (OrC->sge(C))
+        return new ICmpInst(Pred, X, ConstantInt::getNullValue(X->getType()));
+      break;
+    // X | OrC s<= C --> X s< 0 iff OrC s> C s>= 0
+    case ICmpInst::ICMP_SLE:
+    // X | OrC s> C --> X s>= 0 iff OrC s> C s>= 0
+    case ICmpInst::ICMP_SGT:
+      if (OrC->sgt(C))
+        return new ICmpInst(ICmpInst::getFlippedStrictnessPredicate(Pred), X,
+                            ConstantInt::getNullValue(X->getType()));
+      break;
+    default:
+      break;
+    }
   }
 
   if (!Cmp.isEquality() || !C.isZero() || !Or->hasOneUse())
@@ -4064,20 +4089,36 @@ Value *InstCombinerImpl::foldMultiplicationOverflowCheck(ICmpInst &I) {
   return Res;
 }
 
-static Instruction *foldICmpXNegX(ICmpInst &I) {
+static Instruction *foldICmpXNegX(ICmpInst &I,
+                                  InstCombiner::BuilderTy &Builder) {
   CmpInst::Predicate Pred;
   Value *X;
-  if (!match(&I, m_c_ICmp(Pred, m_NSWNeg(m_Value(X)), m_Deferred(X))))
-    return nullptr;
+  if (match(&I, m_c_ICmp(Pred, m_NSWNeg(m_Value(X)), m_Deferred(X)))) {
 
-  if (ICmpInst::isSigned(Pred))
-    Pred = ICmpInst::getSwappedPredicate(Pred);
-  else if (ICmpInst::isUnsigned(Pred))
-    Pred = ICmpInst::getSignedPredicate(Pred);
-  // else for equality-comparisons just keep the predicate.
+    if (ICmpInst::isSigned(Pred))
+      Pred = ICmpInst::getSwappedPredicate(Pred);
+    else if (ICmpInst::isUnsigned(Pred))
+      Pred = ICmpInst::getSignedPredicate(Pred);
+    // else for equality-comparisons just keep the predicate.
 
-  return ICmpInst::Create(Instruction::ICmp, Pred, X,
-                          Constant::getNullValue(X->getType()), I.getName());
+    return ICmpInst::Create(Instruction::ICmp, Pred, X,
+                            Constant::getNullValue(X->getType()), I.getName());
+  }
+
+  // A value is not equal to its negation unless that value is 0 or
+  // MinSignedValue, ie: a != -a --> (a & MaxSignedVal) != 0
+  if (match(&I, m_c_ICmp(Pred, m_OneUse(m_Neg(m_Value(X))), m_Deferred(X))) &&
+      ICmpInst::isEquality(Pred)) {
+    Type *Ty = X->getType();
+    uint32_t BitWidth = Ty->getScalarSizeInBits();
+    Constant *MaxSignedVal =
+        ConstantInt::get(Ty, APInt::getSignedMaxValue(BitWidth));
+    Value *And = Builder.CreateAnd(X, MaxSignedVal);
+    Constant *Zero = Constant::getNullValue(Ty);
+    return CmpInst::Create(Instruction::ICmp, Pred, And, Zero);
+  }
+
+  return nullptr;
 }
 
 /// Try to fold icmp (binop), X or icmp X, (binop).
@@ -4095,7 +4136,7 @@ Instruction *InstCombinerImpl::foldICmpBinOp(ICmpInst &I,
   if (!BO0 && !BO1)
     return nullptr;
 
-  if (Instruction *NewICmp = foldICmpXNegX(I))
+  if (Instruction *NewICmp = foldICmpXNegX(I, Builder))
     return NewICmp;
 
   const CmpInst::Predicate Pred = I.getPredicate();
@@ -6884,7 +6925,7 @@ static Instruction *foldFabsWithFcmpZero(FCmpInst &I, InstCombinerImpl &IC) {
         Mode.Input == DenormalMode::PositiveZero) {
 
       auto replaceFCmp = [](FCmpInst *I, FCmpInst::Predicate P, Value *X) {
-        Constant *Zero = ConstantFP::getNullValue(X->getType());
+        Constant *Zero = ConstantFP::getZero(X->getType());
         return new FCmpInst(P, X, Zero, "", I);
       };
 
@@ -6980,7 +7021,7 @@ static Instruction *foldFCmpFNegCommonOp(FCmpInst &I) {
 
   // Replace the negated operand with 0.0:
   // fcmp Pred Op0, -Op0 --> fcmp Pred Op0, 0.0
-  Constant *Zero = ConstantFP::getNullValue(Op0->getType());
+  Constant *Zero = ConstantFP::getZero(Op0->getType());
   return new FCmpInst(Pred, Op0, Zero, "", &I);
 }
 
@@ -7031,10 +7072,10 @@ Instruction *InstCombinerImpl::visitFCmpInst(FCmpInst &I) {
   // then canonicalize the operand to 0.0.
   if (Pred == CmpInst::FCMP_ORD || Pred == CmpInst::FCMP_UNO) {
     if (!match(Op0, m_PosZeroFP()) && isKnownNeverNaN(Op0, &TLI))
-      return replaceOperand(I, 0, ConstantFP::getNullValue(OpType));
+      return replaceOperand(I, 0, ConstantFP::getZero(OpType));
 
     if (!match(Op1, m_PosZeroFP()) && isKnownNeverNaN(Op1, &TLI))
-      return replaceOperand(I, 1, ConstantFP::getNullValue(OpType));
+      return replaceOperand(I, 1, ConstantFP::getZero(OpType));
   }
 
   // fcmp pred (fneg X), (fneg Y) -> fcmp swap(pred) X, Y
@@ -7063,7 +7104,7 @@ Instruction *InstCombinerImpl::visitFCmpInst(FCmpInst &I) {
   // The sign of 0.0 is ignored by fcmp, so canonicalize to +0.0:
   // fcmp Pred X, -0.0 --> fcmp Pred X, 0.0
   if (match(Op1, m_AnyZeroFP()) && !match(Op1, m_PosZeroFP()))
-    return replaceOperand(I, 1, ConstantFP::getNullValue(OpType));
+    return replaceOperand(I, 1, ConstantFP::getZero(OpType));
 
   // Ignore signbit of bitcasted int when comparing equality to FP 0.0:
   // fcmp oeq/une (bitcast X), 0.0 --> (and X, SignMaskC) ==/!= 0
@@ -7152,11 +7193,11 @@ Instruction *InstCombinerImpl::visitFCmpInst(FCmpInst &I) {
         case FCmpInst::FCMP_ONE:
           // X is ordered and not equal to an impossible constant --> ordered
           return new FCmpInst(FCmpInst::FCMP_ORD, X,
-                              ConstantFP::getNullValue(X->getType()));
+                              ConstantFP::getZero(X->getType()));
         case FCmpInst::FCMP_UEQ:
           // X is unordered or equal to an impossible constant --> unordered
           return new FCmpInst(FCmpInst::FCMP_UNO, X,
-                              ConstantFP::getNullValue(X->getType()));
+                              ConstantFP::getZero(X->getType()));
         case FCmpInst::FCMP_UNE:
           // X is unordered or not equal to an impossible constant --> true
           return replaceInstUsesWith(I, ConstantInt::getTrue(I.getType()));

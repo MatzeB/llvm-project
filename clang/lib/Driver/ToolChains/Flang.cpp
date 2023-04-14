@@ -11,6 +11,7 @@
 #include "CommonArgs.h"
 
 #include "clang/Driver/Options.h"
+#include "llvm/Frontend/Debug/Options.h"
 
 #include <cassert>
 
@@ -65,6 +66,20 @@ void Flang::addOtherOptions(const ArgList &Args, ArgStringList &CmdArgs) const {
   if (stackArrays &&
       !stackArrays->getOption().matches(options::OPT_fno_stack_arrays))
     CmdArgs.push_back("-fstack-arrays");
+
+  if (Args.hasArg(options::OPT_flang_experimental_hlfir))
+    CmdArgs.push_back("-flang-experimental-hlfir");
+
+  llvm::codegenoptions::DebugInfoKind DebugInfoKind;
+  if (Args.hasArg(options::OPT_gN_Group)) {
+    Arg *gNArg = Args.getLastArg(options::OPT_gN_Group);
+    DebugInfoKind = debugLevelToInfoKind(*gNArg);
+  } else if (Args.hasArg(options::OPT_g_Flag)) {
+    DebugInfoKind = llvm::codegenoptions::DebugLineTablesOnly;
+  } else {
+    DebugInfoKind = llvm::codegenoptions::NoDebugInfo;
+  }
+  addDebugInfoKind(CmdArgs, DebugInfoKind);
 }
 
 void Flang::addPicOptions(const ArgList &Args, ArgStringList &CmdArgs) const {
@@ -104,6 +119,8 @@ void Flang::addTargetOptions(const ArgList &Args,
   switch (TC.getArch()) {
   default:
     break;
+  case llvm::Triple::r600:
+  case llvm::Triple::amdgcn:
   case llvm::Triple::aarch64:
   case llvm::Triple::riscv64:
   case llvm::Triple::x86_64:
@@ -112,6 +129,56 @@ void Flang::addTargetOptions(const ArgList &Args,
   }
 
   // TODO: Add target specific flags, ABI, mtune option etc.
+}
+
+void Flang::addOffloadOptions(Compilation &C, const InputInfoList &Inputs,
+                              const JobAction &JA, const ArgList &Args,
+                              ArgStringList &CmdArgs) const {
+  bool IsOpenMPDevice = JA.isDeviceOffloading(Action::OFK_OpenMP);
+  bool IsHostOffloadingAction = JA.isHostOffloading(Action::OFK_OpenMP) ||
+                                JA.isHostOffloading(C.getActiveOffloadKinds());
+
+  // Skips the primary input file, which is the input file that the compilation
+  // proccess will be executed upon (e.g. the host bitcode file) and
+  // adds the other secondary input (e.g. device bitcode files for embedding)
+  // to the embed offload object. This is condensed logic from the Clang driver
+  // for embedding offload objects during HostOffloading.
+  if (IsHostOffloadingAction) {
+    for (size_t i = 1; i < Inputs.size(); ++i) {
+      if (Inputs[i].getType() != types::TY_Nothing)
+        CmdArgs.push_back(
+            Args.MakeArgString("-fembed-offload-object=" +
+                               getToolChain().getInputFilename(Inputs[i])));
+    }
+  }
+
+  if (IsOpenMPDevice) {
+    // -fopenmp-is-device is passed along to tell the frontend that it is
+    // generating code for a device, so that only the relevant code is
+    // emitted.
+    CmdArgs.push_back("-fopenmp-is-device");
+
+    // When in OpenMP offloading mode, enable debugging on the device.
+    Args.AddAllArgs(CmdArgs, options::OPT_fopenmp_target_debug_EQ);
+    if (Args.hasFlag(options::OPT_fopenmp_target_debug,
+                     options::OPT_fno_openmp_target_debug, /*Default=*/false))
+      CmdArgs.push_back("-fopenmp-target-debug");
+
+    // When in OpenMP offloading mode, forward assumptions information about
+    // thread and team counts in the device.
+    if (Args.hasFlag(options::OPT_fopenmp_assume_teams_oversubscription,
+                     options::OPT_fno_openmp_assume_teams_oversubscription,
+                     /*Default=*/false))
+      CmdArgs.push_back("-fopenmp-assume-teams-oversubscription");
+    if (Args.hasFlag(options::OPT_fopenmp_assume_threads_oversubscription,
+                     options::OPT_fno_openmp_assume_threads_oversubscription,
+                     /*Default=*/false))
+      CmdArgs.push_back("-fopenmp-assume-threads-oversubscription");
+    if (Args.hasArg(options::OPT_fopenmp_assume_no_thread_state))
+      CmdArgs.push_back("-fopenmp-assume-no-thread-state");
+    if (Args.hasArg(options::OPT_fopenmp_assume_no_nested_parallelism))
+      CmdArgs.push_back("-fopenmp-assume-no-nested-parallelism");
+  }
 }
 
 static void addFloatingPointOptions(const Driver &D, const ArgList &Args,
@@ -327,6 +394,9 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
   // Add other compile options
   addOtherOptions(Args, CmdArgs);
 
+  // Offloading related options
+  addOffloadOptions(C, Inputs, JA, Args, CmdArgs);
+
   // Forward -Xflang arguments to -fc1
   Args.AddAllArgValues(CmdArgs, options::OPT_Xflang);
 
@@ -369,6 +439,9 @@ void Flang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   assert(Input.isFilename() && "Invalid input.");
+
+  if (Args.getLastArg(options::OPT_save_temps_EQ))
+    Args.AddLastArg(CmdArgs, options::OPT_save_temps_EQ);
 
   addDashXForInput(Args, Input, CmdArgs);
 

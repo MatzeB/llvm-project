@@ -310,6 +310,7 @@ ARMTargetInfo::ARMTargetInfo(const llvm::Triple &Triple,
     case llvm::Triple::GNUEABIHF:
     case llvm::Triple::MuslEABI:
     case llvm::Triple::MuslEABIHF:
+    case llvm::Triple::OpenHOS:
       setABI("aapcs-linux");
       break;
     case llvm::Triple::EABIHF:
@@ -1405,11 +1406,6 @@ DarwinARMTargetInfo::DarwinARMTargetInfo(const llvm::Triple &Triple,
                                          const TargetOptions &Opts)
     : DarwinTargetInfo<ARMleTargetInfo>(Triple, Opts) {
   HasAlignMac68kSupport = true;
-  // iOS always has 64-bit atomic instructions.
-  // FIXME: This should be based off of the target features in
-  // ARMleTargetInfo.
-  MaxAtomicInlineWidth = 64;
-
   if (Triple.isWatchABI()) {
     // Darwin on iOS uses a variant of the ARM C++ ABI.
     TheCXXABI.set(TargetCXXABI::WatchOS);

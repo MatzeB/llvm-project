@@ -243,6 +243,18 @@ public:
     return false;
   }
 
+  bool SelectDupNegativeZero(SDValue N) {
+    switch(N->getOpcode()) {
+    case AArch64ISD::DUP:
+    case ISD::SPLAT_VECTOR: {
+      ConstantFPSDNode *Const = dyn_cast<ConstantFPSDNode>(N->getOperand(0));
+      return Const && Const->isZero() && Const->isNegative();
+    }
+    }
+
+    return false;
+  }
+
   template<MVT::SimpleValueType VT>
   bool SelectSVEAddSubImm(SDValue N, SDValue &Imm, SDValue &Shift) {
     return SelectSVEAddSubImm(N, VT, Imm, Shift);
@@ -6656,26 +6668,19 @@ bool AArch64DAGToDAGISel::SelectAnyPredicate(SDValue N) {
 bool AArch64DAGToDAGISel::SelectSMETileSlice(SDValue N, unsigned MaxSize,
                                              SDValue &Base, SDValue &Offset,
                                              unsigned Scale) {
-  if (N.getOpcode() != ISD::ADD) {
-    Base = N;
-    Offset = CurDAG->getTargetConstant(0, SDLoc(N), MVT::i64);
-    return true;
-  }
+  // Try to untangle an ADD node into a 'reg + offset'
+  if (N.getOpcode() == ISD::ADD)
+    if (auto C = dyn_cast<ConstantSDNode>(N.getOperand(1))) {
+      int64_t ImmOff = C->getSExtValue();
+      if ((ImmOff > 0 && ImmOff <= MaxSize && (ImmOff % Scale == 0))) {
+        Base = N.getOperand(0);
+        Offset = CurDAG->getTargetConstant(ImmOff / Scale, SDLoc(N), MVT::i64);
+        return true;
+      }
+    }
 
-  // Process an ADD node.
-  const SDValue LHS = N.getOperand(0);
-  const SDValue RHS = N.getOperand(1);
-
-  if (auto C = dyn_cast<ConstantSDNode>(RHS)) {
-    int64_t ImmOff = C->getSExtValue();
-
-    if ((ImmOff < 0 || ImmOff > MaxSize) || (ImmOff % Scale != 0))
-      return false;
-
-    Base = LHS;
-    Offset = CurDAG->getTargetConstant(ImmOff / Scale, SDLoc(N), MVT::i64);
-    return true;
-  }
-
-  return false;
+  // By default, just match reg + 0.
+  Base = N;
+  Offset = CurDAG->getTargetConstant(0, SDLoc(N), MVT::i64);
+  return true;
 }
