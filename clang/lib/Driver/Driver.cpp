@@ -1395,8 +1395,9 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   const Arg *Std = Args.getLastArg(options::OPT_std_EQ);
   ModulesModeCXX20 =
       !Args.hasArg(options::OPT_fmodules) && Std &&
-      (Std->containsValue("c++20") || Std->containsValue("c++2b") ||
-       Std->containsValue("c++2a") || Std->containsValue("c++latest"));
+      (Std->containsValue("c++20") || Std->containsValue("c++2a") ||
+       Std->containsValue("c++23") || Std->containsValue("c++2b") ||
+       Std->containsValue("c++latest"));
 
   // Process -fmodule-header{=} flags.
   if (Arg *A = Args.getLastArg(options::OPT_fmodule_header_EQ,
@@ -3877,6 +3878,21 @@ void Driver::handleArguments(Compilation &C, DerivedArgList &Args,
         !Args.getLastArgValue(options::OPT_fuse_ld_EQ)
              .equals_insensitive("lld"))
       Diag(clang::diag::err_drv_lto_without_lld);
+
+    // If -dumpdir is not specified, give a default prefix derived from the link
+    // output filename. For example, `clang -g -gsplit-dwarf a.c -o x` passes
+    // `-dumpdir x-` to cc1. If -o is unspecified, use
+    // stem(getDefaultImageName()) (usually stem("a.out") = "a").
+    if (!Args.hasArg(options::OPT_dumpdir)) {
+      Arg *Arg = Args.MakeSeparateArg(
+          nullptr, getOpts().getOption(options::OPT_dumpdir),
+          Args.MakeArgString(Args.getLastArgValue(
+                                 options::OPT_o,
+                                 llvm::sys::path::stem(getDefaultImageName())) +
+                             "-"));
+      Arg->claim();
+      Args.append(Arg);
+    }
   }
 
   if (FinalPhase == phases::Preprocess || Args.hasArg(options::OPT__SLASH_Y_)) {

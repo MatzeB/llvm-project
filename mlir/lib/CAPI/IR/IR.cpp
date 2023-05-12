@@ -20,6 +20,7 @@
 #include "mlir/IR/Location.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Parser/Parser.h"
@@ -340,7 +341,8 @@ static LogicalResult inferOperationTypes(OperationState &state) {
 
   if (succeeded(inferInterface->inferReturnTypes(
           context, state.location, state.operands,
-          state.attributes.getDictionary(context), state.regions, state.types)))
+          state.attributes.getDictionary(context), state.getRawProperties(),
+          state.regions, state.types)))
     return success();
 
   // Diagnostic emitted by interface.
@@ -524,25 +526,18 @@ void mlirOperationPrintWithFlags(MlirOperation op, MlirOpPrintingFlags flags,
   unwrap(op)->print(stream, *unwrap(flags));
 }
 
-MlirBytecodeWriterResult mlirOperationWriteBytecode(MlirOperation op,
-                                                    MlirStringCallback callback,
-                                                    void *userData) {
+void mlirOperationWriteBytecode(MlirOperation op, MlirStringCallback callback,
+                                void *userData) {
   detail::CallbackOstream stream(callback, userData);
-  MlirBytecodeWriterResult res;
-  BytecodeWriterResult r = writeBytecodeToFile(unwrap(op), stream);
-  res.minVersion = r.minVersion;
-  return res;
+  // As no desired version is set, no failure can occur.
+  (void)writeBytecodeToFile(unwrap(op), stream);
 }
 
-MlirBytecodeWriterResult mlirOperationWriteBytecodeWithConfig(
+MlirLogicalResult mlirOperationWriteBytecodeWithConfig(
     MlirOperation op, MlirBytecodeWriterConfig config,
     MlirStringCallback callback, void *userData) {
   detail::CallbackOstream stream(callback, userData);
-  BytecodeWriterResult r =
-      writeBytecodeToFile(unwrap(op), stream, *unwrap(config));
-  MlirBytecodeWriterResult res;
-  res.minVersion = r.minVersion;
-  return res;
+  return wrap(writeBytecodeToFile(unwrap(op), stream, *unwrap(config)));
 }
 
 void mlirOperationDump(MlirOperation op) { return unwrap(op)->dump(); }
@@ -771,6 +766,13 @@ void mlirValuePrint(MlirValue value, MlirStringCallback callback,
                     void *userData) {
   detail::CallbackOstream stream(callback, userData);
   unwrap(value).print(stream);
+}
+
+void mlirValuePrintAsOperand(MlirValue value, MlirOpPrintingFlags flags,
+                             MlirStringCallback callback, void *userData) {
+  detail::CallbackOstream stream(callback, userData);
+  Value cppValue = unwrap(value);
+  cppValue.printAsOperand(stream, *unwrap(flags));
 }
 
 MlirOpOperand mlirValueGetFirstUse(MlirValue value) {

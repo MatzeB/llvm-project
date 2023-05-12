@@ -11,18 +11,20 @@
 
 #include <__algorithm/any_of.h>
 #include <__config>
-#include <__functional/not_fn.h>
+#include <__iterator/iterator_traits.h>
+#include <__pstl/internal/execution_impl.h>
 #include <__pstl/internal/parallel_impl.h>
 #include <__pstl/internal/unseq_backend_simd.h>
 #include <__type_traits/enable_if.h>
 #include <__type_traits/is_execution_policy.h>
+#include <__type_traits/remove_cvref.h>
 #include <__utility/terminate_on_exception.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
 #endif
 
-#if _LIBCPP_STD_VER >= 17
+#if !defined(_LIBCPP_HAS_NO_INCOMPLETE_PSTL) && _LIBCPP_STD_VER >= 17
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
@@ -58,7 +60,9 @@ template <class _ExecutionPolicy,
           enable_if_t<is_execution_policy_v<__remove_cvref_t<_ExecutionPolicy>>, int> = 0>
 _LIBCPP_NODISCARD_EXT _LIBCPP_HIDE_FROM_ABI bool
 all_of(_ExecutionPolicy&& __policy, _ForwardIterator __first, _ForwardIterator __last, _Pred __pred) {
-  return !std::any_of(__policy, __first, __last, std::not_fn(__pred));
+  return !std::any_of(__policy, __first, __last, [&](__iter_reference<_ForwardIterator> __value) {
+    return !__pred(__value);
+  });
 }
 
 template <class _ExecutionPolicy,
@@ -72,6 +76,6 @@ none_of(_ExecutionPolicy&& __policy, _ForwardIterator __first, _ForwardIterator 
 
 _LIBCPP_END_NAMESPACE_STD
 
-#endif // _LIBCPP_STD_VER >= 17
+#endif // !defined(_LIBCPP_HAS_NO_INCOMPLETE_PSTL) && _LIBCPP_STD_VER >= 17
 
 #endif // _LIBCPP___ALGORITHM_PSTL_ANY_ALL_NONE_OF_H

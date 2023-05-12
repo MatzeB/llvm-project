@@ -1142,6 +1142,10 @@ def module_dependency_dir : Separate<["-"], "module-dependency-dir">,
 def dsym_dir : JoinedOrSeparate<["-"], "dsym-dir">,
   Flags<[NoXarchOption, RenderAsInput]>,
   HelpText<"Directory to output dSYM's (if any) to">, MetaVarName<"<dir>">;
+// GCC style -dumpdir. We intentionally don't implement the less useful -dumpbase{,-ext}.
+def dumpdir : Separate<["-"], "dumpdir">, Flags<[CC1Option]>,
+  MetaVarName<"<dumppfx>">,
+  HelpText<"Use <dumpfpx> as a prefix to form auxiliary and dump file names">;
 def dumpmachine : Flag<["-"], "dumpmachine">;
 def dumpspecs : Flag<["-"], "dumpspecs">, Flags<[Unsupported]>;
 def dumpversion : Flag<["-"], "dumpversion">;
@@ -3421,6 +3425,7 @@ def vfsoverlay : JoinedOrSeparate<["-", "--"], "vfsoverlay">, Flags<[CC1Option, 
   HelpText<"Overlay the virtual filesystem described by file over the real file system. "
            "Additionally, pass this overlay file to the linker if it supports it">;
 def imultilib : Separate<["-"], "imultilib">, Group<gfortran_Group>;
+def K : Flag<["-"], "K">, Flags<[LinkerInput]>;
 def keep__private__externs : Flag<["-"], "keep_private_externs">;
 def l : JoinedOrSeparate<["-"], "l">, Flags<[LinkerInput, RenderJoined]>,
         Group<Link_Group>;
@@ -3959,8 +3964,12 @@ def mno_outline_atomics : Flag<["-"], "mno-outline-atomics">, Group<f_clang_Grou
 def mno_implicit_float : Flag<["-"], "mno-implicit-float">, Group<m_Group>,
   HelpText<"Don't generate implicit floating point or vector instructions">;
 def mimplicit_float : Flag<["-"], "mimplicit-float">, Group<m_Group>;
-def mrecip : Flag<["-"], "mrecip">, Group<m_Group>;
+def mrecip : Flag<["-"], "mrecip">, Group<m_Group>,
+  HelpText<"Equivalent to '-mrecip=all'">;
 def mrecip_EQ : CommaJoined<["-"], "mrecip=">, Group<m_Group>, Flags<[CC1Option]>,
+  HelpText<"Control use of approximate reciprocal and reciprocal square root instructions followed by <n> iterations of "
+           "Newton-Raphson refinement. "
+           "<value> = ( ['!'] ['vec-'] ('rcp'|'sqrt') [('h'|'s'|'d')] [':'<n>] ) | 'all' | 'default' | 'none'">,
   MarshallingInfoStringVector<CodeGenOpts<"Reciprocals">>;
 def mprefer_vector_width_EQ : Joined<["-"], "mprefer-vector-width=">, Group<m_Group>, Flags<[CC1Option]>,
   HelpText<"Specifies preferred vector width for auto-vectorization. Defaults to 'none' which allows target specific decisions.">,
@@ -5835,6 +5844,9 @@ let Flags = [CC1Option, NoDriverOption] in {
 def sys_header_deps : Flag<["-"], "sys-header-deps">,
   HelpText<"Include system headers in dependency output">,
   MarshallingInfoFlag<DependencyOutputOpts<"IncludeSystemHeaders">>;
+def canonical_system_headers : Flag<["-"], "canonical-system-headers">,
+  HelpText<"Canonicalize system headers in dependency output">,
+  MarshallingInfoFlag<DependencyOutputOpts<"CanonicalSystemHeaders">>;
 def module_file_deps : Flag<["-"], "module-file-deps">,
   HelpText<"Include module files in dependency output">,
   MarshallingInfoFlag<DependencyOutputOpts<"IncludeModuleFiles">>;
