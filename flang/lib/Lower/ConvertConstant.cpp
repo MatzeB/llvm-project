@@ -362,7 +362,9 @@ static mlir::Value genInlinedStructureCtorLitImpl(
     if (Fortran::lower::isDerivedTypeWithLenParameters(sym))
       TODO(loc, "component with length parameters in structure constructor");
 
-    if (Fortran::semantics::IsBuiltinCPtr(sym)) {
+    // Special handling for scalar c_ptr/c_funptr constants. The array constant
+    // must fall through to genConstantValue() below.
+    if (Fortran::semantics::IsBuiltinCPtr(sym) && sym->Rank() == 0) {
       // Builtin c_ptr and c_funptr have special handling because initial
       // values are handled for them as an extension.
       mlir::Value addr = fir::getBase(Fortran::lower::genExtAddrInInitializer(
@@ -415,9 +417,10 @@ static mlir::Value genScalarLit(
   if (!outlineBigConstantsInReadOnlyMemory)
     return genInlinedStructureCtorLitImpl(converter, loc, value, eleTy);
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
-  std::string globalName = Fortran::lower::mangle::mangleArrayLiteral(
-      eleTy,
-      Fortran::evaluate::Constant<Fortran::evaluate::SomeDerived>(value));
+  auto expr = std::make_unique<Fortran::lower::SomeExpr>(toEvExpr(
+      Fortran::evaluate::Constant<Fortran::evaluate::SomeDerived>(value)));
+  llvm::StringRef globalName =
+      converter.getUniqueLitName(loc, std::move(expr), eleTy);
   fir::GlobalOp global = builder.getNamedGlobal(globalName);
   if (!global) {
     global = builder.createGlobalConstant(
@@ -525,8 +528,9 @@ genOutlineArrayLit(Fortran::lower::AbstractConverter &converter,
                    const Fortran::evaluate::Constant<T> &constant) {
   fir::FirOpBuilder &builder = converter.getFirOpBuilder();
   mlir::Type eleTy = arrayTy.cast<fir::SequenceType>().getEleTy();
-  std::string globalName =
-      Fortran::lower::mangle::mangleArrayLiteral(eleTy, constant);
+  llvm::StringRef globalName = converter.getUniqueLitName(
+      loc, std::make_unique<Fortran::lower::SomeExpr>(toEvExpr(constant)),
+      eleTy);
   fir::GlobalOp global = builder.getNamedGlobal(globalName);
   if (!global) {
     // Using a dense attribute for the initial value instead of creating an
