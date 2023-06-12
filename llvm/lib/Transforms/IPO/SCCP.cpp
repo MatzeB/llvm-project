@@ -13,7 +13,7 @@
 #include "llvm/Transforms/IPO/SCCP.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/AssumptionCache.h"
-#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -110,10 +110,12 @@ static bool runIPSCCP(
     std::function<const TargetLibraryInfo &(Function &)> GetTLI,
     std::function<TargetTransformInfo &(Function &)> GetTTI,
     std::function<AssumptionCache &(Function &)> GetAC,
-    function_ref<AnalysisResultsForFn(Function &)> getAnalysis,
+    std::function<DominatorTree &(Function &)> GetDT,
+    std::function<BlockFrequencyInfo &(Function &)> GetBFI,
     bool IsFuncSpecEnabled) {
   SCCPSolver Solver(DL, GetTLI, M.getContext());
-  FunctionSpecializer Specializer(Solver, M, FAM, GetTLI, GetTTI, GetAC);
+  FunctionSpecializer Specializer(Solver, M, FAM, GetBFI, GetTLI, GetTTI,
+                                  GetAC);
 
   // Loop over all functions, marking arguments to those with their addresses
   // taken or that are external as overdefined.
@@ -121,7 +123,9 @@ static bool runIPSCCP(
     if (F.isDeclaration())
       continue;
 
-    Solver.addAnalysis(F, getAnalysis(F));
+    DominatorTree &DT = GetDT(F);
+    AssumptionCache &AC = GetAC(F);
+    Solver.addPredicateInfo(F, DT, AC);
 
     // Determine if we can track the function's return values. If so, add the
     // function to the solver's set of return-tracked functions.
@@ -205,7 +209,6 @@ static bool runIPSCCP(
       MadeChanges |= ReplacedPointerArg;
     }
 
-    SmallPtrSet<Value *, 32> InsertedValues;
     for (BasicBlock &BB : F) {
       if (!Solver.isBlockExecutable(&BB)) {
         LLVM_DEBUG(dbgs() << "  BasicBlock Dead:" << BB);
@@ -219,13 +222,12 @@ static bool runIPSCCP(
       }
 
       MadeChanges |= Solver.simplifyInstsInBlock(
-          BB, InsertedValues, NumInstRemoved, NumInstReplaced);
+          BB, NumInstRemoved, NumInstReplaced);
     }
 
-    DomTreeUpdater DTU = IsFuncSpecEnabled && Specializer.isClonedFunction(&F)
-        ? DomTreeUpdater(DomTreeUpdater::UpdateStrategy::Lazy)
-        : Solver.getDTU(F);
-
+    DominatorTree *DT = FAM->getCachedResult<DominatorTreeAnalysis>(F);
+    PostDominatorTree *PDT = FAM->getCachedResult<PostDominatorTreeAnalysis>(F);
+    DomTreeUpdater DTU(DT, PDT, DomTreeUpdater::UpdateStrategy::Lazy);
     // Change dead blocks to unreachable. We do it after replacing constants
     // in all executable blocks, because changeToUnreachable may remove PHI
     // nodes in executable blocks we found values for. The function's entry
@@ -387,15 +389,15 @@ PreservedAnalyses IPSCCPPass::run(Module &M, ModuleAnalysisManager &AM) {
   auto GetAC = [&FAM](Function &F) -> AssumptionCache & {
     return FAM.getResult<AssumptionAnalysis>(F);
   };
-  auto getAnalysis = [&FAM, this](Function &F) -> AnalysisResultsForFn {
-    DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
-    return {
-        std::make_unique<PredicateInfo>(F, DT, FAM.getResult<AssumptionAnalysis>(F)),
-        &DT, FAM.getCachedResult<PostDominatorTreeAnalysis>(F),
-        isFuncSpecEnabled() ? &FAM.getResult<LoopAnalysis>(F) : nullptr };
+  auto GetDT = [&FAM](Function &F) -> DominatorTree & {
+    return FAM.getResult<DominatorTreeAnalysis>(F);
+  };
+  auto GetBFI = [&FAM](Function &F) -> BlockFrequencyInfo & {
+    return FAM.getResult<BlockFrequencyAnalysis>(F);
   };
 
-  if (!runIPSCCP(M, DL, &FAM, GetTLI, GetTTI, GetAC, getAnalysis,
+
+  if (!runIPSCCP(M, DL, &FAM, GetTLI, GetTTI, GetAC, GetDT, GetBFI,
                  isFuncSpecEnabled()))
     return PreservedAnalyses::all();
 

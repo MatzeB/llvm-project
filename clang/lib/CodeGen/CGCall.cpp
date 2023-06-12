@@ -1751,7 +1751,7 @@ CodeGenTypes::GetFunctionType(const CGFunctionInfo &FI) {
 
 llvm::Type *CodeGenTypes::GetFunctionTypeForVTable(GlobalDecl GD) {
   const CXXMethodDecl *MD = cast<CXXMethodDecl>(GD.getDecl());
-  const FunctionProtoType *FPT = MD->getType()->getAs<FunctionProtoType>();
+  const FunctionProtoType *FPT = MD->getType()->castAs<FunctionProtoType>();
 
   if (!isFuncTypeConvertible(FPT))
     return llvm::StructType::get(getLLVMContext());
@@ -2025,7 +2025,8 @@ void CodeGenModule::mergeDefaultFunctionDefinitionAttributes(
   llvm::AttrBuilder FuncAttrs(F.getContext());
   getTrivialDefaultFunctionAttributes(F.getName(), F.hasOptNone(),
                                       /*AttrOnCallSite=*/false, FuncAttrs);
-  GetCPUAndFeaturesAttributes(GlobalDecl(), FuncAttrs);
+  GetCPUAndFeaturesAttributes(GlobalDecl(), FuncAttrs,
+                              /*AddTargetFeatures=*/false);
 
   if (!WillInternalize && F.isInterposable()) {
     // Do not promote "dynamic" denormal-fp-math to this translation unit's
@@ -3132,30 +3133,51 @@ void CodeGenFunction::EmitFunctionProlog(const CGFunctionInfo &FI,
       llvm::StructType *STy = dyn_cast<llvm::StructType>(ArgI.getCoerceToType());
       if (ArgI.isDirect() && ArgI.getCanBeFlattened() && STy &&
           STy->getNumElements() > 1) {
-        uint64_t SrcSize = CGM.getDataLayout().getTypeAllocSize(STy);
-        llvm::Type *DstTy = Ptr.getElementType();
-        uint64_t DstSize = CGM.getDataLayout().getTypeAllocSize(DstTy);
+        llvm::TypeSize StructSize = CGM.getDataLayout().getTypeAllocSize(STy);
+        llvm::TypeSize PtrElementSize =
+            CGM.getDataLayout().getTypeAllocSize(Ptr.getElementType());
+        if (StructSize.isScalable()) {
+          assert(STy->containsHomogeneousScalableVectorTypes() &&
+                 "ABI only supports structure with homogeneous scalable vector "
+                 "type");
+          assert(StructSize == PtrElementSize &&
+                 "Only allow non-fractional movement of structure with"
+                 "homogeneous scalable vector type");
+          assert(STy->getNumElements() == NumIRArgs);
 
-        Address AddrToStoreInto = Address::invalid();
-        if (SrcSize <= DstSize) {
-          AddrToStoreInto = Builder.CreateElementBitCast(Ptr, STy);
+          llvm::Value *LoadedStructValue = llvm::PoisonValue::get(STy);
+          for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
+            auto *AI = Fn->getArg(FirstIRArg + i);
+            AI->setName(Arg->getName() + ".coerce" + Twine(i));
+            LoadedStructValue =
+                Builder.CreateInsertValue(LoadedStructValue, AI, i);
+          }
+
+          Builder.CreateStore(LoadedStructValue, Ptr);
         } else {
-          AddrToStoreInto =
-            CreateTempAlloca(STy, Alloca.getAlignment(), "coerce");
-        }
+          uint64_t SrcSize = StructSize.getFixedValue();
+          uint64_t DstSize = PtrElementSize.getFixedValue();
 
-        assert(STy->getNumElements() == NumIRArgs);
-        for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
-          auto AI = Fn->getArg(FirstIRArg + i);
-          AI->setName(Arg->getName() + ".coerce" + Twine(i));
-          Address EltPtr = Builder.CreateStructGEP(AddrToStoreInto, i);
-          Builder.CreateStore(AI, EltPtr);
-        }
+          Address AddrToStoreInto = Address::invalid();
+          if (SrcSize <= DstSize) {
+            AddrToStoreInto = Builder.CreateElementBitCast(Ptr, STy);
+          } else {
+            AddrToStoreInto =
+                CreateTempAlloca(STy, Alloca.getAlignment(), "coerce");
+          }
 
-        if (SrcSize > DstSize) {
-          Builder.CreateMemCpy(Ptr, AddrToStoreInto, DstSize);
-        }
+          assert(STy->getNumElements() == NumIRArgs);
+          for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
+            auto AI = Fn->getArg(FirstIRArg + i);
+            AI->setName(Arg->getName() + ".coerce" + Twine(i));
+            Address EltPtr = Builder.CreateStructGEP(AddrToStoreInto, i);
+            Builder.CreateStore(AI, EltPtr);
+          }
 
+          if (SrcSize > DstSize) {
+            Builder.CreateMemCpy(Ptr, AddrToStoreInto, DstSize);
+          }
+        }
       } else {
         // Simple case, just do a coerced store of the argument into the alloca.
         assert(NumIRArgs == 1);
@@ -3440,8 +3462,9 @@ static llvm::StoreInst *findDominatingStoreToReturnValue(CodeGenFunction &CGF) {
   // single-predecessors chain from the current insertion point.
   llvm::BasicBlock *StoreBB = store->getParent();
   llvm::BasicBlock *IP = CGF.Builder.GetInsertBlock();
+  llvm::SmallPtrSet<llvm::BasicBlock *, 4> SeenBBs;
   while (IP != StoreBB) {
-    if (!(IP = IP->getSinglePredecessor()))
+    if (!SeenBBs.insert(IP).second || !(IP = IP->getSinglePredecessor()))
       return nullptr;
   }
 
@@ -4889,25 +4912,6 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
         CGM, Loc, dyn_cast_or_null<FunctionDecl>(CurCodeDecl), FD, CallArgs);
   }
 
-#ifndef NDEBUG
-  if (!(CallInfo.isVariadic() && CallInfo.getArgStruct())) {
-    // For an inalloca varargs function, we don't expect CallInfo to match the
-    // function pointer's type, because the inalloca struct a will have extra
-    // fields in it for the varargs parameters.  Code later in this function
-    // bitcasts the function pointer to the type derived from CallInfo.
-    //
-    // In other cases, we assert that the types match up (until pointers stop
-    // having pointee types).
-    if (Callee.isVirtual())
-      assert(IRFuncTy == Callee.getVirtualFunctionType());
-    else {
-      llvm::PointerType *PtrTy =
-          llvm::cast<llvm::PointerType>(Callee.getFunctionPointer()->getType());
-      assert(PtrTy->isOpaqueOrPointeeTypeMatches(IRFuncTy));
-    }
-  }
-#endif
-
   // 1. Set up the arguments.
 
   // If we're using inalloca, insert the allocation after the stack save.
@@ -5126,9 +5130,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
           I->copyInto(*this, AI);
         } else {
           // Skip the extra memcpy call.
-          auto *T = llvm::PointerType::getWithSamePointeeType(
-              cast<llvm::PointerType>(V->getType()),
-              CGM.getDataLayout().getAllocaAddrSpace());
+          auto *T = llvm::PointerType::get(
+              CGM.getLLVMContext(), CGM.getDataLayout().getAllocaAddrSpace());
 
           llvm::Value *Val = getTargetHooks().performAddrSpaceCast(
               *this, V, LangAS::Default, CGM.getASTAllocaAddressSpace(), T,
@@ -5694,7 +5697,6 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
           assert(unpaddedIndex == 0);
         Builder.CreateStore(elt, eltAddr);
       }
-      // FALLTHROUGH
       [[fallthrough]];
     }
 

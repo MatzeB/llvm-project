@@ -150,9 +150,8 @@ public:
 
   std::unique_ptr<TypeScavenger> GetTypeScavenger() override;
 
-  bool GetFormatterPrefixSuffix(ValueObject &valobj, ConstString type_hint,
-                                std::string &prefix,
-                                std::string &suffix) override;
+  std::pair<llvm::StringRef, llvm::StringRef>
+  GetFormatterPrefixSuffix(llvm::StringRef type_hint) override;
 
   bool IsNilReference(ValueObject &valobj) override;
 
@@ -191,7 +190,7 @@ public:
       return false;
   }
 
-  ConstString GetInstanceVariableName() override { return ConstString("self"); }
+  llvm::StringRef GetInstanceVariableName() override { return "self"; }
 
   // PluginInterface protocol
   llvm::StringRef GetPluginName() override { return GetPluginNameStatic(); }

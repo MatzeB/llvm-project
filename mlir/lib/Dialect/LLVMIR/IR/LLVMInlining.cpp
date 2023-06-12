@@ -207,9 +207,8 @@ static Value handleByValArgumentInit(OpBuilder &builder, Location loc,
   // Copy the pointee to the newly allocated value.
   Value copySize = builder.create<LLVM::ConstantOp>(
       loc, builder.getI64Type(), builder.getI64IntegerAttr(elementTypeSize));
-  Value isVolatile = builder.create<LLVM::ConstantOp>(
-      loc, builder.getI1Type(), builder.getBoolAttr(false));
-  builder.create<LLVM::MemcpyOp>(loc, allocaOp, argument, copySize, isVolatile);
+  builder.create<LLVM::MemcpyOp>(loc, allocaOp, argument, copySize,
+                                 /*isVolatile=*/false);
   return allocaOp;
 }
 
@@ -245,16 +244,6 @@ static Value handleByValArgument(OpBuilder &builder, Operation *callable,
                                  targetAlignment);
 }
 
-/// Returns true if the given argument or result attribute is supported by the
-/// inliner, false otherwise.
-static bool isArgOrResAttrSupported(NamedAttribute attr) {
-  if (attr.getName() == LLVM::LLVMDialect::getInAllocaAttrName())
-    return false;
-  if (attr.getName() == LLVM::LLVMDialect::getNoAliasAttrName())
-    return false;
-  return true;
-}
-
 namespace {
 struct LLVMInlinerInterface : public DialectInlinerInterface {
   using DialectInlinerInterface::DialectInlinerInterface;
@@ -287,27 +276,13 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
                  << "Cannot inline: callable is not an LLVM::LLVMFuncOp\n");
       return false;
     }
+    // TODO: Generate aliasing metadata from noalias argument/result attributes.
     if (auto attrs = funcOp.getArgAttrs()) {
       for (DictionaryAttr attrDict : attrs->getAsRange<DictionaryAttr>()) {
-        for (NamedAttribute attr : attrDict) {
-          if (!isArgOrResAttrSupported(attr)) {
-            LLVM_DEBUG(llvm::dbgs() << "Cannot inline " << funcOp.getSymName()
-                                    << ": unhandled argument attribute "
-                                    << attr.getName() << "\n");
-            return false;
-          }
-        }
-      }
-    }
-    if (auto attrs = funcOp.getResAttrs()) {
-      for (DictionaryAttr attrDict : attrs->getAsRange<DictionaryAttr>()) {
-        for (NamedAttribute attr : attrDict) {
-          if (!isArgOrResAttrSupported(attr)) {
-            LLVM_DEBUG(llvm::dbgs() << "Cannot inline " << funcOp.getSymName()
-                                    << ": unhandled return attribute "
-                                    << attr.getName() << "\n");
-            return false;
-          }
+        if (attrDict.contains(LLVM::LLVMDialect::getInAllocaAttrName())) {
+          LLVM_DEBUG(llvm::dbgs() << "Cannot inline " << funcOp.getSymName()
+                                  << ": inalloca arguments not supported\n");
+          return false;
         }
       }
     }
@@ -364,6 +339,7 @@ struct LLVMInlinerInterface : public DialectInlinerInterface {
     }
     // clang-format off
     if (isa<LLVM::AllocaOp,
+            LLVM::AssumeOp,
             LLVM::AtomicRMWOp,
             LLVM::AtomicCmpXchgOp,
             LLVM::CallOp,

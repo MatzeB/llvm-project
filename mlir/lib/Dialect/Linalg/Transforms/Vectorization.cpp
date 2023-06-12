@@ -729,11 +729,7 @@ static Value calculateGatherOffset(RewriterBase &rewriter,
   return offset;
 }
 
-enum VectorMemoryAccessKind {
-  // TODO: ScalarBroadcast,
-  Contiguous,
-  Gather
-};
+enum VectorMemoryAccessKind { ScalarBroadcast, Contiguous, Gather };
 
 /// Checks whether /p val can be used for calculating a loop invariant index.
 static bool isLoopInvariantIdx(LinalgOp &linalgOp, Value &val) {
@@ -872,36 +868,57 @@ getTensorExtractMemoryAccessPattern(tensor::ExtractOp extractOp,
   if (inputShape.getShape().back() == 1)
     return VectorMemoryAccessKind::Gather;
 
-  bool isContiguous = true;
+  bool leadingIdxsLoopInvariant = true;
 
-  // 3a. Analyze the leading indices of `extractOp`.
+  // 3. Analyze the leading indices of `extractOp`.
   // Look at the way each index is calculated and decide whether it is suitable
   // for a contiguous load, i.e. whether it's loop invariant.
   auto indices = extractOp.getIndices();
-  auto leadIndices = ValueRange(indices.drop_back(1));
+  auto leadIndices = indices.drop_back(1);
 
   for (auto [i, indexVal] : llvm::enumerate(leadIndices)) {
     if (inputShape.getShape()[i] == 1)
       continue;
 
-    isContiguous &= isLoopInvariantIdx(linalgOp, indexVal);
+    leadingIdxsLoopInvariant &= isLoopInvariantIdx(linalgOp, indexVal);
   }
 
-  // 3b. Analyze the trailing index for `extractOp`.
-  auto extractOpTrailingIdx = indices.back();
-  // For contiguous loads, the trailing `extractOp` index should increment with
-  // every loop iteration. This effectively means that it must be based on the
-  // trailing loop index. This is what the following bool captures.
-  bool foundIndexOp = false;
-  isContiguous &=
-      isContiguousLoadIdx(linalgOp, extractOpTrailingIdx, foundIndexOp);
-  isContiguous &= foundIndexOp;
+  if (!leadingIdxsLoopInvariant) {
+    LDBG("Found gather load: " << extractOp);
+    return VectorMemoryAccessKind::Gather;
+  }
 
-  if (isContiguous) {
+  // 4. Analyze the trailing index for `extractOp`.
+  // At this point we know that the leading indices are loop invariant. This
+  // means that is potentially a scalar or a contiguous load. We can decide
+  // based on the trailing idx.
+  auto extractOpTrailingIdx = indices.back();
+
+  // 4a. Scalar broadcast load
+  // If the trailing index is loop invariant then this is a scalar load.
+  if (leadingIdxsLoopInvariant &&
+      isLoopInvariantIdx(linalgOp, extractOpTrailingIdx)) {
+    LDBG("Found scalar broadcast load: " << extractOp);
+
+    return VectorMemoryAccessKind::ScalarBroadcast;
+  }
+
+  // 4b. Contiguous loads
+  // The trailing `extractOp` index should increment with every loop iteration.
+  // This effectively means that it must be based on the trailing loop index.
+  // This is what the following bool captures.
+  bool foundIndexOp = false;
+  bool isContiguousLoad =
+      isContiguousLoadIdx(linalgOp, extractOpTrailingIdx, foundIndexOp);
+  isContiguousLoad &= foundIndexOp;
+
+  if (isContiguousLoad) {
     LDBG("Found contigous load: " << extractOp);
     return VectorMemoryAccessKind::Contiguous;
   }
 
+  // 5. Fallback case - gather load.
+  LDBG("Found gather load: " << extractOp);
   return VectorMemoryAccessKind::Gather;
 }
 
@@ -948,16 +965,14 @@ vectorizeTensorExtract(RewriterBase &rewriter, VectorizationState &state,
         maskConstantOp, passThruConstantOp);
     gatherOp = state.maskOperation(rewriter, gatherOp, linalgOp);
 
-    LDBG("Vectorised as gather load: " << extractOp);
+    LDBG("Vectorised as gather load: " << extractOp << "\n");
     return VectorizationResult{VectorizationStatus::NewOp, gatherOp};
   }
 
-  // 2. Handle contiguous access.
-  LDBG("Vectorised as contiguous load: " << extractOp);
-  SmallVector<Value> transferReadIdxs;
-  auto resTrailingDim = resultType.getShape().back();
-  auto zero = rewriter.create<arith::ConstantOp>(
-      loc, rewriter.getI32Type(), rewriter.getZeroAttr(rewriter.getI32Type()));
+  // 2. Handle:
+  //  a. scalar loads + broadcast,
+  //  b. contiguous loads.
+  // Both cases use vector.transfer_read.
 
   // Collect indices for `vector.transfer_read`. At this point, the indices will
   // either be scalars or would have been broadcast to vectors matching the
@@ -972,6 +987,10 @@ vectorizeTensorExtract(RewriterBase &rewriter, VectorizationState &state,
   //   * for scalar indices - just re-use it,
   //   * for vector indices (e.g. `vector<1x1x4xindex>`) - extract the bottom
   //    (0th) element and use that.
+  SmallVector<Value> transferReadIdxs;
+  auto resTrailingDim = resultType.getShape().back();
+  auto zero = rewriter.create<arith::ConstantOp>(
+      loc, rewriter.getI32Type(), rewriter.getZeroAttr(rewriter.getI32Type()));
   for (size_t i = 0; i < extractOp.getIndices().size(); i++) {
     auto idx = bvm.lookup(extractOp.getIndices()[i]);
     if (idx.getType().isIndex()) {
@@ -988,10 +1007,24 @@ vectorizeTensorExtract(RewriterBase &rewriter, VectorizationState &state,
 
   // `tensor.extract_element` is always in-bounds, hence the following holds.
   auto dstRank = resultType.getRank();
+  auto srcRank = extractOp.getTensor().getType().getRank();
   SmallVector<bool> inBounds(dstRank, true);
 
-  // Create a permutation map for transfer_read Op.
-  auto srcRank = extractOp.getTensor().getType().getRank();
+  // 2a. Handle scalar broadcast access.
+  if (memAccessKind == VectorMemoryAccessKind::ScalarBroadcast) {
+    MLIRContext *ctx = rewriter.getContext();
+    SmallVector<AffineExpr> exprs(dstRank, getAffineConstantExpr(0, ctx));
+    auto permutationMap = AffineMap::get(srcRank, 0, exprs, ctx);
+
+    auto transferReadOp = rewriter.create<vector::TransferReadOp>(
+        loc, resultType, extractOp.getTensor(), transferReadIdxs,
+        permutationMap, inBounds);
+
+    LDBG("Vectorised as scalar broadcast load: " << extractOp << "\n");
+    return VectorizationResult{VectorizationStatus::NewOp, transferReadOp};
+  }
+
+  // 2b. Handle contiguous access.
   auto permutationMap = AffineMap::getMinorIdentityMap(
       srcRank, std::min(dstRank, srcRank), rewriter.getContext());
 
@@ -1012,6 +1045,8 @@ vectorizeTensorExtract(RewriterBase &rewriter, VectorizationState &state,
   auto transferReadOp = rewriter.create<vector::TransferReadOp>(
       loc, resultType, extractOp.getTensor(), transferReadIdxs, permutationMap,
       inBounds);
+
+  LDBG("Vectorised as contiguous load: " << extractOp);
   return VectorizationResult{VectorizationStatus::NewOp, transferReadOp};
 }
 
@@ -1301,6 +1336,7 @@ vectorizeAsTensorPadOp(RewriterBase &rewriter, tensor::PadOp padOp,
   LogicalResult status =
       cast<ReifyRankedShapedTypeOpInterface>(padOp.getOperation())
           .reifyResultShapes(rewriter, reifiedReturnShapes);
+  (void)status; // prevent unused variable warning on non-assert builds
   assert(succeeded(status) && "failed to reify result shapes");
   auto emptyOp = rewriter.create<tensor::EmptyOp>(loc, reifiedReturnShapes[0],
                                                   padValue.getType());
@@ -1324,7 +1360,14 @@ vectorizeAsTensorPadOp(RewriterBase &rewriter, tensor::PadOp padOp,
       /*source=*/emptyOp,
       /*indices=*/SmallVector<Value>(rank, zero),
       /*inBounds=*/SmallVector<bool>(rank, true));
-  write = mlir::vector::maskOperation(rewriter, write, mask);
+  bool needMaskForWrite = llvm::any_of(
+      llvm::zip_equal(inputVectorSizes, padOp.getResultType().getShape()),
+      [](auto it) { return std::get<0>(it) != std::get<1>(it); });
+  if (needMaskForWrite) {
+    Value maskForWrite = rewriter.create<vector::CreateMaskOp>(
+        loc, maskType, reifiedReturnShapes[0]);
+    write = mlir::vector::maskOperation(rewriter, write, maskForWrite);
+  }
   newResults.push_back(write->getResult(0));
   return success();
 }
@@ -1521,11 +1564,16 @@ static void convertAffineApply(RewriterBase &rewriter, LinalgOp linalgOp) {
 /// operations with dynamic shapes.
 LogicalResult mlir::linalg::vectorize(RewriterBase &rewriter, Operation *op,
                                       ArrayRef<int64_t> inputVectorSizes,
-                                      bool vectorizeNDExtract) {
+                                      bool vectorizeNDExtract,
+                                      bool lastVectorSizeScalable) {
   LDBG("Attempting to vectorize:\n" << *op << "\n");
   LDBG("Input vector sizes: ");
   LLVM_DEBUG(llvm::interleaveComma(inputVectorSizes, llvm::dbgs()));
   LLVM_DEBUG(llvm::dbgs() << "\n");
+  LDBG("Scalable vectorisation: " << lastVectorSizeScalable << "\n");
+
+  if (lastVectorSizeScalable)
+    op->emitWarning("Scalable vectorization is not supported yet");
 
   if (failed(
           vectorizeOpPrecondition(op, inputVectorSizes, vectorizeNDExtract))) {
@@ -1638,7 +1686,7 @@ static SmallVector<Value> ofrToIndexValues(RewriterBase &rewriter, Location loc,
                                            ArrayRef<OpFoldResult> ofrs) {
   SmallVector<Value> result;
   for (auto o : ofrs) {
-    if (auto val = o.template dyn_cast<Value>()) {
+    if (auto val = llvm::dyn_cast_if_present<Value>(o)) {
       result.push_back(val);
     } else {
       result.push_back(rewriter.create<arith::ConstantIndexOp>(
@@ -1946,8 +1994,8 @@ struct PadOpVectorizationWithTransferWritePattern
         continue;
 
       // Other cases: Take a deeper look at defining ops of values.
-      auto v1 = size1.dyn_cast<Value>();
-      auto v2 = size2.dyn_cast<Value>();
+      auto v1 = llvm::dyn_cast_if_present<Value>(size1);
+      auto v2 = llvm::dyn_cast_if_present<Value>(size2);
       if (!v1 || !v2)
         return false;
 

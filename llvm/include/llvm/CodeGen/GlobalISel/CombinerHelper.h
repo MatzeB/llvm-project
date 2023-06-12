@@ -353,8 +353,6 @@ public:
   void applyCombineUnmergeZExtToZExt(MachineInstr &MI);
 
   /// Transform fp_instr(cst) to constant result of the fp operation.
-  bool matchCombineConstantFoldFpUnary(MachineInstr &MI,
-                                       const ConstantFP *&Cst);
   void applyCombineConstantFoldFpUnary(MachineInstr &MI, const ConstantFP *Cst);
 
   /// Transform IntToPtr(PtrToInt(x)) to x if cast is in the same address space.
@@ -632,6 +630,12 @@ public:
   /// Reassociate pointer calculations with G_ADD involved, to allow better
   /// addressing mode usage.
   bool matchReassocPtrAdd(MachineInstr &MI, BuildFnTy &MatchInfo);
+
+  /// Try to reassociate to reassociate operands of a commutative binop.
+  bool tryReassocBinOp(unsigned Opc, Register DstReg, Register Op0,
+                       Register Op1, BuildFnTy &MatchInfo);
+  /// Reassociate commutative binary operations like G_ADD.
+  bool matchReassocCommBinOp(MachineInstr &MI, BuildFnTy &MatchInfo);
 
   /// Do constant folding when opportunities are exposed after MIR building.
   bool matchConstantFold(MachineInstr &MI, APInt &MatchInfo);

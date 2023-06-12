@@ -317,6 +317,27 @@ def hlfir_ConcatOp : hlfir_Op<"concat", []> {
   let hasVerifier = 1;
 }
 
+def hlfir_AllOp : hlfir_Op<"all", []> {
+  let summary = "ALL transformational intrinsic";
+  let description = [{
+    Takes a logical array MASK as argument, optionally along a particular dimension,
+    and returns true if all elements of MASK are true.
+  }];
+
+  let arguments = (ins
+    AnyFortranLogicalArrayObject:$mask,
+    Optional<AnyIntegerType>:$dim
+  );
+
+  let results = (outs AnyFortranValue);
+
+  let assemblyFormat = [{
+    $mask  (`dim` $dim^)?  attr-dict `:` functional-type(operands, results)
+  }];
+
+  let hasVerifier = 1;
+}
+
 def hlfir_AnyOp : hlfir_Op<"any", []> {
   let summary = "ANY transformational intrinsic";
   let description = [{
@@ -329,7 +350,7 @@ def hlfir_AnyOp : hlfir_Op<"any", []> {
     Optional<AnyIntegerType>:$dim
   );
 
-  let results = (outs hlfir_ExprType);
+  let results = (outs AnyFortranValue);
 
   let assemblyFormat = [{
     $mask  (`dim` $dim^)?  attr-dict `:` functional-type(operands, results)
@@ -355,7 +376,7 @@ def hlfir_ProductOp : hlfir_Op<"product", [AttrSizedOperandSegments,
                       "::mlir::arith::FastMathFlags::none">:$fastmath
   );
 
-  let results = (outs hlfir_ExprType);
+  let results = (outs AnyFortranValue);
 
   let assemblyFormat = [{
     $array (`dim` $dim^)? (`mask` $mask^)? attr-dict `:` functional-type(operands, results)
@@ -400,10 +421,33 @@ def hlfir_SumOp : hlfir_Op<"sum", [AttrSizedOperandSegments,
                       "::mlir::arith::FastMathFlags::none">:$fastmath
   );
 
-  let results = (outs hlfir_ExprType);
+  let results = (outs AnyFortranValue);
 
   let assemblyFormat = [{
     $array (`dim` $dim^)? (`mask` $mask^)? attr-dict `:` functional-type(operands, results)
+  }];
+
+  let hasVerifier = 1;
+}
+
+def hlifr_DotProductOp : hlfir_Op<"dot_product",
+    [DeclareOpInterfaceMethods<ArithFastMathInterface>]> {
+  let summary = "DOT_PRODUCT transformational intrinsic";
+  let description = [{
+    Dot product of two vectors
+  }];
+
+  let arguments = (ins
+    AnyFortranNumericalOrLogicalArrayObject:$lhs,
+    AnyFortranNumericalOrLogicalArrayObject:$rhs,
+    DefaultValuedAttr<Arith_FastMathAttr,
+                      "::mlir::arith::FastMathFlags::none">:$fastmath
+  );
+
+  let results = (outs AnyFortranValue);
+
+  let assemblyFormat = [{
+    $lhs $rhs attr-dict `:` functional-type(operands, results)
   }];
 
   let hasVerifier = 1;
@@ -644,10 +688,14 @@ def hlfir_ElementalOp : hlfir_Op<"elemental", [RecursiveMemoryEffects]> {
   let extraClassDeclaration = [{
       mlir::Block *getBody() { return &getRegion().front(); }
 
-      // Get the indices iterating over the shape.
+      /// Get the indices iterating over the shape.
       mlir::Block::BlockArgListType getIndices() {
        return getBody()->getArguments();
       }
+
+      /// Must this elemental be evaluated in order?
+      /// TODO: add attribute and set it in lowering.
+      bool isOrdered() {return true;}
   }];
 
   let skipDefaultBuilders = 1;

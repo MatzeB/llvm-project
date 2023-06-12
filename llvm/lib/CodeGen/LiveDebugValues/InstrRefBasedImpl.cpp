@@ -3716,7 +3716,12 @@ bool InstrRefBasedLDV::ExtendRanges(MachineFunction &MF,
 
     unsigned BlockNo = Num.getBlock();
     LocIdx LocNo = Num.getLoc();
-    Num = MInLocs[BlockNo][LocNo.asU64()];
+    ValueIDNum ResolvedValue = MInLocs[BlockNo][LocNo.asU64()];
+    // If there is no resolved value for this live-in then it is not directly
+    // reachable from the entry block -- model it as a PHI on entry to this
+    // block, which means we leave the ValueIDNum unchanged.
+    if (ResolvedValue != ValueIDNum::EmptyValue)
+      Num = ResolvedValue;
   }
   // Later, we'll be looking up ranges of instruction numbers.
   llvm::sort(DebugPHINumToValue);
@@ -4050,10 +4055,7 @@ public:
   /// ValueIsPHI - Check if the instruction that defines the specified value
   /// is a PHI instruction.
   static LDVSSAPhi *ValueIsPHI(BlockValueNum Val, LDVSSAUpdater *Updater) {
-    auto PHIIt = Updater->PHIs.find(Val);
-    if (PHIIt == Updater->PHIs.end())
-      return nullptr;
-    return PHIIt->second;
+    return Updater->PHIs.lookup(Val);
   }
 
   /// ValueIsNewPHI - Like ValueIsPHI but also check if the PHI has no source

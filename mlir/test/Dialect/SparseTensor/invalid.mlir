@@ -8,134 +8,86 @@ func.func @invalid_new_dense(%arg0: !llvm.ptr<i8>) -> tensor<32xf32> {
 
 // -----
 
-#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], crdWidth=32}>
+#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], posWidth=32, crdWidth=32}>
 
-func.func @non_static_pack_ret(%values: tensor<6xf64>, %coordinates: tensor<6x1xi32>)
+func.func @non_static_pack_ret(%values: tensor<6xf64>, %pos: tensor<2xi32>, %coordinates: tensor<6x1xi32>)
                             -> tensor<?xf64, #SparseVector> {
   // expected-error@+1 {{the sparse-tensor must have static shape}}
-  %0 = sparse_tensor.pack %values, %coordinates
-     : tensor<6xf64>, tensor<6x1xi32> to tensor<?xf64, #SparseVector>
+  %0 = sparse_tensor.pack %values, %pos, %coordinates
+     : tensor<6xf64>, tensor<2xi32>, tensor<6x1xi32> to tensor<?xf64, #SparseVector>
   return %0 : tensor<?xf64, #SparseVector>
 }
 
 // -----
 
-#DenseVector = #sparse_tensor.encoding<{lvlTypes = ["dense"], crdWidth=32}>
+#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], posWidth=32, crdWidth=32}>
 
-func.func @invalid_pack_dense(%values: tensor<6xf64>, %coordinates: tensor<6x1xi32>)
-                            -> tensor<100xf64, #DenseVector> {
-  // expected-error@+1 {{the sparse-tensor must have a COO type}}
-  %0 = sparse_tensor.pack %values, %coordinates
-     : tensor<6xf64>, tensor<6x1xi32> to tensor<100xf64, #DenseVector>
-  return %0 : tensor<100xf64, #DenseVector>
-}
-
-// -----
-
-#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], crdWidth=32}>
-
-func.func @invalid_pack_data(%values: tensor<6x1xf64>, %coordinates: tensor<6x1xi32>)
-                            -> tensor<100xf64, #SparseVector> {
-  // expected-error@+1 {{values must have rank 1 + batched_lvls}}
-  %0 = sparse_tensor.pack %values, %coordinates
-     : tensor<6x1xf64>, tensor<6x1xi32> to tensor<100xf64, #SparseVector>
-  return %0 : tensor<100xf64, #SparseVector>
-}
-
-// -----
-
-#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], crdWidth=32}>
-
-func.func @invalid_pack_type(%values: tensor<6xf64>, %coordinates: tensor<6x1xi32>)
+func.func @invalid_pack_type(%values: tensor<6xf64>, %pos: tensor<2xi32>, %coordinates: tensor<6x1xi32>)
                             -> tensor<100xf32, #SparseVector> {
   // expected-error@+1 {{input/output element-types don't match}}
-  %0 = sparse_tensor.pack %values, %coordinates
-     : tensor<6xf64>, tensor<6x1xi32> to tensor<100xf32, #SparseVector>
+  %0 = sparse_tensor.pack %values, %pos, %coordinates
+     : tensor<6xf64>, tensor<2xi32>, tensor<6x1xi32> to tensor<100xf32, #SparseVector>
   return %0 : tensor<100xf32, #SparseVector>
 }
 
 // -----
 
-#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], crdWidth=32}>
+#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed-nu", "singleton"], posWidth=32, crdWidth=32}>
 
-func.func @invalid_pack_type(%values: tensor<5xf64>, %coordinates: tensor<6x1xi32>)
-                            -> tensor<100xf64, #SparseVector> {
-  // expected-error@+1 {{values/coordinates number-of-elements don't match}}
+func.func @invalid_pack_type(%values: tensor<6xf64>, %pos: tensor<2xi32>, %coordinates: tensor<6x3xi32>)
+                            -> tensor<100x2xf64, #SparseVector> {
+  // expected-error@+1 {{input/output trailing COO level-ranks don't match}}
+  %0 = sparse_tensor.pack %values, %pos, %coordinates
+     : tensor<6xf64>, tensor<2xi32>, tensor<6x3xi32> to tensor<100x2xf64, #SparseVector>
+  return %0 : tensor<100x2xf64, #SparseVector>
+}
+
+// -----
+
+#CSR = #sparse_tensor.encoding<{lvlTypes = ["dense", "compressed"], posWidth=32, crdWidth=32}>
+
+func.func @invalid_pack_mis_position(%values: tensor<6xf64>, %coordinates: tensor<6xi32>)
+                                     -> tensor<2x100xf64, #CSR> {
+  // expected-error@+1 {{inconsistent number of fields between input/output}}
   %0 = sparse_tensor.pack %values, %coordinates
-     : tensor<5xf64>, tensor<6x1xi32> to tensor<100xf64, #SparseVector>
-  return %0 : tensor<100xf64, #SparseVector>
+     : tensor<6xf64>, tensor<6xi32> to tensor<2x100xf64, #CSR>
+  return %0 : tensor<2x100xf64, #CSR>
 }
 
 // -----
 
-#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], crdWidth=32}>
+#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], posWidth=32, crdWidth=32}>
 
-func.func @invalid_pack_type(%values: tensor<6xf64>, %coordinates: tensor<6x2xi32>)
-                            -> tensor<100xf64, #SparseVector> {
-  // expected-error@+1 {{input/output level-ranks don't match}}
-  %0 = sparse_tensor.pack %values, %coordinates
-     : tensor<6xf64>, tensor<6x2xi32> to tensor<100xf64, #SparseVector>
-  return %0 : tensor<100xf64, #SparseVector>
-}
-
-// -----
-
-#BCOO = #sparse_tensor.encoding<{lvlTypes = ["dense", "compressed-hi"], crdWidth=32}>
-
-func.func @invalid_pack_batched(%values: tensor<2x6xf64>, %coordinates: tensor<3x6x1xi32>)
-                              -> tensor<2x100xf64, #BCOO> {
-  // expected-error@+1 {{values/coordinates batched level sizes don't match statically}}
-  %0 = sparse_tensor.pack %values, %coordinates batched_lvls=1
-     : tensor<2x6xf64>, tensor<3x6x1xi32> to tensor<2x100xf64, #BCOO>
-  return %0 : tensor<2x100xf64, #BCOO>
-}
-
-// -----
-
-#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], crdWidth=32}>
-
-func.func @invalid_unpack_type(%sp: tensor<100xf32, #SparseVector>)
-                            -> (tensor<6xf64>, tensor<6x1xi32>, i32) {
+func.func @invalid_unpack_type(%sp: tensor<100xf32, #SparseVector>, %values: tensor<6xf64>, %pos: tensor<2xi32>, %coordinates: tensor<6x1xi32>) {
   // expected-error@+1 {{input/output element-types don't match}}
-  %values, %coordinates, %nse = sparse_tensor.unpack %sp
-     : tensor<100xf32, #SparseVector> to tensor<6xf64>, tensor<6x1xi32>, i32
-  return %values, %coordinates, %nse : tensor<6xf64>, tensor<6x1xi32>, i32
+  %rv, %rp, %rc = sparse_tensor.unpack %sp : tensor<100xf32, #SparseVector>
+                  outs(%values, %pos, %coordinates : tensor<6xf64>, tensor<2xi32>, tensor<6x1xi32>)
+                  -> tensor<6xf64>, tensor<2xi32>, tensor<6x1xi32>
+  return
 }
 
 // -----
 
-#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], crdWidth=32}>
+#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed-nu", "singleton"], posWidth=32, crdWidth=32}>
 
-func.func @invalid_unpack_type(%sp: tensor<100xf32, #SparseVector>)
-                            -> (tensor<5xf32>, tensor<6x1xi32>, i32) {
-  // expected-error@+1 {{values/coordinates number-of-elements don't match}}
-  %values, %coordinates, %nse = sparse_tensor.unpack %sp
-     : tensor<100xf32, #SparseVector> to tensor<5xf32>, tensor<6x1xi32>, i32
-  return %values, %coordinates, %nse : tensor<5xf32>, tensor<6x1xi32>, i32
+func.func @invalid_unpack_type(%sp: tensor<100x2xf64, #SparseVector>, %values: tensor<6xf64>, %pos: tensor<2xi32>, %coordinates: tensor<6x3xi32>) {
+  // expected-error@+1 {{input/output trailing COO level-ranks don't match}}
+  %rv, %rp, %rc = sparse_tensor.unpack %sp : tensor<100x2xf64, #SparseVector>
+                  outs(%values, %pos, %coordinates : tensor<6xf64>, tensor<2xi32>, tensor<6x3xi32>)
+                  -> tensor<6xf64>, tensor<2xi32>, tensor<6x3xi32>
+  return
 }
 
 // -----
 
-#SparseVector = #sparse_tensor.encoding<{lvlTypes = ["compressed"], crdWidth=32}>
+#CSR = #sparse_tensor.encoding<{lvlTypes = ["dense", "compressed"], posWidth=32, crdWidth=32}>
 
-func.func @invalid_unpack_type(%sp: tensor<100xf32, #SparseVector>)
-                            -> (tensor<6xf32>, tensor<6x2xi32>, i32) {
-  // expected-error@+1 {{input/output level-ranks don't match}}
-  %values, %coordinates, %nse = sparse_tensor.unpack %sp
-     : tensor<100xf32, #SparseVector> to tensor<6xf32>, tensor<6x2xi32>, i32
-  return %values, %coordinates, %nse : tensor<6xf32>, tensor<6x2xi32>, i32
-}
-
-// -----
-
-#BCOO = #sparse_tensor.encoding<{lvlTypes = ["dense", "compressed-hi"], crdWidth=32}>
-
-func.func @invalid_unpack_type(%sp: tensor<2x100xf32, #BCOO>)
-                            -> (tensor<2x6xf32>, tensor<3x6x2xi32>, i32) {
-  // expected-error@+1 {{values/coordinates batched level sizes don't match statically}}
-  %values, %coordinates, %nse = sparse_tensor.unpack %sp batched_lvls=1
-     : tensor<2x100xf32, #BCOO> to tensor<2x6xf32>, tensor<3x6x2xi32>, i32
-  return %values, %coordinates, %nse : tensor<2x6xf32>, tensor<3x6x2xi32>, i32
+func.func @invalid_unpack_mis_position(%sp: tensor<2x100xf64, #CSR>, %values: tensor<6xf64>, %coordinates: tensor<6xi32>) {
+  // expected-error@+1 {{inconsistent number of fields between input/output}}
+  %rv, %rc = sparse_tensor.unpack %sp : tensor<2x100xf64, #CSR>
+             outs(%values, %coordinates : tensor<6xf64>, tensor<6xi32>)
+             -> tensor<6xf64>, tensor<6xi32>
+  return
 }
 
 // -----
@@ -250,7 +202,7 @@ func.func @mismatch_values_types(%arg0: tensor<?xf64, #SparseVector>) -> memref<
 
 #CSR_SLICE = #sparse_tensor.encoding<{
   lvlTypes = [ "dense", "compressed" ],
-  slice = [ (1, 4, 1), (1, 4, 2) ]
+  dimSlices = [ (1, 4, 1), (1, 4, 2) ]
 }>
 
 func.func @sparse_slice_offset(%arg0: tensor<2x8xf64, #CSR_SLICE>) -> index {
@@ -263,7 +215,7 @@ func.func @sparse_slice_offset(%arg0: tensor<2x8xf64, #CSR_SLICE>) -> index {
 
 #CSR_SLICE = #sparse_tensor.encoding<{
   lvlTypes = [ "dense", "compressed" ],
-  slice = [ (1, 4, 1), (1, 4, 2) ]
+  dimSlices = [ (1, 4, 1), (1, 4, 2) ]
 }>
 
 func.func @sparse_slice_stride(%arg0: tensor<2x8xf64, #CSR_SLICE>) -> index {
@@ -449,7 +401,7 @@ func.func @invalid_out_dense(%arg0: tensor<10xf64>, %arg1: !llvm.ptr<i8>) {
 
 #CSR = #sparse_tensor.encoding<{
   lvlTypes = ["dense", "compressed"],
-  slice = [ (1, 4, 1), (1, 4, 2) ]
+  dimSlices = [ (1, 4, 1), (1, 4, 2) ]
 }>
 
 func.func @sparse_convert_to_slice(%arg0: tensor<10x?xf32>) -> tensor<10x10xf32, #CSR> {

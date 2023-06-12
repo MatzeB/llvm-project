@@ -135,10 +135,10 @@ using namespace PatternMatch;
 
 #define DEBUG_TYPE "scalar-evolution"
 
-STATISTIC(NumTripCountsComputed,
-          "Number of loops with predictable loop counts");
-STATISTIC(NumTripCountsNotComputed,
-          "Number of loops without predictable loop counts");
+STATISTIC(NumExitCountsComputed,
+          "Number of loop exits with predictable exit counts");
+STATISTIC(NumExitCountsNotComputed,
+          "Number of loop exits without predictable exit counts");
 STATISTIC(NumBruteForceTripCountsComputed,
           "Number of loops with trip counts computed by force");
 
@@ -161,10 +161,6 @@ static cl::opt<bool, true> VerifySCEVOpt(
 static cl::opt<bool> VerifySCEVStrict(
     "verify-scev-strict", cl::Hidden,
     cl::desc("Enable stricter verification with -verify-scev is passed"));
-static cl::opt<bool>
-    VerifySCEVMap("verify-scev-maps", cl::Hidden,
-                  cl::desc("Verify no dangling value in ScalarEvolution's "
-                           "ExprValueMap (slow)"));
 
 static cl::opt<bool> VerifyIR(
     "scev-verify-ir", cl::Hidden,
@@ -4345,8 +4341,10 @@ const SCEV *ScalarEvolution::getOffsetOfExpr(Type *IntTy,
   // We can bypass creating a target-independent constant expression and then
   // folding it back into a ConstantInt. This is just a compile-time
   // optimization.
-  return getConstant(
-      IntTy, getDataLayout().getStructLayout(STy)->getElementOffset(FieldNo));
+  const StructLayout *SL = getDataLayout().getStructLayout(STy);
+  assert(!SL->getSizeInBits().isScalable() &&
+         "Cannot get offset for structure containing scalable vector types");
+  return getConstant(IntTy, SL->getElementOffset(FieldNo));
 }
 
 const SCEV *ScalarEvolution::getUnknown(Value *V) {
@@ -4456,13 +4454,6 @@ ArrayRef<Value *> ScalarEvolution::getSCEVValues(const SCEV *S) {
   ExprValueMapType::iterator SI = ExprValueMap.find_as(S);
   if (SI == ExprValueMap.end())
     return std::nullopt;
-#ifndef NDEBUG
-  if (VerifySCEVMap) {
-    // Check there is no dangling Value in the set returned.
-    for (Value *V : SI->second)
-      assert(ValueExprMap.count(V));
-  }
-#endif
   return SI->second.getArrayRef();
 }
 
@@ -5907,90 +5898,6 @@ const SCEV *ScalarEvolution::createAddRecFromPHI(PHINode *PN) {
   return nullptr;
 }
 
-// Checks if the SCEV S is available at BB.  S is considered available at BB
-// if S can be materialized at BB without introducing a fault.
-static bool IsAvailableOnEntry(const Loop *L, DominatorTree &DT, const SCEV *S,
-                               BasicBlock *BB) {
-  struct CheckAvailable {
-    bool TraversalDone = false;
-    bool Available = true;
-
-    const Loop *L = nullptr;  // The loop BB is in (can be nullptr)
-    BasicBlock *BB = nullptr;
-    DominatorTree &DT;
-
-    CheckAvailable(const Loop *L, BasicBlock *BB, DominatorTree &DT)
-      : L(L), BB(BB), DT(DT) {}
-
-    bool setUnavailable() {
-      TraversalDone = true;
-      Available = false;
-      return false;
-    }
-
-    bool follow(const SCEV *S) {
-      switch (S->getSCEVType()) {
-      case scConstant:
-      case scVScale:
-      case scPtrToInt:
-      case scTruncate:
-      case scZeroExtend:
-      case scSignExtend:
-      case scAddExpr:
-      case scMulExpr:
-      case scUMaxExpr:
-      case scSMaxExpr:
-      case scUMinExpr:
-      case scSMinExpr:
-      case scSequentialUMinExpr:
-        // These expressions are available if their operand(s) is/are.
-        return true;
-
-      case scAddRecExpr: {
-        // We allow add recurrences that are on the loop BB is in, or some
-        // outer loop.  This guarantees availability because the value of the
-        // add recurrence at BB is simply the "current" value of the induction
-        // variable.  We can relax this in the future; for instance an add
-        // recurrence on a sibling dominating loop is also available at BB.
-        const auto *ARLoop = cast<SCEVAddRecExpr>(S)->getLoop();
-        if (L && (ARLoop == L || ARLoop->contains(L)))
-          return true;
-
-        return setUnavailable();
-      }
-
-      case scUnknown: {
-        // For SCEVUnknown, we check for simple dominance.
-        const auto *SU = cast<SCEVUnknown>(S);
-        Value *V = SU->getValue();
-
-        if (isa<Argument>(V))
-          return false;
-
-        if (isa<Instruction>(V) && DT.dominates(cast<Instruction>(V), BB))
-          return false;
-
-        return setUnavailable();
-      }
-
-      case scUDivExpr:
-      case scCouldNotCompute:
-        // We do not try to smart about these at all.
-        return setUnavailable();
-      }
-      llvm_unreachable("Unknown SCEV kind!");
-    }
-
-    bool isDone() { return TraversalDone; }
-  };
-
-  CheckAvailable CA(L, BB, DT);
-  SCEVTraversal<CheckAvailable> ST(CA);
-
-  ST.visitAll(S);
-  return CA.Available;
-}
-
 // Try to match a control flow sequence that branches out at BI and merges back
 // at Merge into a "C ? LHS : RHS" select pattern.  Return true on a successful
 // match.
@@ -6028,8 +5935,6 @@ const SCEV *ScalarEvolution::createNodeFromSelectLikePHI(PHINode *PN) {
   auto IsReachable =
       [&](BasicBlock *BB) { return DT.isReachableFromEntry(BB); };
   if (PN->getNumIncomingValues() == 2 && all_of(PN->blocks(), IsReachable)) {
-    const Loop *L = LI.getLoopFor(PN->getParent());
-
     // Try to match
     //
     //  br %cond, label %left, label %right
@@ -6050,8 +5955,8 @@ const SCEV *ScalarEvolution::createNodeFromSelectLikePHI(PHINode *PN) {
 
     if (BI && BI->isConditional() &&
         BrPHIToSelect(DT, BI, PN, Cond, LHS, RHS) &&
-        IsAvailableOnEntry(L, DT, getSCEV(LHS), PN->getParent()) &&
-        IsAvailableOnEntry(L, DT, getSCEV(RHS), PN->getParent()))
+        properlyDominates(getSCEV(LHS), PN->getParent()) &&
+        properlyDominates(getSCEV(RHS), PN->getParent()))
       return createNodeForSelectOrPHI(PN, Cond, LHS, RHS);
   }
 
@@ -6783,21 +6688,30 @@ const ConstantRange &ScalarEvolution::getRangeRef(
 
     // TODO: non-affine addrec
     if (AddRec->isAffine()) {
-      const SCEV *MaxBECount =
+      const SCEV *MaxBEScev =
           getConstantMaxBackedgeTakenCount(AddRec->getLoop());
-      if (!isa<SCEVCouldNotCompute>(MaxBECount) &&
-          getTypeSizeInBits(MaxBECount->getType()) <= BitWidth) {
-        auto RangeFromAffine = getRangeForAffineAR(
-            AddRec->getStart(), AddRec->getStepRecurrence(*this), MaxBECount,
-            BitWidth);
-        ConservativeResult =
-            ConservativeResult.intersectWith(RangeFromAffine, RangeType);
+      if (!isa<SCEVCouldNotCompute>(MaxBEScev)) {
+        APInt MaxBECount = cast<SCEVConstant>(MaxBEScev)->getAPInt();
 
-        auto RangeFromFactoring = getRangeViaFactoring(
-            AddRec->getStart(), AddRec->getStepRecurrence(*this), MaxBECount,
-            BitWidth);
-        ConservativeResult =
-            ConservativeResult.intersectWith(RangeFromFactoring, RangeType);
+        // Adjust MaxBECount to the same bitwidth as AddRec. We can truncate if
+        // MaxBECount's active bits are all <= AddRec's bit width.
+        if (MaxBECount.getBitWidth() > BitWidth &&
+            MaxBECount.getActiveBits() <= BitWidth)
+          MaxBECount = MaxBECount.trunc(BitWidth);
+        else if (MaxBECount.getBitWidth() < BitWidth)
+          MaxBECount = MaxBECount.zext(BitWidth);
+
+        if (MaxBECount.getBitWidth() == BitWidth) {
+          auto RangeFromAffine = getRangeForAffineAR(
+              AddRec->getStart(), AddRec->getStepRecurrence(*this), MaxBECount);
+          ConservativeResult =
+              ConservativeResult.intersectWith(RangeFromAffine, RangeType);
+
+          auto RangeFromFactoring = getRangeViaFactoring(
+              AddRec->getStart(), AddRec->getStepRecurrence(*this), MaxBECount);
+          ConservativeResult =
+              ConservativeResult.intersectWith(RangeFromFactoring, RangeType);
+        }
       }
 
       // Now try symbolic BE count and more powerful methods.
@@ -6805,7 +6719,7 @@ const ConstantRange &ScalarEvolution::getRangeRef(
         const SCEV *SymbolicMaxBECount =
             getSymbolicMaxBackedgeTakenCount(AddRec->getLoop());
         if (!isa<SCEVCouldNotCompute>(SymbolicMaxBECount) &&
-            getTypeSizeInBits(MaxBECount->getType()) <= BitWidth &&
+            getTypeSizeInBits(MaxBEScev->getType()) <= BitWidth &&
             AddRec->hasNoSelfWrap()) {
           auto RangeFromAffineNew = getRangeForAffineNoSelfWrappingAR(
               AddRec, SymbolicMaxBECount, BitWidth, SignHint);
@@ -6969,7 +6883,10 @@ const ConstantRange &ScalarEvolution::getRangeRef(
 static ConstantRange getRangeForAffineARHelper(APInt Step,
                                                const ConstantRange &StartRange,
                                                const APInt &MaxBECount,
-                                               unsigned BitWidth, bool Signed) {
+                                               bool Signed) {
+  unsigned BitWidth = Step.getBitWidth();
+  assert(BitWidth == StartRange.getBitWidth() &&
+         BitWidth == MaxBECount.getBitWidth() && "mismatched bit widths");
   // If either Step or MaxBECount is 0, then the expression won't change, and we
   // just need to return the initial range.
   if (Step == 0 || MaxBECount == 0)
@@ -7028,14 +6945,11 @@ static ConstantRange getRangeForAffineARHelper(APInt Step,
 
 ConstantRange ScalarEvolution::getRangeForAffineAR(const SCEV *Start,
                                                    const SCEV *Step,
-                                                   const SCEV *MaxBECount,
-                                                   unsigned BitWidth) {
-  assert(!isa<SCEVCouldNotCompute>(MaxBECount) &&
-         getTypeSizeInBits(MaxBECount->getType()) <= BitWidth &&
-         "Precondition!");
-
-  MaxBECount = getNoopOrZeroExtend(MaxBECount, Start->getType());
-  APInt MaxBECountValue = getUnsignedRangeMax(MaxBECount);
+                                                   const APInt &MaxBECount) {
+  assert(getTypeSizeInBits(Start->getType()) ==
+             getTypeSizeInBits(Step->getType()) &&
+         getTypeSizeInBits(Start->getType()) == MaxBECount.getBitWidth() &&
+         "mismatched bit widths");
 
   // First, consider step signed.
   ConstantRange StartSRange = getSignedRange(Start);
@@ -7043,17 +6957,16 @@ ConstantRange ScalarEvolution::getRangeForAffineAR(const SCEV *Start,
 
   // If Step can be both positive and negative, we need to find ranges for the
   // maximum absolute step values in both directions and union them.
-  ConstantRange SR =
-      getRangeForAffineARHelper(StepSRange.getSignedMin(), StartSRange,
-                                MaxBECountValue, BitWidth, /* Signed = */ true);
+  ConstantRange SR = getRangeForAffineARHelper(
+      StepSRange.getSignedMin(), StartSRange, MaxBECount, /* Signed = */ true);
   SR = SR.unionWith(getRangeForAffineARHelper(StepSRange.getSignedMax(),
-                                              StartSRange, MaxBECountValue,
-                                              BitWidth, /* Signed = */ true));
+                                              StartSRange, MaxBECount,
+                                              /* Signed = */ true));
 
   // Next, consider step unsigned.
   ConstantRange UR = getRangeForAffineARHelper(
-      getUnsignedRangeMax(Step), getUnsignedRange(Start),
-      MaxBECountValue, BitWidth, /* Signed = */ false);
+      getUnsignedRangeMax(Step), getUnsignedRange(Start), MaxBECount,
+      /* Signed = */ false);
 
   // Finally, intersect signed and unsigned ranges.
   return SR.intersectWith(UR, ConstantRange::Smallest);
@@ -7129,10 +7042,14 @@ ConstantRange ScalarEvolution::getRangeForAffineNoSelfWrappingAR(
 
 ConstantRange ScalarEvolution::getRangeViaFactoring(const SCEV *Start,
                                                     const SCEV *Step,
-                                                    const SCEV *MaxBECount,
-                                                    unsigned BitWidth) {
+                                                    const APInt &MaxBECount) {
   //    RangeOf({C?A:B,+,C?P:Q}) == RangeOf(C?{A,+,P}:{B,+,Q})
   // == RangeOf({A,+,P}) union RangeOf({B,+,Q})
+
+  unsigned BitWidth = MaxBECount.getBitWidth();
+  assert(getTypeSizeInBits(Start->getType()) == BitWidth &&
+         getTypeSizeInBits(Step->getType()) == BitWidth &&
+         "mismatched bit widths");
 
   struct SelectPattern {
     Value *Condition = nullptr;
@@ -7235,9 +7152,9 @@ ConstantRange ScalarEvolution::getRangeViaFactoring(const SCEV *Start,
   const SCEV *FalseStep = this->getConstant(StepPattern.FalseValue);
 
   ConstantRange TrueRange =
-      this->getRangeForAffineAR(TrueStart, TrueStep, MaxBECount, BitWidth);
+      this->getRangeForAffineAR(TrueStart, TrueStep, MaxBECount);
   ConstantRange FalseRange =
-      this->getRangeForAffineAR(FalseStart, FalseStep, MaxBECount, BitWidth);
+      this->getRangeForAffineAR(FalseStart, FalseStep, MaxBECount);
 
   return TrueRange.unionWith(FalseRange);
 }
@@ -8448,23 +8365,6 @@ ScalarEvolution::getBackedgeTakenInfo(const Loop *L) {
   // must be cleared in this scope.
   BackedgeTakenInfo Result = computeBackedgeTakenCount(L);
 
-  // In product build, there are no usage of statistic.
-  (void)NumTripCountsComputed;
-  (void)NumTripCountsNotComputed;
-#if LLVM_ENABLE_STATS || !defined(NDEBUG)
-  const SCEV *BEExact = Result.getExact(L, this);
-  if (BEExact != getCouldNotCompute()) {
-    assert(isLoopInvariant(BEExact, L) &&
-           isLoopInvariant(Result.getConstantMax(this), L) &&
-           "Computed backedge-taken count isn't loop invariant for loop!");
-    ++NumTripCountsComputed;
-  } else if (Result.getConstantMax(this) == getCouldNotCompute() &&
-             isa<PHINode>(L->getHeader()->begin())) {
-    // Only count loops that have phi nodes as not being computable.
-    ++NumTripCountsNotComputed;
-  }
-#endif // LLVM_ENABLE_STATS || !defined(NDEBUG)
-
   // Now that we know more about the trip count for this loop, forget any
   // existing SCEV values for PHI nodes in this loop since they are only
   // conservative estimates made without the benefit of trip count
@@ -8850,7 +8750,9 @@ ScalarEvolution::computeBackedgeTakenCount(const Loop *L,
 
     // 1. For each exit that can be computed, add an entry to ExitCounts.
     // CouldComputeBECount is true only if all exits can be computed.
-    if (EL.ExactNotTaken == getCouldNotCompute())
+    if (EL.ExactNotTaken != getCouldNotCompute())
+      ++NumExitCountsComputed;
+    else
       // We couldn't compute an exact value for this exit, so
       // we won't be able to compute an exact value for the loop.
       CouldComputeBECount = false;
@@ -8858,9 +8760,11 @@ ScalarEvolution::computeBackedgeTakenCount(const Loop *L,
     // Exact always implies symbolic, only check symbolic.
     if (EL.SymbolicMaxNotTaken != getCouldNotCompute())
       ExitCounts.emplace_back(ExitBB, EL);
-    else
+    else {
       assert(EL.ExactNotTaken == getCouldNotCompute() &&
              "Exact is known but symbolic isn't?");
+      ++NumExitCountsNotComputed;
+    }
 
     // 2. Derive the loop's MaxBECount from each exit's max number of
     // non-exiting iterations. Partition the loop exits into two kinds:
@@ -14383,16 +14287,16 @@ void ScalarEvolution::verify() const {
     }
   }
 
-  // Verify that ConstantMultipleCache computations are correct. It is possible
-  // that a recomputed multiple has a higher multiple than the cached multiple
-  // due to strengthened wrap flags. In this case, the cached multiple is a
-  // conservative, but still correct if it divides the recomputed multiple. As
-  // a special case, if if one multiple is zero, the other must also be zero.
+  // Verify that ConstantMultipleCache computations are correct. We check that
+  // cached multiples and recomputed multiples are multiples of each other to
+  // verify correctness. It is possible that a recomputed multiple is different
+  // from the cached multiple due to strengthened no wrap flags or changes in
+  // KnownBits computations.
   for (auto [S, Multiple] : ConstantMultipleCache) {
-    APInt RecomputedMultiple = SE2.getConstantMultipleImpl(S);
-    if ((Multiple != RecomputedMultiple &&
-         (Multiple == 0 || RecomputedMultiple == 0)) &&
-        RecomputedMultiple.urem(Multiple) != 0) {
+    APInt RecomputedMultiple = SE2.getConstantMultiple(S);
+    if ((Multiple != 0 && RecomputedMultiple != 0 &&
+         Multiple.urem(RecomputedMultiple) != 0 &&
+         RecomputedMultiple.urem(Multiple) != 0)) {
       dbgs() << "Incorrect cached computation in ConstantMultipleCache for "
              << *S << " : Computed " << RecomputedMultiple
              << " but cache contains " << Multiple << "!\n";
@@ -15054,9 +14958,25 @@ public:
 
   const SCEV *visitZeroExtendExpr(const SCEVZeroExtendExpr *Expr) {
     auto I = Map.find(Expr);
-    if (I == Map.end())
+    if (I == Map.end()) {
+      // If we didn't find the extact ZExt expr in the map, check if there's an
+      // entry for a smaller ZExt we can use instead.
+      Type *Ty = Expr->getType();
+      const SCEV *Op = Expr->getOperand(0);
+      unsigned Bitwidth = Ty->getScalarSizeInBits() / 2;
+      while (Bitwidth % 8 == 0 && Bitwidth >= 8 &&
+             Bitwidth > Op->getType()->getScalarSizeInBits()) {
+        Type *NarrowTy = IntegerType::get(SE.getContext(), Bitwidth);
+        auto *NarrowExt = SE.getZeroExtendExpr(Op, NarrowTy);
+        auto I = Map.find(NarrowExt);
+        if (I != Map.end())
+          return SE.getZeroExtendExpr(I->second, Ty);
+        Bitwidth = Bitwidth / 2;
+      }
+
       return SCEVRewriteVisitor<SCEVLoopGuardRewriter>::visitZeroExtendExpr(
           Expr);
+    }
     return I->second;
   }
 
@@ -15336,7 +15256,7 @@ const SCEV *ScalarEvolution::applyLoopGuards(const SCEV *Expr, const Loop *L) {
         if (RHS->getType()->isPointerTy())
           return;
         RHS = getUMaxExpr(RHS, One);
-        LLVM_FALLTHROUGH;
+        [[fallthrough]];
       case CmpInst::ICMP_SLT: {
         RHS = getMinusSCEV(RHS, One);
         RHS = DividesBy ? GetPreviousSCEVDividesByDivisor(RHS, DividesBy) : RHS;

@@ -1551,8 +1551,10 @@ void Instruction::addAnnotationMetadata(SmallVector<StringRef> Annotations) {
   if (Existing) {
     auto *Tuple = cast<MDTuple>(Existing);
     for (auto &N : Tuple->operands()) {
-      if (isa<MDString>(N.get()))
+      if (isa<MDString>(N.get())) {
+        Names.push_back(N);
         continue;
+      }
       auto *MDAnnotationTuple = cast<MDTuple>(N);
       if (any_of(MDAnnotationTuple->operands(), [&AnnotationsSet](auto &Op) {
             return AnnotationsSet.contains(cast<MDString>(Op)->getString());
@@ -1610,6 +1612,11 @@ void Instruction::setAAMetadata(const AAMDNodes &N) {
   setMetadata(LLVMContext::MD_tbaa_struct, N.TBAAStruct);
   setMetadata(LLVMContext::MD_alias_scope, N.Scope);
   setMetadata(LLVMContext::MD_noalias, N.NoAlias);
+}
+
+void Instruction::setNoSanitizeMetadata() {
+  setMetadata(llvm::LLVMContext::MD_nosanitize,
+              llvm::MDNode::get(getContext(), std::nullopt));
 }
 
 MDNode *Instruction::getMetadataImpl(unsigned KindID) const {

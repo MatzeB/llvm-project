@@ -14,6 +14,7 @@
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/InitAllDialects.h"
+#include "mlir/InitAllExtensions.h"
 #include "mlir/InitAllPasses.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
@@ -31,6 +32,7 @@ using namespace mlir;
 namespace mlir {
 void registerConvertToTargetEnvPass();
 void registerCloneTestPasses();
+void registerLazyLoadingTestPasses();
 void registerPassManagerTestPass();
 void registerPrintSpirvAvailabilityPass();
 void registerLoopLikeInterfaceTestPasses();
@@ -52,6 +54,7 @@ void registerTestOperationEqualPass();
 void registerTestPrintDefUsePass();
 void registerTestPrintInvalidPass();
 void registerTestPrintNestingPass();
+void registerTestPreserveUseListOrders();
 void registerTestReducer();
 void registerTestSpirvEntryPointABIPass();
 void registerTestSpirvModuleCombinerPass();
@@ -146,6 +149,7 @@ void registerTestPasses() {
   registerConvertToTargetEnvPass();
   registerPassManagerTestPass();
   registerPrintSpirvAvailabilityPass();
+  registerLazyLoadingTestPasses();
   registerLoopLikeInterfaceTestPasses();
   registerShapeFunctionTestPasses();
   registerSideEffectTestPasses();
@@ -165,6 +169,7 @@ void registerTestPasses() {
   registerTestPrintDefUsePass();
   registerTestPrintInvalidPass();
   registerTestPrintNestingPass();
+  registerTestPreserveUseListOrders();
   registerTestReducer();
   registerTestSpirvEntryPointABIPass();
   registerTestSpirvModuleCombinerPass();
@@ -255,6 +260,8 @@ int main(int argc, char **argv) {
 #endif
   DialectRegistry registry;
   registerAllDialects(registry);
+  registerAllExtensions(registry);
+
 #ifdef MLIR_INCLUDE_TESTS
   ::test::registerTestDialect(registry);
   ::test::registerTestTransformDialectExtension(registry);

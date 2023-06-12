@@ -23,8 +23,11 @@
 #include "clang-c/FatalErrorHandler.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclObjCCommon.h"
+#include "clang/AST/Expr.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/Mangle.h"
 #include "clang/AST/OpenMPClause.h"
+#include "clang/AST/OperationKinds.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/DiagnosticCategories.h"
@@ -3796,14 +3799,15 @@ enum CXErrorCode clang_createTranslationUnit2(CXIndex CIdx,
 
   CIndexer *CXXIdx = static_cast<CIndexer *>(CIdx);
   FileSystemOptions FileSystemOpts;
+  auto HSOpts = std::make_shared<HeaderSearchOptions>();
 
   IntrusiveRefCntPtr<DiagnosticsEngine> Diags =
       CompilerInstance::createDiagnostics(new DiagnosticOptions());
   std::unique_ptr<ASTUnit> AU = ASTUnit::LoadFromASTFile(
       ast_filename, CXXIdx->getPCHContainerOperations()->getRawReader(),
-      ASTUnit::LoadEverything, Diags, FileSystemOpts, /*UseDebugInfo=*/false,
-      CXXIdx->getOnlyLocalDecls(), CaptureDiagsKind::All,
-      /*AllowASTWithCompilerErrors=*/true,
+      ASTUnit::LoadEverything, Diags, FileSystemOpts, HSOpts,
+      /*UseDebugInfo=*/false, CXXIdx->getOnlyLocalDecls(),
+      CaptureDiagsKind::All, /*AllowASTWithCompilerErrors=*/true,
       /*UserFilesAreVolatile=*/true);
   *out_TU = MakeCXTranslationUnit(CXXIdx, std::move(AU));
   return *out_TU ? CXError_Success : CXError_Failure;
@@ -8798,7 +8802,8 @@ CXModule clang_getModuleForFile(CXTranslationUnit TU, CXFile File) {
 
   ASTUnit &Unit = *cxtu::getASTUnit(TU);
   HeaderSearch &HS = Unit.getPreprocessor().getHeaderSearchInfo();
-  ModuleMap::KnownHeader Header = HS.findModuleForHeader(FE);
+  // TODO: Make CXFile a FileEntryRef.
+  ModuleMap::KnownHeader Header = HS.findModuleForHeader(FE->getLastRef());
 
   return Header.getModule();
 }
@@ -9601,4 +9606,39 @@ cxindex::Logger::~Logger() {
     llvm::sys::PrintStackTrace(OS);
     OS << "--------------------------------------------------\n";
   }
+}
+
+CXString clang_getBinaryOperatorKindSpelling(enum CXBinaryOperatorKind kind) {
+  return cxstring::createRef(
+      BinaryOperator::getOpcodeStr(static_cast<BinaryOperatorKind>(kind - 1)));
+}
+
+enum CXBinaryOperatorKind clang_getCursorBinaryOperatorKind(CXCursor cursor) {
+  if (clang_isExpression(cursor.kind)) {
+    const Expr *expr = getCursorExpr(cursor);
+
+    if (const auto *op = dyn_cast<BinaryOperator>(expr))
+      return static_cast<CXBinaryOperatorKind>(op->getOpcode() + 1);
+
+    if (const auto *op = dyn_cast<CXXRewrittenBinaryOperator>(expr))
+      return static_cast<CXBinaryOperatorKind>(op->getOpcode() + 1);
+  }
+
+  return CXBinaryOperator_Invalid;
+}
+
+CXString clang_getUnaryOperatorKindSpelling(enum CXUnaryOperatorKind kind) {
+  return cxstring::createRef(
+      UnaryOperator::getOpcodeStr(static_cast<UnaryOperatorKind>(kind - 1)));
+}
+
+enum CXUnaryOperatorKind clang_getCursorUnaryOperatorKind(CXCursor cursor) {
+  if (clang_isExpression(cursor.kind)) {
+    const Expr *expr = getCursorExpr(cursor);
+
+    if (const auto *op = dyn_cast<UnaryOperator>(expr))
+      return static_cast<CXUnaryOperatorKind>(op->getOpcode() + 1);
+  }
+
+  return CXUnaryOperator_Invalid;
 }

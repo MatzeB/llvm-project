@@ -77,6 +77,10 @@ public:
     return TTI::TCC_Expensive;
   }
 
+  uint64_t getMaxMemIntrinsicInlineSizeThreshold() const {
+    return 64;
+  }
+
   // Although this default value is arbitrary, it is not random. It is assumed
   // that a condition that evaluates the same way by a higher percentage than
   // this is best represented as control flow. Therefore, the default value N
@@ -1041,6 +1045,7 @@ public:
   InstructionCost getPointersChainCost(ArrayRef<const Value *> Ptrs,
                                        const Value *Base,
                                        const TTI::PointersChainInfo &Info,
+                                       Type *AccessTy,
                                        TTI::TargetCostKind CostKind) {
     InstructionCost Cost = TTI::TCC_Free;
     // In the basic model we take into account GEP instructions only

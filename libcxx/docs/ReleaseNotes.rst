@@ -43,6 +43,7 @@ Implemented Papers
 - P2675R1 - ``format``'s width estimation is too approximate and not forward compatible
 - P2505R5 - Monadic operations for ``std::expected``
 - P2711R1 - Making Multi-Param Constructors Of views explicit (``join_with_view`` is not done yet)
+- P2572R1 - ``std::format`` fill character allowances
 
 Improvements and New Features
 -----------------------------
@@ -58,6 +59,11 @@ Improvements and New Features
 - `D122780 <https://reviews.llvm.org/D122780>`_ Improved the performance of ``std::sort`` and ``std::ranges::sort``
   by up to 50% for arithmetic types and by approximately 10% for other types.
 
+- The ``<format>`` header is no longer considered experimental. Some
+  ``std::formatter`` specializations are not yet available since the class used
+  in the specialization has not been implemented in libc++. This prevents the
+  feature-test macro to be set.
+
 Deprecations and Removals
 -------------------------
 
@@ -69,15 +75,15 @@ Deprecations and Removals
   includes are removed based on the language version used. Incidental transitive
   inclusions of the following headers have been removed:
 
-  - C++2b: ``atomic``, ``bit``, ``cstdint``, ``cstdlib``, ``cstring``, ``initializer_list``, ``limits``, ``new``,
+  - C++23: ``atomic``, ``bit``, ``cstdint``, ``cstdlib``, ``cstring``, ``initializer_list``, ``limits``, ``new``,
            ``stdexcept``, ``system_error``, ``type_traits``, ``typeinfo``
 
-- ``<algorithm>`` no longer includes ``<chrono>`` in any C++ version (it was prevously included in C++17 and earlier).
+- ``<algorithm>`` no longer includes ``<chrono>`` in any C++ version (it was previously included in C++17 and earlier).
 
-- ``<string>`` no longer includes ``<vector>`` in any C++ version (it was prevously included in C++20 and earlier).
+- ``<string>`` no longer includes ``<vector>`` in any C++ version (it was previously included in C++20 and earlier).
 
 - ``<string>``, ``<string_view>``, and ``<mutex>`` no longer include ``<functional>``
-  in any C++ version (it was prevously included in C++20 and earlier).
+  in any C++ version (it was previously included in C++20 and earlier).
 
 - The headers ``<experimental/algorithm>`` and ``<experimental/functional>`` have been removed, since all the contents
   have been implemented in namespace ``std`` for at least two releases.
@@ -99,8 +105,23 @@ Deprecations and Removals
 
 - The ``_LIBCPP_ABI_OLD_LOGNORMAL_DISTRIBUTION`` macro has been removed.
 
+- The classes ``strstreambuf`` , ``istrstream``, ``ostrstream``, and ``strstream`` have been deprecated.
+  They have been deprecated in the Standard since C++98, but were never marked as deprecated in libc++.
+
 Upcoming Deprecations and Removals
 ----------------------------------
+
+LLVM 18
+~~~~~~~
+
+- The base template for ``std::char_traits`` has been marked as deprecated and
+  will be removed in LLVM 18. If you are using ``std::char_traits`` with types
+  other than ``char``, ``wchar_t``, ``char8_t``, ``char16_t``, ``char32_t`` or
+  a custom character type for which you specialized ``std::char_traits``, your code
+  will stop working when we remove the base template. The Standard does not
+  mandate that a base template is provided, and such a base template is bound
+  to be incorrect for some types, which could currently cause unexpected
+  behavior while going undetected.
 
 - The ``_LIBCPP_AVAILABILITY_CUSTOM_VERBOSE_ABORT_PROVIDED`` macro will not be honored anymore in LLVM 18.
   Please see the updated documentation about the safe libc++ mode and in particular the ``_LIBCPP_VERBOSE_ABORT``
@@ -132,3 +153,11 @@ Build System Changes
 - Building libc++ and libc++abi for Apple platforms now requires targeting macOS 10.13 and later.
   This is relevant for vendors building the libc++ shared library and for folks statically linking
   libc++ into an application that has back-deployment requirements on Apple platforms.
+
+- ``LIBCXX_ENABLE_FILESYSTEM`` now represents whether a filesystem is supported on the platform instead
+  of representing merely whether ``<filesystem>`` should be provided. This means that vendors building
+  with ``LIBCXX_ENABLE_FILESYSTEM=OFF`` will now also get ``<fstream>`` excluded from their configuration
+  of the library.
+
+- ``LIBCXX_ENABLE_FSTREAM`` is not supported anymore, please use ``LIBCXX_ENABLE_FILESYSTEM=OFF`` if your
+  platform does not have support for a filesystem.

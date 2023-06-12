@@ -1947,7 +1947,7 @@ bool Parser::TryAnnotateTypeOrScopeToken(
   assert((Tok.is(tok::identifier) || Tok.is(tok::coloncolon) ||
           Tok.is(tok::kw_typename) || Tok.is(tok::annot_cxxscope) ||
           Tok.is(tok::kw_decltype) || Tok.is(tok::annot_template_id) ||
-          Tok.is(tok::kw___super)) &&
+          Tok.is(tok::kw___super) || Tok.is(tok::kw_auto)) &&
          "Cannot be a type or scope token!");
 
   if (Tok.is(tok::kw_typename)) {
@@ -2461,6 +2461,7 @@ Parser::ParseModuleDecl(Sema::ModuleImportState &ImportState) {
   ParsedAttributes Attrs(AttrFactory);
   MaybeParseCXX11Attributes(Attrs);
   ProhibitCXX11Attributes(Attrs, diag::err_attribute_not_module_attr,
+                          diag::err_keyword_not_module_attr,
                           /*DiagnoseEmptyAttrs=*/false,
                           /*WarnOnUnknownAttrs=*/true);
 
@@ -2530,6 +2531,7 @@ Decl *Parser::ParseModuleImport(SourceLocation AtLoc,
   MaybeParseCXX11Attributes(Attrs);
   // We don't support any module import attributes yet.
   ProhibitCXX11Attributes(Attrs, diag::err_attribute_not_import_attr,
+                          diag::err_keyword_not_import_attr,
                           /*DiagnoseEmptyAttrs=*/false,
                           /*WarnOnUnknownAttrs=*/true);
 

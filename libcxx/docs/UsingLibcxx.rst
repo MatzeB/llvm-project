@@ -173,7 +173,7 @@ that this function is provided by the static or shared library, so it is only av
 to a platform where the compiled library is sufficiently recent. On older platforms, the program will
 terminate in an unspecified unsuccessful manner, but the quality of diagnostics won't be great.
 However, users can also override that mechanism at two different levels. First, the mechanism can be
-overriden at compile-time by defining the ``_LIBCPP_VERBOSE_ABORT(format, args...)`` variadic macro.
+overridden at compile-time by defining the ``_LIBCPP_VERBOSE_ABORT(format, args...)`` variadic macro.
 When that macro is defined, it will be called with a format string as the first argument, followed by
 a series of arguments to format using printf-style formatting. Compile-time customization may be
 interesting to get precise control over code generation, however it is also inconvenient to use in
@@ -380,18 +380,30 @@ which no dialect declares as such (See the second form described above).
 * ``adjacent_find``
 * ``all_of``
 * ``any_of``
+* ``as_const``
 * ``binary_search``
+* ``bit_cast``
+* ``cbrt``
+* ``ceil``
 * ``clamp``
+* ``copysign``
 * ``count_if``
 * ``count``
 * ``equal_range``
 * ``equal``
+* ``fabs``
 * ``find_end``
 * ``find_first_of``
 * ``find_if_not``
 * ``find_if``
 * ``find``
+* ``floor``
+* ``fmax``
+* ``fmin``
+* ``forward``
+* ``fpclassify``
 * ``get_temporary_buffer``
+* ``identity::operator()``
 * ``includes``
 * ``is_heap_until``
 * ``is_heap``
@@ -399,8 +411,21 @@ which no dialect declares as such (See the second form described above).
 * ``is_permutation``
 * ``is_sorted_until``
 * ``is_sorted``
+* ``isfinite``
+* ``isgreater``
+* ``isgreaterequal``
+* ``isinf``
+* ``isless``
+* ``islessequal``
+* ``islessgreater``
+* ``isnan``
+* ``isnormal``
+* ``isunordered``
 * ``lexicographical_compare``
+* ``lock_guard``'s constructors
 * ``lower_bound``
+* ``make_format_args``
+* ``make_wformat_args``
 * ``max_element``
 * ``max``
 * ``min_element``
@@ -408,13 +433,10 @@ which no dialect declares as such (See the second form described above).
 * ``minmax_element``
 * ``minmax``
 * ``mismatch``
+* ``move_if_noexcept``
+* ``move``
+* ``nearbyint``
 * ``none_of``
-* ``remove_if``
-* ``remove``
-* ``search_n``
-* ``search``
-* ``unique``
-* ``upper_bound``
 * ``ranges::adjacent_find``
 * ``ranges::all_of``
 * ``ranges::any_of``
@@ -453,38 +475,19 @@ which no dialect declares as such (See the second form described above).
 * ``ranges::search``
 * ``ranges::unique``
 * ``ranges::upper_bound``
-* ``lock_guard``'s constructors
-* ``as_const``
-* ``bit_cast``
-* ``forward``
-* ``move``
-* ``move_if_noexcept``
-* ``identity::operator()``
-* ``to_integer``
-* ``to_underlying``
-* ``signbit``
-* ``fpclassify``
-* ``isfinite``
-* ``isinf``
-* ``isnan``
-* ``isnormal``
-* ``isgreater``
-* ``isgreaterequal``
-* ``isless``
-* ``islessequal``
-* ``islessgreater``
-* ``isunordered``
-* ``ceil``
-* ``fabs``
-* ``floor``
-* ``cbrt``
-* ``copysign``
-* ``fmax``
-* ``fmin``
-* ``nearbyint``
+* ``remove_if``
+* ``remove``
 * ``rint``
 * ``round``
+* ``search_n``
+* ``search``
+* ``signbit``
+* ``to_integer``
+* ``to_underlying``
 * ``trunc``
+* ``unique``
+* ``upper_bound``
+* ``vformat``
 
 Extended integral type support
 ------------------------------
@@ -552,3 +555,26 @@ Unpoisoning may not be an option, if (for example) you are not maintaining the a
 
 * You are using allocator, which does not call destructor during deallocation.
 * You are aware that memory allocated with an allocator may be accessed, even when unused by container.
+
+Platform specific behavior
+==========================
+
+Windows
+-------
+
+The ``stdout``, ``stderr``, and ``stdin`` file streams can be placed in
+Unicode mode by a suitable call to ``_setmode()``. When in this mode,
+the sequence of bytes read from, or written to, these streams is interpreted
+as a sequence of little-endian ``wchar_t`` elements. Thus, use of
+``std::cout``, ``std::cerr``, or ``std::cin`` with streams in Unicode mode
+will not behave as they usually do since bytes read or written won't be
+interpreted as individual ``char`` elements. However, ``std::wcout``,
+``std::wcerr``, and ``std::wcin`` will behave as expected.
+
+Wide character stream such as ``std::wcin`` or ``std::wcout`` imbued with a
+locale behave differently than they otherwise do. By default, wide character
+streams don't convert wide characters but input/output them as is. If a
+specific locale is imbued, the IO with the underlying stream happens with
+regular ``char`` elements, which are converted to/from wide characters
+according to the locale. Note that this doesn't behave as expected if the
+stream has been set in Unicode mode.

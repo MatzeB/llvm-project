@@ -93,6 +93,7 @@ class X86TTIImpl : public BasicTTIImplBase<X86TTIImpl> {
       X86::TuningNoDomainDelayShuffle,
       X86::TuningNoDomainDelayBlend,
       X86::TuningPreferShiftShuffle,
+      X86::TuningFastImmVectorShift,
 
       // Perf-tuning flags.
       X86::TuningFastGather,
@@ -180,6 +181,7 @@ public:
   InstructionCost getPointersChainCost(ArrayRef<const Value *> Ptrs,
                                        const Value *Base,
                                        const TTI::PointersChainInfo &Info,
+                                       Type *AccessTy,
                                        TTI::TargetCostKind CostKind);
   InstructionCost getAddressComputationCost(Type *PtrTy, ScalarEvolution *SE,
                                             const SCEV *Ptr);
@@ -272,6 +274,11 @@ public:
                            const Function *Callee) const;
   bool areTypesABICompatible(const Function *Caller, const Function *Callee,
                              const ArrayRef<Type *> &Type) const;
+
+  uint64_t getMaxMemIntrinsicInlineSizeThreshold() const {
+    return ST->getMaxInlineSizeThreshold();
+  }
+
   TTI::MemCmpExpansionOptions enableMemCmpExpansion(bool OptSize,
                                                     bool IsZeroCmp) const;
   bool prefersVectorizedAddressing() const;

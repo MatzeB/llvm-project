@@ -127,6 +127,17 @@ void Prescanner::Statement() {
       } else {
         SkipSpaces();
       }
+    } else if (directiveSentinel_[0] == '@' && directiveSentinel_[1] == 'c' &&
+        directiveSentinel_[2] == 'u' && directiveSentinel_[3] == 'f' &&
+        directiveSentinel_[4] == '\0') {
+      // CUDA conditional compilation line.  Remove the sentinel and then
+      // treat the line as if it were normal source.
+      at_ += 5, column_ += 5;
+      if (inFixedForm_) {
+        LabelField(tokens);
+      } else {
+        SkipSpaces();
+      }
     } else {
       // Compiler directive.  Emit normalized sentinel.
       EmitChar(tokens, '!');
@@ -777,8 +788,23 @@ bool Prescanner::PadOutCharacterLiteral(TokenSequence &tokens) {
   return false;
 }
 
+static bool IsAtProcess(const char *p) {
+  static const char pAtProc[]{"process"};
+  for (std::size_t i{0}; i < sizeof pAtProc - 1; ++i) {
+    if (ToLowerCaseLetter(*++p) != pAtProc[i])
+      return false;
+  }
+  return true;
+}
+
 bool Prescanner::IsFixedFormCommentLine(const char *start) const {
   const char *p{start};
+
+  // The @process directive must start in column 1.
+  if (*p == '@' && IsAtProcess(p)) {
+    return true;
+  }
+
   if (IsFixedFormCommentChar(*p) || *p == '%' || // VAX %list, %eject, &c.
       ((*p == 'D' || *p == 'd') &&
           !features_.IsEnabled(LanguageFeature::OldDebugLines))) {
@@ -810,6 +836,8 @@ const char *Prescanner::IsFreeFormComment(const char *p) const {
   p = SkipWhiteSpaceAndCComments(p);
   if (*p == '!' || *p == '\n') {
     return p;
+  } else if (*p == '@') {
+    return IsAtProcess(p) ? p : nullptr;
   } else {
     return nullptr;
   }

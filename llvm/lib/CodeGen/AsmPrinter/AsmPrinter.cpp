@@ -541,7 +541,7 @@ bool AsmPrinter::doInitialization(Module &M) {
         break;
     }
     assert(MAI->getExceptionHandlingType() == ExceptionHandling::DwarfCFI ||
-           ModuleCFISection != CFISection::EH);
+           usesCFIWithoutEH() || ModuleCFISection != CFISection::EH);
     break;
   default:
     break;
@@ -550,7 +550,7 @@ bool AsmPrinter::doInitialization(Module &M) {
   EHStreamer *ES = nullptr;
   switch (MAI->getExceptionHandlingType()) {
   case ExceptionHandling::None:
-    if (!needsCFIForDebug())
+    if (!usesCFIWithoutEH())
       break;
     [[fallthrough]];
   case ExceptionHandling::SjLj:
@@ -971,6 +971,16 @@ void AsmPrinter::emitFunctionHeader() {
     CurrentPatchableFunctionEntrySym = CurrentFnBegin;
   }
 
+  // Emit the function prologue data for the indirect call sanitizer.
+  if (const MDNode *MD = F.getMetadata(LLVMContext::MD_func_sanitize)) {
+    assert(MD->getNumOperands() == 2);
+
+    auto *PrologueSig = mdconst::extract<Constant>(MD->getOperand(0));
+    auto *TypeHash = mdconst::extract<Constant>(MD->getOperand(1));
+    emitGlobalConstant(F.getParent()->getDataLayout(), PrologueSig);
+    emitGlobalConstant(F.getParent()->getDataLayout(), TypeHash);
+  }
+
   if (isVerbose()) {
     F.printAsOperand(OutStreamer->getCommentOS(),
                      /*PrintType=*/false, F.getParent());
@@ -1025,24 +1035,6 @@ void AsmPrinter::emitFunctionHeader() {
   // Emit the prologue data.
   if (F.hasPrologueData())
     emitGlobalConstant(F.getParent()->getDataLayout(), F.getPrologueData());
-
-  // Emit the function prologue data for the indirect call sanitizer.
-  if (const MDNode *MD = F.getMetadata(LLVMContext::MD_func_sanitize)) {
-    assert(TM.getTargetTriple().getArch() == Triple::x86 ||
-           TM.getTargetTriple().getArch() == Triple::x86_64);
-    assert(MD->getNumOperands() == 2);
-
-    auto *PrologueSig = mdconst::extract<Constant>(MD->getOperand(0));
-    auto *FTRTTIProxy = mdconst::extract<Constant>(MD->getOperand(1));
-    assert(PrologueSig && FTRTTIProxy);
-    emitGlobalConstant(F.getParent()->getDataLayout(), PrologueSig);
-
-    const MCExpr *Proxy = lowerConstant(FTRTTIProxy);
-    const MCExpr *FnExp = MCSymbolRefExpr::create(CurrentFnSym, OutContext);
-    const MCExpr *PCRel = MCBinaryExpr::createSub(Proxy, FnExp, OutContext);
-    // Use 32 bit since only small code model is supported.
-    OutStreamer->emitValue(PCRel, 4u);
-  }
 }
 
 /// EmitFunctionEntryLabel - Emit the label that is the entrypoint for the
@@ -1274,6 +1266,9 @@ AsmPrinter::getFunctionCFISectionType(const Function &F) const {
       F.needsUnwindTableEntry())
     return CFISection::EH;
 
+  if (MAI->usesCFIWithoutEH() && F.hasUWTable())
+    return CFISection::EH;
+
   assert(MMI != nullptr && "Invalid machine module info");
   if (MMI->hasDebugInfo() || TM.Options.ForceDwarfFrameSection)
     return CFISection::Debug;
@@ -1290,14 +1285,13 @@ bool AsmPrinter::needsSEHMoves() {
   return MAI->usesWindowsCFI() && MF->getFunction().needsUnwindTableEntry();
 }
 
-bool AsmPrinter::needsCFIForDebug() const {
-  return MAI->getExceptionHandlingType() == ExceptionHandling::None &&
-         MAI->doesUseCFIForDebug() && ModuleCFISection == CFISection::Debug;
+bool AsmPrinter::usesCFIWithoutEH() const {
+  return MAI->usesCFIWithoutEH() && ModuleCFISection != CFISection::None;
 }
 
 void AsmPrinter::emitCFIInstruction(const MachineInstr &MI) {
   ExceptionHandling ExceptionHandlingType = MAI->getExceptionHandlingType();
-  if (!needsCFIForDebug() &&
+  if (!usesCFIWithoutEH() &&
       ExceptionHandlingType != ExceptionHandling::DwarfCFI &&
       ExceptionHandlingType != ExceptionHandling::ARM)
     return;
@@ -1338,7 +1332,8 @@ static uint32_t getBBAddrMapMetadata(const MachineBasicBlock &MBB) {
   const TargetInstrInfo *TII = MBB.getParent()->getSubtarget().getInstrInfo();
   return object::BBAddrMap::BBEntry::Metadata{
       MBB.isReturnBlock(), !MBB.empty() && TII->isTailCall(MBB.back()),
-      MBB.isEHPad(), const_cast<MachineBasicBlock &>(MBB).canFallThrough()}
+      MBB.isEHPad(), const_cast<MachineBasicBlock &>(MBB).canFallThrough(),
+      !MBB.empty() && MBB.rbegin()->isIndirectBranch()}
       .encode();
 }
 
@@ -4016,14 +4011,14 @@ void AsmPrinter::emitXRayTable() {
                                        Flags, 0, GroupName, F.hasComdat(),
                                        MCSection::NonUniqueID, LinkedToSym);
 
-    if (!TM.Options.XRayOmitFunctionIndex)
+    if (TM.Options.XRayFunctionIndex)
       FnSledIndex = OutContext.getELFSection(
           "xray_fn_idx", ELF::SHT_PROGBITS, Flags | ELF::SHF_WRITE, 0,
           GroupName, F.hasComdat(), MCSection::NonUniqueID, LinkedToSym);
   } else if (MF->getSubtarget().getTargetTriple().isOSBinFormatMachO()) {
     InstMap = OutContext.getMachOSection("__DATA", "xray_instr_map", 0,
                                          SectionKind::getReadOnlyWithRel());
-    if (!TM.Options.XRayOmitFunctionIndex)
+    if (TM.Options.XRayFunctionIndex)
       FnSledIndex = OutContext.getMachOSection(
           "__DATA", "xray_fn_idx", 0, SectionKind::getReadOnlyWithRel());
   } else {

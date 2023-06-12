@@ -332,6 +332,18 @@ public:
   static KnownBits computeForAddSub(bool Add, bool NSW, const KnownBits &LHS,
                                     KnownBits RHS);
 
+  /// Compute knownbits resulting from llvm.sadd.sat(LHS, RHS)
+  static KnownBits sadd_sat(const KnownBits &LHS, const KnownBits &RHS);
+
+  /// Compute knownbits resulting from llvm.uadd.sat(LHS, RHS)
+  static KnownBits uadd_sat(const KnownBits &LHS, const KnownBits &RHS);
+
+  /// Compute knownbits resulting from llvm.ssub.sat(LHS, RHS)
+  static KnownBits ssub_sat(const KnownBits &LHS, const KnownBits &RHS);
+
+  /// Compute knownbits resulting from llvm.usub.sat(LHS, RHS)
+  static KnownBits usub_sat(const KnownBits &LHS, const KnownBits &RHS);
+
   /// Compute known bits resulting from multiplying LHS and RHS.
   static KnownBits mul(const KnownBits &LHS, const KnownBits &RHS,
                        bool NoUndefSelfMultiply = false);
@@ -370,15 +382,19 @@ public:
 
   /// Compute known bits for shl(LHS, RHS).
   /// NOTE: RHS (shift amount) bitwidth doesn't need to be the same as LHS.
-  static KnownBits shl(const KnownBits &LHS, const KnownBits &RHS);
+  static KnownBits shl(const KnownBits &LHS, const KnownBits &RHS,
+                       bool NUW = false, bool NSW = false,
+                       bool ShAmtNonZero = false);
 
   /// Compute known bits for lshr(LHS, RHS).
   /// NOTE: RHS (shift amount) bitwidth doesn't need to be the same as LHS.
-  static KnownBits lshr(const KnownBits &LHS, const KnownBits &RHS);
+  static KnownBits lshr(const KnownBits &LHS, const KnownBits &RHS,
+                        bool ShAmtNonZero = false);
 
   /// Compute known bits for ashr(LHS, RHS).
   /// NOTE: RHS (shift amount) bitwidth doesn't need to be the same as LHS.
-  static KnownBits ashr(const KnownBits &LHS, const KnownBits &RHS);
+  static KnownBits ashr(const KnownBits &LHS, const KnownBits &RHS,
+                        bool ShAmtNonZero = false);
 
   /// Determine if these known bits always give the same ICMP_EQ result.
   static std::optional<bool> eq(const KnownBits &LHS, const KnownBits &RHS);

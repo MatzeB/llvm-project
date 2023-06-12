@@ -531,6 +531,11 @@ DIE &DwarfCompileUnit::updateSubprogramScopeDIEImpl(const DISubprogram *SP,
     case TargetFrameLowering::DwarfFrameBase::CFA: {
       DIELoc *Loc = new (DIEValueAllocator) DIELoc;
       addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_call_frame_cfa);
+      if (FrameBase.Location.Offset != 0) {
+        addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_consts);
+        addSInt(*Loc, dwarf::DW_FORM_sdata, FrameBase.Location.Offset);
+        addUInt(*Loc, dwarf::DW_FORM_data1, dwarf::DW_OP_plus);
+      }
       addBlock(*SPDie, dwarf::DW_AT_frame_base, Loc);
       break;
     }
@@ -1394,8 +1399,8 @@ void DwarfCompileUnit::createAbstractEntity(const DINode *Node,
   assert(Scope && Scope->isAbstractScope());
   auto &Entity = getAbstractEntities()[Node];
   if (isa<const DILocalVariable>(Node)) {
-    Entity = std::make_unique<DbgVariable>(
-                        cast<const DILocalVariable>(Node), nullptr /* IA */);;
+    Entity = std::make_unique<DbgVariable>(cast<const DILocalVariable>(Node),
+                                           nullptr /* IA */);
     DU->addScopeVariable(Scope, cast<DbgVariable>(Entity.get()));
   } else if (isa<const DILabel>(Node)) {
     Entity = std::make_unique<DbgLabel>(

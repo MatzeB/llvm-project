@@ -9,6 +9,7 @@
 #ifndef LLVM_LIBC_SRC_SUPPORT_RPC_RPC_UTILS_H
 #define LLVM_LIBC_SRC_SUPPORT_RPC_RPC_UTILS_H
 
+#include "src/__support/CPP/type_traits.h"
 #include "src/__support/GPU/utils.h"
 #include "src/__support/macros/attributes.h"
 #include "src/__support/macros/properties/architectures.h"
@@ -22,7 +23,7 @@ constexpr uint64_t MAX_LANE_SIZE = 64;
 /// Suspend the thread briefly to assist the thread scheduler during busy loops.
 LIBC_INLINE void sleep_briefly() {
 #if defined(LIBC_TARGET_ARCH_IS_NVPTX) && __CUDA_ARCH__ >= 700
-  asm("nanosleep.u32 64;" ::: "memory");
+  LIBC_INLINE_ASM("nanosleep.u32 64;" ::: "memory");
 #elif defined(LIBC_TARGET_ARCH_IS_AMDGPU)
   __builtin_amdgcn_s_sleep(2);
 #else
@@ -69,9 +70,13 @@ template <typename T> LIBC_INLINE const T &max(const T &x, const T &y) {
   return x < y ? y : x;
 }
 
-/// Advance the \p ptr by \p bytes.
-template <typename T, typename U> LIBC_INLINE T *advance(T ptr, U bytes) {
-  return reinterpret_cast<T *>(reinterpret_cast<uint8_t *>(ptr) + bytes);
+/// Advance the \p p by \p bytes.
+template <typename T, typename U> LIBC_INLINE T *advance(T *ptr, U bytes) {
+  if constexpr (cpp::is_const_v<T>)
+    return reinterpret_cast<T *>(reinterpret_cast<const uint8_t *>(ptr) +
+                                 bytes);
+  else
+    return reinterpret_cast<T *>(reinterpret_cast<uint8_t *>(ptr) + bytes);
 }
 
 } // namespace rpc

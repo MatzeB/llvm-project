@@ -17,7 +17,6 @@
 #include "mlir/Dialect/SparseTensor/IR/SparseTensorStorageLayout.h"
 #include "mlir/Dialect/SparseTensor/IR/SparseTensorType.h"
 #include "mlir/Dialect/SparseTensor/Transforms/Passes.h"
-#include "mlir/Transforms/DialectConversion.h"
 
 namespace mlir {
 namespace sparse_tensor {
@@ -157,6 +156,7 @@ public:
 
   RankedTensorType getRankedTensorType() const { return rType; }
   ValueArrayRef getFields() const { return fields; }
+  StorageLayout getLayout() const { return layout; }
 
 protected:
   SparseTensorType rType;

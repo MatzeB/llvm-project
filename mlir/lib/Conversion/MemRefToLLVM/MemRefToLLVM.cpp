@@ -85,13 +85,15 @@ private:
 struct AllocaOpLowering : public AllocLikeOpLLVMLowering {
   AllocaOpLowering(LLVMTypeConverter &converter)
       : AllocLikeOpLLVMLowering(memref::AllocaOp::getOperationName(),
-                                converter) {}
+                                converter) {
+    setRequiresNumElements();
+  }
 
   /// Allocates the underlying buffer using the right call. `allocatedBytePtr`
   /// is set to null for stack allocations. `accessAlignment` is set if
   /// alignment is needed post allocation (for eg. in conjunction with malloc).
   std::tuple<Value, Value> allocateBuffer(ConversionPatternRewriter &rewriter,
-                                          Location loc, Value sizeBytes,
+                                          Location loc, Value size,
                                           Operation *op) const override {
 
     // With alloca, one gets a pointer to the element type right away.
@@ -104,9 +106,9 @@ struct AllocaOpLowering : public AllocLikeOpLLVMLowering {
     auto elementPtrType =
         getTypeConverter()->getPointerType(elementType, addrSpace);
 
-    auto allocatedElementPtr = rewriter.create<LLVM::AllocaOp>(
-        loc, elementPtrType, elementType, sizeBytes,
-        allocaOp.getAlignment().value_or(0));
+    auto allocatedElementPtr =
+        rewriter.create<LLVM::AllocaOp>(loc, elementPtrType, elementType, size,
+                                        allocaOp.getAlignment().value_or(0));
 
     return std::make_tuple(allocatedElementPtr, allocatedElementPtr);
   }
@@ -215,8 +217,6 @@ struct ReallocOpLoweringBase : public AllocationOpLLVMLowering {
         allocateBuffer(rewriter, loc, dstByteSize, op);
     // Copy the data from the old buffer to the new buffer.
     Value srcAlignedPtr = desc.alignedPtr(rewriter, loc);
-    Value isVolatile =
-        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getBoolAttr(false));
     auto toVoidPtr = [&](Value ptr) -> Value {
       if (getTypeConverter()->useOpaquePointers())
         return ptr;
@@ -224,7 +224,7 @@ struct ReallocOpLoweringBase : public AllocationOpLLVMLowering {
     };
     rewriter.create<LLVM::MemcpyOp>(loc, toVoidPtr(dstAlignedPtr),
                                     toVoidPtr(srcAlignedPtr), srcByteSize,
-                                    isVolatile);
+                                    /*isVolatile=*/false);
     // Deallocate the old buffer.
     LLVM::LLVMFuncOp freeFunc =
         getFreeFn(getTypeConverter(), op->getParentOfType<ModuleOp>());
@@ -669,7 +669,7 @@ struct GlobalMemrefOpLowering
 
     Attribute initialValue = nullptr;
     if (!global.isExternal() && !global.isUninitialized()) {
-      auto elementsAttr = global.getInitialValue()->cast<ElementsAttr>();
+      auto elementsAttr = llvm::cast<ElementsAttr>(*global.getInitialValue());
       initialValue = elementsAttr;
 
       // For scalar memrefs, the global variable created is of the element type,
@@ -802,14 +802,10 @@ struct PrefetchOpLowering : public LoadStoreOpLowering<memref::PrefetchOp> {
                                          adaptor.getIndices(), rewriter);
 
     // Replace with llvm.prefetch.
-    auto llvmI32Type = typeConverter->convertType(rewriter.getIntegerType(32));
-    auto isWrite = rewriter.create<LLVM::ConstantOp>(loc, llvmI32Type,
-                                                     prefetchOp.getIsWrite());
-    auto localityHint = rewriter.create<LLVM::ConstantOp>(
-        loc, llvmI32Type, prefetchOp.getLocalityHint());
-    auto isData = rewriter.create<LLVM::ConstantOp>(
-        loc, llvmI32Type, prefetchOp.getIsDataCache());
-
+    IntegerAttr isWrite = rewriter.getI32IntegerAttr(prefetchOp.getIsWrite());
+    IntegerAttr localityHint = prefetchOp.getLocalityHintAttr();
+    IntegerAttr isData =
+        rewriter.getI32IntegerAttr(prefetchOp.getIsDataCache());
     rewriter.replaceOpWithNewOp<LLVM::Prefetch>(prefetchOp, dataPtr, isWrite,
                                                 localityHint, isData);
     return success();
@@ -972,10 +968,8 @@ struct MemRefCopyOpLowering : public ConvertOpToLLVMPattern<memref::CopyOp> {
     Value targetOffset = targetDesc.offset(rewriter, loc);
     Value targetPtr = rewriter.create<LLVM::GEPOp>(
         loc, targetBasePtr.getType(), elementType, targetBasePtr, targetOffset);
-    Value isVolatile =
-        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getBoolAttr(false));
     rewriter.create<LLVM::MemcpyOp>(loc, targetPtr, srcPtr, totalSize,
-                                    isVolatile);
+                                    /*isVolatile=*/false);
     rewriter.eraseOp(op);
 
     return success();
@@ -1176,11 +1170,8 @@ struct MemorySpaceCastOpLowering
           loc, getIndexType(), rewriter.getIndexAttr(bytesToSkip));
       Value copySize = rewriter.create<LLVM::SubOp>(
           loc, getIndexType(), resultUnderlyingSize, bytesToSkipConst);
-      Type llvmBool = typeConverter->convertType(rewriter.getI1Type());
-      Value nonVolatile = rewriter.create<LLVM::ConstantOp>(
-          loc, llvmBool, rewriter.getBoolAttr(false));
       rewriter.create<LLVM::MemcpyOp>(loc, resultIndexVals, sourceIndexVals,
-                                      copySize, nonVolatile);
+                                      copySize, /*isVolatile=*/false);
 
       rewriter.replaceOp(op, ValueRange{result});
       return success();

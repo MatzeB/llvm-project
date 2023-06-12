@@ -69,7 +69,7 @@ translateDataLayout(DataLayoutSpecInterface attribute,
   std::string llvmDataLayout;
   llvm::raw_string_ostream layoutStream(llvmDataLayout);
   for (DataLayoutEntryInterface entry : attribute.getEntries()) {
-    auto key = entry.getKey().dyn_cast<StringAttr>();
+    auto key = llvm::dyn_cast_if_present<StringAttr>(entry.getKey());
     if (!key)
       continue;
     if (key.getValue() == DLTIDialect::kDataLayoutEndiannessKey) {
@@ -108,7 +108,7 @@ translateDataLayout(DataLayoutSpecInterface attribute,
   // specified in entries. Where possible, data layout queries are used instead
   // of directly inspecting the entries.
   for (DataLayoutEntryInterface entry : attribute.getEntries()) {
-    auto type = entry.getKey().dyn_cast<Type>();
+    auto type = llvm::dyn_cast_if_present<Type>(entry.getKey());
     if (!type)
       continue;
     // Data layout for the index type is irrelevant at this point.
@@ -341,6 +341,16 @@ llvm::Constant *mlir::LLVM::detail::getLLVMConstant(
     if (!imag)
       return nullptr;
     return llvm::ConstantStruct::get(structType, {real, imag});
+  }
+  if (auto *targetExtType = dyn_cast<::llvm::TargetExtType>(llvmType)) {
+    // TODO: Replace with 'zeroinitializer' once there is a dedicated
+    // zeroinitializer operation in the LLVM dialect.
+    auto intAttr = dyn_cast<IntegerAttr>(attr);
+    if (!intAttr || intAttr.getInt() != 0)
+      emitError(loc,
+                "Only zero-initialization allowed for target extension type");
+
+    return llvm::ConstantTargetNone::get(targetExtType);
   }
   // For integer types, we allow a mismatch in sizes as the index type in
   // MLIR might have a different size than the index type in the LLVM module.
@@ -578,7 +588,7 @@ mlir::LLVM::detail::getTopologicallySortedBlocks(Region &region) {
   return blocks;
 }
 
-llvm::Value *mlir::LLVM::detail::createIntrinsicCall(
+llvm::CallInst *mlir::LLVM::detail::createIntrinsicCall(
     llvm::IRBuilderBase &builder, llvm::Intrinsic::ID intrinsic,
     ArrayRef<llvm::Value *> args, ArrayRef<llvm::Type *> tys) {
   llvm::Module *module = builder.GetInsertBlock()->getModule();
@@ -741,22 +751,6 @@ LogicalResult ModuleTranslation::convertGlobals() {
         if (failed(convertOperation(op, builder)) ||
             !isa<llvm::Constant>(lookupValue(op.getResult(0))))
           return emitError(op.getLoc(), "unemittable constant value");
-        // When emitting an LLVM constant, a new constant is created and the old
-        // constant may become dangling and take space. We should remove the
-        // dangling constants to avoid memory explosion especially for constant
-        // arrays whose number of elements is large.
-        // TODO: handle ops other than InsertValueOp with ConstantArray.
-        if (auto ivOp = dyn_cast<LLVM::InsertValueOp>(op)) {
-          Value container = ivOp.getContainer();
-          if (auto cst =
-                  dyn_cast<llvm::ConstantArray>(lookupValue(container))) {
-            // GlobalValue shouldn't be treated like other constants.
-            if (isa<llvm::GlobalValue>(cst))
-              continue;
-            if (cst->hasZeroLiveUses())
-              cst->destroyConstant();
-          }
-        }
       }
       ReturnOp ret = cast<ReturnOp>(initializer->getTerminator());
       llvm::Constant *cst =
@@ -896,6 +890,11 @@ LogicalResult ModuleTranslation::convertOneFunction(LLVMFuncOp func) {
 
   if (auto gc = func.getGarbageCollector())
     llvmFunc->setGC(gc->str());
+
+  if (auto armStreaming = func.getArmStreaming())
+    llvmFunc->addFnAttr("aarch64_pstate_sm_enabled");
+  else if (auto armLocallyStreaming = func.getArmLocallyStreaming())
+    llvmFunc->addFnAttr("aarch64_pstate_sm_body");
 
   // First, create all blocks so we can jump to them.
   llvm::LLVMContext &llvmContext = llvmFunc->getContext();
@@ -1277,11 +1276,15 @@ llvm::OpenMPIRBuilder *ModuleTranslation::getOpenMPBuilder() {
 
     bool isDevice = false;
     llvm::StringRef hostIRFilePath = "";
-    if (auto offloadMod =
-            dyn_cast<mlir::omp::OffloadModuleInterface>(mlirModule)) {
-      isDevice = offloadMod.getIsDevice();
-      hostIRFilePath = offloadMod.getHostIRFilePath();
-    }
+
+    if (Attribute deviceAttr = mlirModule->getAttr("omp.is_device"))
+      if (::llvm::isa<mlir::BoolAttr>(deviceAttr))
+        isDevice = ::llvm::dyn_cast<mlir::BoolAttr>(deviceAttr).getValue();
+
+    if (Attribute filepath = mlirModule->getAttr("omp.host_ir_filepath"))
+      if (::llvm::isa<mlir::StringAttr>(filepath))
+        hostIRFilePath =
+            ::llvm::dyn_cast<mlir::StringAttr>(filepath).getValue();
 
     ompBuilder->initialize(hostIRFilePath);
 

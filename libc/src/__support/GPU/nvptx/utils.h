@@ -100,7 +100,7 @@ LIBC_INLINE uint32_t get_lane_size() { return LANE_SIZE; }
 /// Returns the bit-mask of active threads in the current warp.
 [[clang::convergent]] LIBC_INLINE uint64_t get_lane_mask() {
   uint32_t mask;
-  asm volatile("activemask.b32 %0;" : "=r"(mask));
+  LIBC_INLINE_ASM("activemask.b32 %0;" : "=r"(mask));
   return mask;
 }
 
@@ -118,6 +118,7 @@ LIBC_INLINE uint32_t get_lane_size() { return LANE_SIZE; }
 #endif
 }
 
+/// Returns a bitmask of threads in the current lane for which \p x is true.
 [[clang::convergent]] LIBC_INLINE uint64_t ballot(uint64_t lane_mask, bool x) {
 #if __CUDA_ARCH__ >= 600
   return __nvvm_vote_ballot_sync(lane_mask, x);
