@@ -1191,11 +1191,6 @@ public:
   /// of 0.
   Symbol &addExternalSymbol(StringRef Name, orc::ExecutorAddrDiff Size,
                             bool IsWeaklyReferenced) {
-    assert(llvm::count_if(ExternalSymbols,
-                          [&](const Symbol *Sym) {
-                            return Sym->getName() == Name;
-                          }) == 0 &&
-           "Duplicate external symbol");
     auto &Sym = Symbol::constructExternal(
         Allocator, createAddressable(orc::ExecutorAddr(), false), Name, Size,
         Linkage::Strong, IsWeaklyReferenced);
