@@ -3809,15 +3809,9 @@ llvm::Constant *CGObjCMac::EmitIvarList(const ObjCImplementationDecl *ID,
   ivarList.fillPlaceholderWithInt(countSlot, ObjCTypes.IntTy, count);
 
   llvm::GlobalVariable *GV;
-  if (ForClass)
-    GV =
-        CreateMetadataVar("OBJC_CLASS_VARIABLES_" + ID->getName(), ivarList,
-                          "__OBJC,__class_vars,regular,no_dead_strip",
-                          CGM.getPointerAlign(), true);
-  else
-    GV = CreateMetadataVar("OBJC_INSTANCE_VARIABLES_" + ID->getName(), ivarList,
-                           "__OBJC,__instance_vars,regular,no_dead_strip",
-                           CGM.getPointerAlign(), true);
+  GV = CreateMetadataVar("OBJC_INSTANCE_VARIABLES_" + ID->getName(), ivarList,
+                         "__OBJC,__instance_vars,regular,no_dead_strip",
+                         CGM.getPointerAlign(), true);
   return llvm::ConstantExpr::getBitCast(GV, ObjCTypes.IvarListPtrTy);
 }
 
@@ -5023,11 +5017,8 @@ void CGObjCMac::EmitObjCStrongCastAssign(CodeGen::CodeGenFunction &CGF,
 }
 
 void CGObjCMac::EmitGCMemmoveCollectable(CodeGen::CodeGenFunction &CGF,
-                                         Address DestPtr,
-                                         Address SrcPtr,
+                                         Address DestPtr, Address SrcPtr,
                                          llvm::Value *size) {
-  SrcPtr = CGF.Builder.CreateElementBitCast(SrcPtr, CGF.Int8Ty);
-  DestPtr = CGF.Builder.CreateElementBitCast(DestPtr, CGF.Int8Ty);
   llvm::Value *args[] = { DestPtr.getPointer(), SrcPtr.getPointer(), size };
   CGF.EmitNounwindRuntimeCall(ObjCTypes.GcMemmoveCollectableFn(), args);
 }
@@ -7696,12 +7687,8 @@ void CGObjCNonFragileABIMac::EmitObjCStrongCastAssign(
 }
 
 void CGObjCNonFragileABIMac::EmitGCMemmoveCollectable(
-  CodeGen::CodeGenFunction &CGF,
-  Address DestPtr,
-  Address SrcPtr,
-  llvm::Value *Size) {
-  SrcPtr = CGF.Builder.CreateElementBitCast(SrcPtr, CGF.Int8Ty);
-  DestPtr = CGF.Builder.CreateElementBitCast(DestPtr, CGF.Int8Ty);
+    CodeGen::CodeGenFunction &CGF, Address DestPtr, Address SrcPtr,
+    llvm::Value *Size) {
   llvm::Value *args[] = { DestPtr.getPointer(), SrcPtr.getPointer(), Size };
   CGF.EmitNounwindRuntimeCall(ObjCTypes.GcMemmoveCollectableFn(), args);
 }

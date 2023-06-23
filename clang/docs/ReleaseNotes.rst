@@ -111,6 +111,7 @@ C++20 Feature Support
   SFINAE.
 - Clang now supports `requires cplusplus20` for module maps.
 - Implemented missing parts of `P2002R1: Consistent comparison operators <https://wg21.link/P2002R1>`_
+- Clang now defines `__cpp_consteval` macro.
 
 C++23 Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
@@ -225,6 +226,12 @@ Non-comprehensive list of changes in this release
   This fixes (`#58951 <https://github.com/llvm/llvm-project/issues/58951>`_).
 - Clang now supports the `NO_COLOR <https://no-color.org/>`_ environment
   variable as a way to disable color diagnostics.
+- Clang now supports ``__builtin_isfpclass``, which checks if the specified
+  floating-point value falls into any of the specified data classes.
+- Added ``__builtin_elementwise_round`` for  builtin for floating
+  point types. This allows access to ``llvm.round`` for
+  arbitrary floating-point and vector of floating-point types.
+
 
 New Compiler Flags
 ------------------
@@ -339,6 +346,19 @@ Improvements to Clang's diagnostics
   can be controlled using ``-fcaret-diagnostics-max-lines=``.
 - Clang no longer emits ``-Wunused-variable`` warnings for variables declared
   with ``__attribute__((cleanup(...)))`` to match GCC's behavior.
+- Clang now issues expected warnings for situations of comparing with NULL pointers.
+  (`#42992: <https://github.com/llvm/llvm-project/issues/42992>`_)
+- Clang now diagnoses unused const-qualified variable template as
+  "unused variable template" rather than "unused variable".
+- When diagnosing a constant expression where an enum without a fixed underlying
+  type is set to a value outside the range of the enum's values, clang will now
+  print the name of the enum in question.
+- Clang no longer diagnoses a read of an empty structure as use of an
+  uninitialized variable.
+  (`#26842: <https://github.com/llvm/llvm-project/issues/26842>`_)
+- The Fix-It emitted for unused labels used to expand to the next line, which caused
+  visual oddities now that Clang shows more than one line of code snippet. This has
+  been fixed and the Fix-It now only spans to the end of the ``:``.
 
 Bug Fixes in This Version
 -------------------------
@@ -497,6 +517,13 @@ Bug Fixes in This Version
 - CallExpr built for C error-recovery now is always type-dependent. Fixes a
   crash when we encounter a unresolved TypoExpr during diagnostic emission.
   (`#50244 <https://github.com/llvm/llvm-project/issues/50244>_`).
+- Apply ``-fmacro-prefix-map`` to anonymous tags in template arguments
+  (`#63219 <https://github.com/llvm/llvm-project/issues/63219>`_).
+- Clang now properly diagnoses format string mismatches involving scoped
+  enumeration types. A scoped enumeration type is not promoted to an integer
+  type by the default argument promotions, and thus this is UB. Clang's
+  behavior now matches GCC's behavior in C++.
+  (`#38717 <https://github.com/llvm/llvm-project/issues/38717>_`).
 
 Bug Fixes to Compiler Builtins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -718,6 +745,7 @@ clang-format
 - Fix all known issues associated with ``LambdaBodyIndentation: OuterScope``.
 - Add ``BracedInitializerIndentWidth`` which can be used to configure
   the indentation level of the contents of braced init lists.
+- Add ``KeepEmptyLinesAtEOF`` to keep empty lines at end of file.
 
 libclang
 --------

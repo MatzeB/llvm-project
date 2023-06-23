@@ -434,7 +434,7 @@ public:
   }
 
   /// Check whether we support inverting this branch
-  virtual bool isUnsupportedBranch(unsigned Opcode) const { return false; }
+  virtual bool isUnsupportedBranch(const MCInst &Inst) const { return false; }
 
   /// Return true of the instruction is of pseudo kind.
   bool isPseudo(const MCInst &Inst) const {
@@ -629,6 +629,12 @@ public:
   }
 
   virtual bool isPacked(const MCInst &Inst) const {
+    llvm_unreachable("not implemented");
+    return false;
+  }
+
+  /// Returns true if First/Second is a AUIPC/JALR call pair.
+  virtual bool isRISCVCall(const MCInst &First, const MCInst &Second) const {
     llvm_unreachable("not implemented");
     return false;
   }
@@ -2031,6 +2037,10 @@ MCPlusBuilder *createX86MCPlusBuilder(const MCInstrAnalysis *,
 MCPlusBuilder *createAArch64MCPlusBuilder(const MCInstrAnalysis *,
                                           const MCInstrInfo *,
                                           const MCRegisterInfo *);
+
+MCPlusBuilder *createRISCVMCPlusBuilder(const MCInstrAnalysis *,
+                                        const MCInstrInfo *,
+                                        const MCRegisterInfo *);
 
 } // namespace bolt
 } // namespace llvm

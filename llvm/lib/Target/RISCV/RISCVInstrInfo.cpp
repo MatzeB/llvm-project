@@ -417,12 +417,13 @@ void RISCVInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   if (IsScalableVector) {
     bool UseVMV_V_V = false;
+    bool UseVMV_V_I = false;
     MachineBasicBlock::const_iterator DefMBBI;
-    unsigned VIOpc;
     if (isConvertibleToVMV_V_V(STI, MBB, MBBI, DefMBBI, LMul)) {
       UseVMV_V_V = true;
       // We only need to handle LMUL = 1/2/4/8 here because we only define
       // vector register classes for LMUL = 1/2/4/8.
+      unsigned VIOpc;
       switch (LMul) {
       default:
         llvm_unreachable("Impossible LMUL for vector register copy.");
@@ -443,12 +444,11 @@ void RISCVInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
         VIOpc = RISCV::PseudoVMV_V_I_M8;
         break;
       }
-    }
 
-    bool UseVMV_V_I = false;
-    if (UseVMV_V_V && (DefMBBI->getOpcode() == VIOpc)) {
-      UseVMV_V_I = true;
-      Opc = VIOpc;
+      if (DefMBBI->getOpcode() == VIOpc) {
+        UseVMV_V_I = true;
+        Opc = VIOpc;
+      }
     }
 
     if (NF == 1) {
@@ -1793,13 +1793,6 @@ bool RISCVInstrInfo::verifyInstruction(const MachineInstr &MI,
   }
 
   const uint64_t TSFlags = Desc.TSFlags;
-  if (RISCVII::hasMergeOp(TSFlags)) {
-    unsigned OpIdx = RISCVII::getMergeOpNum(Desc);
-    if (MI.findTiedOperandIdx(0) != OpIdx) {
-      ErrInfo = "Merge op improperly tied";
-      return false;
-    }
-  }
   if (RISCVII::hasVLOp(TSFlags)) {
     const MachineOperand &Op = MI.getOperand(RISCVII::getVLOpNum(Desc));
     if (!Op.isImm() && !Op.isReg())  {

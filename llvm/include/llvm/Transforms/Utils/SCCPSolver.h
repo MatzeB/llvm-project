@@ -130,7 +130,7 @@ public:
 
   std::vector<ValueLatticeElement> getStructLatticeValueFor(Value *V) const;
 
-  void moveLatticeValue(Value *From, Value *To);
+  void removeLatticeValueFor(Value *V);
 
   /// Invalidate the Lattice Value of \p Call and its users after specializing
   /// the call. Then recompute it.
@@ -160,7 +160,7 @@ public:
 
   /// Helper to return a Constant if \p LV is either a constant or a constant
   /// range with a single element.
-  Constant *getConstant(const ValueLatticeElement &LV) const;
+  Constant *getConstant(const ValueLatticeElement &LV, Type *Ty) const;
 
   /// Return either a Constant or nullptr for a given Value.
   Constant *getConstantOrNull(Value *V) const;
@@ -184,6 +184,7 @@ public:
   void visitCall(CallInst &I);
 
   bool simplifyInstsInBlock(BasicBlock &BB,
+                            SmallPtrSetImpl<Value *> &InsertedValues,
                             Statistic &InstRemovedStat,
                             Statistic &InstReplacedStat);
 

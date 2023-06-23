@@ -94,6 +94,11 @@ class Align<AttrIndex idx, int align> : IntrinsicProperty {
   int Align = align;
 }
 
+class Dereferenceable<AttrIndex idx, int bytes> : IntrinsicProperty {
+  int ArgNo = idx.Value;
+  int Bytes = bytes;
+}
+
 // Returned - The specified argument is always the return value of the
 // intrinsic.
 class Returned<AttrIndex idx> : IntrinsicProperty {
@@ -2253,12 +2258,12 @@ def int_hwasan_check_memaccess_shortgranules :
 //===----------------------------------------------------------------------===//
 // Custom event logging for x-ray.
 // Takes a pointer to a string and the length of the string.
-def int_xray_customevent : Intrinsic<[], [llvm_ptr_ty, llvm_i32_ty],
+def int_xray_customevent : Intrinsic<[], [llvm_ptr_ty, llvm_i64_ty],
                                      [IntrWriteMem, NoCapture<ArgIndex<0>>,
                                       ReadOnly<ArgIndex<0>>]>;
 // Typed event logging for x-ray.
 // Takes a numeric type tag, a pointer to a string and the length of the string.
-def int_xray_typedevent : Intrinsic<[], [llvm_i16_ty, llvm_ptr_ty, llvm_i32_ty],
+def int_xray_typedevent : Intrinsic<[], [llvm_i64_ty, llvm_ptr_ty, llvm_i64_ty],
                                         [IntrWriteMem, NoCapture<ArgIndex<1>>,
                                          ReadOnly<ArgIndex<1>>]>;
 //===----------------------------------------------------------------------===//
@@ -2322,6 +2327,10 @@ let IntrProperties = [IntrNoMem, IntrSpeculatable] in {
   def int_vector_reduce_fmax : DefaultAttrsIntrinsic<[LLVMVectorElementType<0>],
                                          [llvm_anyvector_ty]>;
   def int_vector_reduce_fmin : DefaultAttrsIntrinsic<[LLVMVectorElementType<0>],
+                                         [llvm_anyvector_ty]>;
+  def int_vector_reduce_fminimum: DefaultAttrsIntrinsic<[LLVMVectorElementType<0>],
+                                         [llvm_anyvector_ty]>;
+  def int_vector_reduce_fmaximum: DefaultAttrsIntrinsic<[LLVMVectorElementType<0>],
                                          [llvm_anyvector_ty]>;
 }
 

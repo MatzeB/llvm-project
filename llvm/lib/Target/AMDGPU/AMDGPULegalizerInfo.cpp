@@ -1987,9 +1987,9 @@ bool AMDGPULegalizerInfo::legalizeCustom(LegalizerHelper &Helper,
   case TargetOpcode::G_ATOMIC_CMPXCHG:
     return legalizeAtomicCmpXChg(MI, MRI, B);
   case TargetOpcode::G_FLOG:
-    return legalizeFlog(MI, B, numbers::ln2f);
+    return legalizeFlog(MI, B, numbers::ln2);
   case TargetOpcode::G_FLOG10:
-    return legalizeFlog(MI, B, numbers::ln2f / numbers::ln10f);
+    return legalizeFlog(MI, B, numbers::ln2 / numbers::ln10);
   case TargetOpcode::G_FEXP:
     return legalizeFExp(MI, B);
   case TargetOpcode::G_FPOW:
@@ -4928,20 +4928,6 @@ bool AMDGPULegalizerInfo::legalizeBufferLoad(MachineInstr &MI,
   return true;
 }
 
-bool AMDGPULegalizerInfo::legalizeAtomicIncDec(MachineInstr &MI,
-                                               MachineIRBuilder &B,
-                                               bool IsInc) const {
-  unsigned Opc = IsInc ? AMDGPU::G_ATOMICRMW_UINC_WRAP :
-                         AMDGPU::G_ATOMICRMW_UDEC_WRAP;
-  B.buildInstr(Opc)
-    .addDef(MI.getOperand(0).getReg())
-    .addUse(MI.getOperand(2).getReg())
-    .addUse(MI.getOperand(3).getReg())
-    .cloneMemRefs(MI);
-  MI.eraseFromParent();
-  return true;
-}
-
 static unsigned getBufferAtomicPseudo(Intrinsic::ID IntrID) {
   switch (IntrID) {
   case Intrinsic::amdgcn_raw_buffer_atomic_swap:
@@ -6215,10 +6201,6 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
   case Intrinsic::amdgcn_struct_buffer_atomic_fadd:
   case Intrinsic::amdgcn_struct_ptr_buffer_atomic_fadd:
     return legalizeBufferAtomic(MI, B, IntrID);
-  case Intrinsic::amdgcn_atomic_inc:
-    return legalizeAtomicIncDec(MI, B, true);
-  case Intrinsic::amdgcn_atomic_dec:
-    return legalizeAtomicIncDec(MI, B, false);
   case Intrinsic::trap:
     return legalizeTrapIntrinsic(MI, MRI, B);
   case Intrinsic::debugtrap:

@@ -561,6 +561,7 @@ add_entrypoint_object(
     ../exp2f.h
   DEPENDS
     .explogxf
+    libc.src.__support.FPUtil.except_value_utils
     libc.src.__support.FPUtil.fenv_impl
     libc.src.__support.FPUtil.fp_bits
     libc.src.__support.FPUtil.multiply_add
@@ -780,6 +781,7 @@ add_header_library(
     log_range_reduction.h
   DEPENDS
     .common_constants
+    libc.src.__support.uint128
     libc.src.__support.FPUtil.dyadic_float
 )
 
@@ -1373,6 +1375,8 @@ add_entrypoint_object(
     .explogxf
     libc.src.__support.FPUtil.fp_bits
     libc.src.__support.FPUtil.rounding_mode
+    libc.src.__support.FPUtil.multiply_add
+    libc.src.__support.FPUtil.polyeval
     libc.src.__support.macros.optimization
   COMPILE_OPTIONS
     -O3

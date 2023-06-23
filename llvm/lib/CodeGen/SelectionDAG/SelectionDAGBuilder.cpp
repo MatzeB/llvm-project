@@ -33,6 +33,7 @@
 #include "llvm/CodeGen/CodeGenCommonISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GCMetadata.h"
+#include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
@@ -5558,13 +5559,8 @@ static SDValue expandDivFix(unsigned Opcode, const SDLoc &DL,
         PromVT = EVT::getVectorVT(Ctx, PromVT, VT.getVectorElementCount());
       } else
         llvm_unreachable("Wrong VT for DIVFIX?");
-      if (Signed) {
-        LHS = DAG.getSExtOrTrunc(LHS, DL, PromVT);
-        RHS = DAG.getSExtOrTrunc(RHS, DL, PromVT);
-      } else {
-        LHS = DAG.getZExtOrTrunc(LHS, DL, PromVT);
-        RHS = DAG.getZExtOrTrunc(RHS, DL, PromVT);
-      }
+      LHS = DAG.getExtOrTrunc(Signed, LHS, DL, PromVT);
+      RHS = DAG.getExtOrTrunc(Signed, RHS, DL, PromVT);
       EVT ShiftTy = TLI.getShiftAmountTy(PromVT, DAG.getDataLayout());
       // For saturating operations, we need to shift up the LHS to get the
       // proper saturation width, and then shift down again afterwards.
@@ -6595,10 +6591,10 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     const DataLayout DLayout = DAG.getDataLayout();
     EVT EnvVT = TLI.getValueType(DLayout, I.getType());
     Align TempAlign = DAG.getEVTAlign(EnvVT);
-    SDValue Chain = DAG.getRoot();
+    SDValue Chain = getRoot();
     // Use GET_FPENV if it is legal or custom. Otherwise use memory-based node
     // and temporary storage in stack.
-    if (TLI.isOperationLegalOrCustom(ISD::SET_FPENV, EnvVT)) {
+    if (TLI.isOperationLegalOrCustom(ISD::GET_FPENV, EnvVT)) {
       Res = DAG.getNode(
           ISD::GET_FPENV, sdl,
           DAG.getVTList(TLI.getValueType(DAG.getDataLayout(), I.getType()),
@@ -7289,6 +7285,8 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
   case Intrinsic::vector_reduce_umin:
   case Intrinsic::vector_reduce_fmax:
   case Intrinsic::vector_reduce_fmin:
+  case Intrinsic::vector_reduce_fmaximum:
+  case Intrinsic::vector_reduce_fminimum:
     visitVectorReduce(I, Intrinsic);
     return;
 
@@ -8226,10 +8224,7 @@ void SelectionDAGBuilder::processIntegerCallValue(const Instruction &I,
                                                   bool IsSigned) {
   EVT VT = DAG.getTargetLoweringInfo().getValueType(DAG.getDataLayout(),
                                                     I.getType(), true);
-  if (IsSigned)
-    Value = DAG.getSExtOrTrunc(Value, getCurSDLoc(), VT);
-  else
-    Value = DAG.getZExtOrTrunc(Value, getCurSDLoc(), VT);
+  Value = DAG.getExtOrTrunc(IsSigned, Value, getCurSDLoc(), VT);
   setValue(&I, Value);
 }
 
@@ -10010,6 +10005,12 @@ void SelectionDAGBuilder::visitVectorReduce(const CallInst &I,
   case Intrinsic::vector_reduce_fmin:
     Res = DAG.getNode(ISD::VECREDUCE_FMIN, dl, VT, Op1, SDFlags);
     break;
+  case Intrinsic::vector_reduce_fmaximum:
+    Res = DAG.getNode(ISD::VECREDUCE_FMAXIMUM, dl, VT, Op1, SDFlags);
+    break;
+  case Intrinsic::vector_reduce_fminimum:
+    Res = DAG.getNode(ISD::VECREDUCE_FMINIMUM, dl, VT, Op1, SDFlags);
+    break;
   default:
     llvm_unreachable("Unhandled vector reduce intrinsic");
   }
@@ -10615,9 +10616,9 @@ static void tryToElideArgumentCopy(
     DenseMap<int, int> &ArgCopyElisionFrameIndexMap,
     SmallPtrSetImpl<const Instruction *> &ElidedArgCopyInstrs,
     ArgCopyElisionMapTy &ArgCopyElisionCandidates, const Argument &Arg,
-    SDValue ArgVal, bool &ArgHasUses) {
+    ArrayRef<SDValue> ArgVals, bool &ArgHasUses) {
   // Check if this is a load from a fixed stack object.
-  auto *LNode = dyn_cast<LoadSDNode>(ArgVal);
+  auto *LNode = dyn_cast<LoadSDNode>(ArgVals[0]);
   if (!LNode)
     return;
   auto *FINode = dyn_cast<FrameIndexSDNode>(LNode->getBasePtr().getNode());
@@ -10660,7 +10661,8 @@ static void tryToElideArgumentCopy(
   MFI.setIsImmutableObjectIndex(FixedIndex, false);
   AllocaIndex = FixedIndex;
   ArgCopyElisionFrameIndexMap.insert({OldIndex, FixedIndex});
-  Chains.push_back(ArgVal.getValue(1));
+  for (SDValue ArgVal : ArgVals)
+    Chains.push_back(ArgVal.getValue(1));
 
   // Avoid emitting code for the store implementing the copy.
   const StoreInst *SI = ArgCopyIter->second.second;
@@ -10921,9 +10923,14 @@ void SelectionDAGISel::LowerArguments(const Function &F) {
     // Elide the copying store if the target loaded this argument from a
     // suitable fixed stack object.
     if (Ins[i].Flags.isCopyElisionCandidate()) {
+      unsigned NumParts = 0;
+      for (EVT VT : ValueVTs)
+        NumParts += TLI->getNumRegistersForCallingConv(*CurDAG->getContext(),
+                                                       F.getCallingConv(), VT);
+
       tryToElideArgumentCopy(*FuncInfo, Chains, ArgCopyElisionFrameIndexMap,
                              ElidedArgCopyInstrs, ArgCopyElisionCandidates, Arg,
-                             InVals[i], ArgHasUses);
+                             ArrayRef(&InVals[i], NumParts), ArgHasUses);
     }
 
     // If this argument is unused then remember its value. It is used to generate

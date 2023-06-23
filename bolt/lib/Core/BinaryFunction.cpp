@@ -1250,7 +1250,7 @@ bool BinaryFunction::disassemble() {
         const bool IsCondBranch = MIB->isConditionalBranch(Instruction);
         MCSymbol *TargetSymbol = nullptr;
 
-        if (BC.MIB->isUnsupportedBranch(Instruction.getOpcode())) {
+        if (BC.MIB->isUnsupportedBranch(Instruction)) {
           setIgnored();
           if (BinaryFunction *TargetFunc =
                   BC.getBinaryFunctionContainingAddress(TargetAddress))
@@ -1323,7 +1323,7 @@ bool BinaryFunction::disassemble() {
         if (BC.isAArch64())
           handleAArch64IndirectCall(Instruction, Offset);
       }
-    } else if (BC.isAArch64()) {
+    } else if (BC.isAArch64() || BC.isRISCV()) {
       // Check if there's a relocation associated with this instruction.
       bool UsedReloc = false;
       for (auto Itr = Relocations.lower_bound(Offset),
@@ -1343,7 +1343,7 @@ bool BinaryFunction::disassemble() {
         UsedReloc = true;
       }
 
-      if (MIB->hasPCRelOperand(Instruction) && !UsedReloc)
+      if (!BC.isRISCV() && MIB->hasPCRelOperand(Instruction) && !UsedReloc)
         handlePCRelOperand(Instruction, AbsoluteInstrAddr, Size);
     }
 
@@ -3262,8 +3262,7 @@ void BinaryFunction::fixBranches() {
       const BinaryBasicBlock *TSuccessor = BB->getConditionalSuccessor(true);
       const BinaryBasicBlock *FSuccessor = BB->getConditionalSuccessor(false);
       // Check whether we support reversing this branch direction
-      const bool IsSupported =
-          !MIB->isUnsupportedBranch(CondBranch->getOpcode());
+      const bool IsSupported = !MIB->isUnsupportedBranch(*CondBranch);
       if (NextBB && NextBB == TSuccessor && IsSupported) {
         std::swap(TSuccessor, FSuccessor);
         {

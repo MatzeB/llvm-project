@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "MCTargetDesc/RISCVBaseInfo.h"
 #include "MCTargetDesc/RISCVInstPrinter.h"
 #include "MCTargetDesc/RISCVMCExpr.h"
 #include "MCTargetDesc/RISCVTargetStreamer.h"
@@ -630,12 +631,13 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
   const MachineFunction *MF = MBB->getParent();
   assert(MF && "MBB expected to be in a machine function");
 
-  const TargetRegisterInfo *TRI =
-      MF->getSubtarget<RISCVSubtarget>().getRegisterInfo();
-
+  const RISCVSubtarget &Subtarget = MF->getSubtarget<RISCVSubtarget>();
+  const TargetInstrInfo *TII = Subtarget.getInstrInfo();
+  const TargetRegisterInfo *TRI = Subtarget.getRegisterInfo();
   assert(TRI && "TargetRegisterInfo expected");
 
-  uint64_t TSFlags = MI->getDesc().TSFlags;
+  const MCInstrDesc &MCID = MI->getDesc();
+  uint64_t TSFlags = MCID.TSFlags;
   unsigned NumOps = MI->getNumExplicitOperands();
 
   // Skip policy, VL and SEW operands which are the last operands if present.
@@ -645,6 +647,8 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
     --NumOps;
   if (RISCVII::hasSEWOp(TSFlags))
     --NumOps;
+  if (RISCVII::hasRoundModeOp(TSFlags))
+    --NumOps;
 
   bool hasVLOutput = RISCV::isFaultFirstLoad(*MI);
   for (unsigned OpNo = 0; OpNo != NumOps; ++OpNo) {
@@ -653,10 +657,17 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
     if (hasVLOutput && OpNo == 1)
       continue;
 
-    // Skip merge op. It should be the first operand after the result.
-    if (RISCVII::hasMergeOp(TSFlags) && OpNo == 1U + hasVLOutput) {
-      assert(MI->getNumExplicitDefs() == 1U + hasVLOutput);
-      continue;
+    // Skip merge op. It should be the first operand after the defs.
+    if (OpNo == MI->getNumExplicitDefs() && MO.isReg() && MO.isTied()) {
+      assert(MCID.getOperandConstraint(OpNo, MCOI::TIED_TO) == 0 &&
+             "Expected tied to first def.");
+      const MCInstrDesc &OutMCID = TII->get(OutMI.getOpcode());
+      // Skip if the next operand in OutMI is not supposed to be tied. Unless it
+      // is a _TIED instruction.
+      if (OutMCID.getOperandConstraint(OutMI.getNumOperands(), MCOI::TIED_TO) <
+              0 &&
+          !RISCVII::isTiedPseudo(TSFlags))
+        continue;
     }
 
     MCOperand MCOp;
@@ -705,9 +716,15 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
 
   // Unmasked pseudo instructions need to append dummy mask operand to
   // V instructions. All V instructions are modeled as the masked version.
-  if (RISCVII::hasDummyMaskOp(TSFlags))
+  const MCInstrDesc &OutMCID = TII->get(OutMI.getOpcode());
+  if (OutMI.getNumOperands() < OutMCID.getNumOperands()) {
+    assert(OutMCID.operands()[OutMI.getNumOperands()].RegClass ==
+               RISCV::VMV0RegClassID &&
+           "Expected only mask operand to be missing");
     OutMI.addOperand(MCOperand::createReg(RISCV::NoRegister));
+  }
 
+  assert(OutMI.getNumOperands() == OutMCID.getNumOperands());
   return true;
 }
 

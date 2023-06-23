@@ -126,7 +126,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
     addRegisterClass(MVT::f32, &RISCV::GPRF32RegClass);
   if (Subtarget.hasStdExtZdinx()) {
     if (Subtarget.is64Bit())
-      addRegisterClass(MVT::f64, &RISCV::GPRF64RegClass);
+      addRegisterClass(MVT::f64, &RISCV::GPRRegClass);
     else
       addRegisterClass(MVT::f64, &RISCV::GPRPF64RegClass);
   }
@@ -500,6 +500,10 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::Other, Custom);
   if (Subtarget.is64Bit())
     setOperationAction(ISD::INTRINSIC_WO_CHAIN, MVT::i32, Custom);
+
+  if (Subtarget.hasStdExtZicbop()) {
+    setOperationAction(ISD::PREFETCH, MVT::Other, Legal);
+  }
 
   if (Subtarget.hasStdExtA()) {
     setMaxAtomicSizeInBitsSupported(Subtarget.getXLen());
@@ -887,6 +891,10 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
                            OtherVT, VT, Expand);
         }
 
+        // Custom lower fixed vector undefs to scalable vector undefs to avoid
+        // expansion to a build_vector of 0s.
+        setOperationAction(ISD::UNDEF, VT, Custom);
+
         // We use EXTRACT_SUBVECTOR as a "cast" from scalable to fixed.
         setOperationAction({ISD::INSERT_SUBVECTOR, ISD::EXTRACT_SUBVECTOR}, VT,
                            Custom);
@@ -1016,6 +1024,10 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
           setLoadExtAction(ISD::EXTLOAD, OtherVT, VT, Expand);
           setTruncStoreAction(VT, OtherVT, Expand);
         }
+
+        // Custom lower fixed vector undefs to scalable vector undefs to avoid
+        // expansion to a build_vector of 0s.
+        setOperationAction(ISD::UNDEF, VT, Custom);
 
         // We use EXTRACT_SUBVECTOR as a "cast" from scalable to fixed.
         setOperationAction({ISD::INSERT_SUBVECTOR, ISD::EXTRACT_SUBVECTOR}, VT,
@@ -2961,39 +2973,36 @@ static SDValue lowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG,
         return SDValue();
       // Now we can create our integer vector type. Note that it may be larger
       // than the resulting mask type: v4i1 would use v1i8 as its integer type.
+      unsigned IntegerViaVecElts = divideCeil(NumElts, NumViaIntegerBits);
       MVT IntegerViaVecVT =
           MVT::getVectorVT(MVT::getIntegerVT(NumViaIntegerBits),
-                           divideCeil(NumElts, NumViaIntegerBits));
+                           IntegerViaVecElts);
 
       uint64_t Bits = 0;
       unsigned BitPos = 0, IntegerEltIdx = 0;
-      SDValue Vec = DAG.getUNDEF(IntegerViaVecVT);
+      SmallVector<SDValue, 8> Elts(IntegerViaVecElts);
 
-      for (unsigned I = 0; I < NumElts; I++, BitPos++) {
-        // Once we accumulate enough bits to fill our scalar type, insert into
-        // our vector and clear our accumulated data.
-        if (I != 0 && I % NumViaIntegerBits == 0) {
+      for (unsigned I = 0; I < NumElts;) {
+        SDValue V = Op.getOperand(I);
+        bool BitValue = !V.isUndef() && cast<ConstantSDNode>(V)->getZExtValue();
+        Bits |= ((uint64_t)BitValue << BitPos);
+        ++BitPos;
+        ++I;
+
+        // Once we accumulate enough bits to fill our scalar type or process the
+        // last element, insert into our vector and clear our accumulated data.
+        if (I % NumViaIntegerBits == 0 || I == NumElts) {
           if (NumViaIntegerBits <= 32)
             Bits = SignExtend64<32>(Bits);
           SDValue Elt = DAG.getConstant(Bits, DL, XLenVT);
-          Vec = DAG.getNode(ISD::INSERT_VECTOR_ELT, DL, IntegerViaVecVT, Vec,
-                            Elt, DAG.getConstant(IntegerEltIdx, DL, XLenVT));
+          Elts[IntegerEltIdx] = Elt;
           Bits = 0;
           BitPos = 0;
           IntegerEltIdx++;
         }
-        SDValue V = Op.getOperand(I);
-        bool BitValue = !V.isUndef() && cast<ConstantSDNode>(V)->getZExtValue();
-        Bits |= ((uint64_t)BitValue << BitPos);
       }
 
-      // Insert the (remaining) scalar value into position in our integer
-      // vector type.
-      if (NumViaIntegerBits <= 32)
-        Bits = SignExtend64<32>(Bits);
-      SDValue Elt = DAG.getConstant(Bits, DL, XLenVT);
-      Vec = DAG.getNode(ISD::INSERT_VECTOR_ELT, DL, IntegerViaVecVT, Vec, Elt,
-                        DAG.getConstant(IntegerEltIdx, DL, XLenVT));
+      SDValue Vec = DAG.getBuildVector(IntegerViaVecVT, DL, Elts);
 
       if (NumElts < NumViaIntegerBits) {
         // If we're producing a smaller vector than our minimum legal integer
@@ -3521,10 +3530,11 @@ static bool isInterleaveShuffle(ArrayRef<int> Mask, MVT VT, int &EvenSrc,
   // vectors, or at the start and middle of the first vector if it's an unary
   // interleave.
   // In both cases, HalfNumElts will be extracted.
-  // So make sure that EvenSrc/OddSrc are within range.
+  // We need to ensure that the extract indices are 0 or HalfNumElts otherwise
+  // we'll create an illegal extract_subvector.
+  // FIXME: We could support other values using a slidedown first.
   int HalfNumElts = NumElts / 2;
-  return (((EvenSrc % NumElts) + HalfNumElts) <= NumElts) &&
-         (((OddSrc % NumElts) + HalfNumElts) <= NumElts);
+  return ((EvenSrc % HalfNumElts) == 0) && ((OddSrc % HalfNumElts) == 0);
 }
 
 /// Match shuffles that concatenate two vectors, rotate the concatenation,
@@ -3766,14 +3776,21 @@ static SDValue lowerVECTOR_SHUFFLEAsVSlideup(const SDLoc &DL, MVT VT,
   // up to the very end of it, then we don't actually care about the tail.
   if (NumSubElts + Index >= (int)NumElts)
     Policy |= RISCVII::TAIL_AGNOSTIC;
-  SDValue Slideup = getVSlideup(
-      DAG, Subtarget, DL, ContainerVT,
-      convertToScalableVector(ContainerVT, InPlace, DAG, Subtarget),
-      convertToScalableVector(ContainerVT, ToInsert, DAG, Subtarget),
-      DAG.getConstant(Index, DL, XLenVT), TrueMask,
-      DAG.getConstant(NumSubElts + Index, DL, XLenVT),
-      Policy);
-  return convertFromScalableVector(VT, Slideup, DAG, Subtarget);
+
+  InPlace = convertToScalableVector(ContainerVT, InPlace, DAG, Subtarget);
+  ToInsert = convertToScalableVector(ContainerVT, ToInsert, DAG, Subtarget);
+  SDValue VL = DAG.getConstant(NumSubElts + Index, DL, XLenVT);
+
+  SDValue Res;
+  // If we're inserting into the lowest elements, use a tail undisturbed
+  // vmv.v.v.
+  if (Index == 0)
+    Res = DAG.getNode(RISCVISD::VMV_V_V_VL, DL, ContainerVT, InPlace, ToInsert,
+                      VL);
+  else
+    Res = getVSlideup(DAG, Subtarget, DL, ContainerVT, InPlace, ToInsert,
+                      DAG.getConstant(Index, DL, XLenVT), TrueMask, VL, Policy);
+  return convertFromScalableVector(VT, Res, DAG, Subtarget);
 }
 
 /// Match v(f)slide1up/down idioms.  These operations involve sliding
@@ -4947,6 +4964,11 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     if (Op.getOperand(1).getValueType().getVectorElementType() == MVT::i1)
       return lowerVectorMaskVecReduction(Op, DAG, /*IsVP*/ true);
     return lowerVPREDUCE(Op, DAG);
+  case ISD::UNDEF: {
+    MVT ContainerVT = getContainerForFixedLengthVector(Op.getSimpleValueType());
+    return convertFromScalableVector(Op.getSimpleValueType(),
+                                     DAG.getUNDEF(ContainerVT), DAG, Subtarget);
+  }
   case ISD::INSERT_SUBVECTOR:
     return lowerINSERT_SUBVECTOR(Op, DAG);
   case ISD::EXTRACT_SUBVECTOR:
@@ -7787,8 +7809,9 @@ SDValue RISCVTargetLowering::lowerVECTOR_INTERLEAVE(SDValue Op,
 
     // Then perform the interleave
     //   v[0]   v[n]   v[1] v[n+1]   v[2] v[n+2]   v[3] v[n+3] ...
+    SDValue TrueMask = getAllOnesMask(IdxVT, VL, DL, DAG);
     Interleaved = DAG.getNode(RISCVISD::VRGATHEREI16_VV_VL, DL, ConcatVT,
-                              Concat, Idx, DAG.getUNDEF(ConcatVT), OddMask, VL);
+                              Concat, Idx, DAG.getUNDEF(ConcatVT), TrueMask, VL);
   }
 
   // Extract the two halves from the interleaved result
@@ -10463,6 +10486,20 @@ static SDValue performXORCombine(SDNode *N, SelectionDAG &DAG,
                        DAG.getConstant(~1, DL, MVT::i64), N0.getOperand(1));
   }
 
+  // Fold (xor (setcc constant, y, setlt), 1) -> (setcc y, constant + 1, setlt)
+  if (N0.hasOneUse() && N0.getOpcode() == ISD::SETCC && isOneConstant(N1)) {
+    auto *ConstN00 = dyn_cast<ConstantSDNode>(N0.getOperand(0));
+    ISD::CondCode CC = cast<CondCodeSDNode>(N0.getOperand(2))->get();
+    if (ConstN00 && CC == ISD::SETLT) {
+      EVT VT = N0.getValueType();
+      SDLoc DL(N0);
+      const APInt &Imm = ConstN00->getAPIntValue();
+      if ((Imm + 1).isSignedIntN(12))
+        return DAG.getSetCC(DL, VT, N0.getOperand(1),
+                            DAG.getConstant(Imm + 1, DL, VT), CC);
+    }
+  }
+
   if (SDValue V = combineBinOpToReduce(N, DAG, Subtarget))
     return V;
   // fold (xor (select cond, 0, y), x) ->
@@ -12125,6 +12162,63 @@ static SDValue performCONCAT_VECTORSCombine(SDNode *N, SelectionDAG &DAG,
   return convertFromScalableVector(VT, Res, DAG, Subtarget);
 }
 
+static SDValue combineToVWMACC(SDNode *N, SelectionDAG &DAG,
+                               const RISCVSubtarget &Subtarget) {
+  assert(N->getOpcode() == RISCVISD::ADD_VL);
+  SDValue Addend = N->getOperand(0);
+  SDValue MulOp = N->getOperand(1);
+  SDValue AddMergeOp = N->getOperand(2);
+
+  if (!AddMergeOp.isUndef())
+    return SDValue();
+
+  auto IsVWMulOpc = [](unsigned Opc) {
+    switch (Opc) {
+    case RISCVISD::VWMUL_VL:
+    case RISCVISD::VWMULU_VL:
+    case RISCVISD::VWMULSU_VL:
+      return true;
+    default:
+      return false;
+    }
+  };
+
+  if (!IsVWMulOpc(MulOp.getOpcode()))
+    std::swap(Addend, MulOp);
+
+  if (!IsVWMulOpc(MulOp.getOpcode()))
+    return SDValue();
+
+  SDValue MulMergeOp = MulOp.getOperand(2);
+
+  if (!MulMergeOp.isUndef())
+    return SDValue();
+
+  SDValue AddMask = N->getOperand(3);
+  SDValue AddVL = N->getOperand(4);
+  SDValue MulMask = MulOp.getOperand(3);
+  SDValue MulVL = MulOp.getOperand(4);
+
+  if (AddMask != MulMask || AddVL != MulVL)
+    return SDValue();
+
+  unsigned Opc = RISCVISD::VWMACC_VL + MulOp.getOpcode() - RISCVISD::VWMUL_VL;
+  static_assert(RISCVISD::VWMACC_VL + 1 == RISCVISD::VWMACCU_VL,
+                "Unexpected opcode after VWMACC_VL");
+  static_assert(RISCVISD::VWMACC_VL + 2 == RISCVISD::VWMACCSU_VL,
+                "Unexpected opcode after VWMACC_VL!");
+  static_assert(RISCVISD::VWMUL_VL + 1 == RISCVISD::VWMULU_VL,
+                "Unexpected opcode after VWMUL_VL!");
+  static_assert(RISCVISD::VWMUL_VL + 2 == RISCVISD::VWMULSU_VL,
+                "Unexpected opcode after VWMUL_VL!");
+
+  SDLoc DL(N);
+  EVT VT = N->getValueType(0);
+  SDValue Ops[] = {MulOp.getOperand(0), MulOp.getOperand(1), Addend, AddMask,
+                   AddVL};
+  return DAG.getNode(Opc, DL, VT, Ops);
+}
+
 SDValue RISCVTargetLowering::PerformDAGCombine(SDNode *N,
                                                DAGCombinerInfo &DCI) const {
   SelectionDAG &DAG = DCI.DAG;
@@ -12535,6 +12629,9 @@ SDValue RISCVTargetLowering::PerformDAGCombine(SDNode *N,
     break;
   }
   case RISCVISD::ADD_VL:
+    if (SDValue V = combineBinOp_VLToVWBinOp_VL(N, DCI))
+      return V;
+    return combineToVWMACC(N, DAG, Subtarget);
   case RISCVISD::SUB_VL:
   case RISCVISD::VWADD_W_VL:
   case RISCVISD::VWADDU_W_VL:
@@ -13730,7 +13827,7 @@ static MachineBasicBlock *emitFROUND(MachineInstr &MI, MachineBasicBlock *MBB,
     I2FOpc = RISCV::FCVT_D_L_INX;
     FSGNJOpc = RISCV::FSGNJ_D_INX;
     FSGNJXOpc = RISCV::FSGNJX_D_INX;
-    RC = &RISCV::GPRF64RegClass;
+    RC = &RISCV::GPRRegClass;
     break;
   }
 
@@ -15672,6 +15769,9 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(VFWSUB_VL)
   NODE_NAME_CASE(VFWADD_W_VL)
   NODE_NAME_CASE(VFWSUB_W_VL)
+  NODE_NAME_CASE(VWMACC_VL)
+  NODE_NAME_CASE(VWMACCU_VL)
+  NODE_NAME_CASE(VWMACCSU_VL)
   NODE_NAME_CASE(VNSRL_VL)
   NODE_NAME_CASE(SETCC_VL)
   NODE_NAME_CASE(VSELECT_VL)
@@ -15916,7 +16016,6 @@ RISCVTargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI,
   // Subtarget into account.
   if (Res.second == &RISCV::GPRF16RegClass ||
       Res.second == &RISCV::GPRF32RegClass ||
-      Res.second == &RISCV::GPRF64RegClass ||
       Res.second == &RISCV::GPRPF64RegClass)
     return std::make_pair(Res.first, &RISCV::GPRRegClass);
 
@@ -16008,6 +16107,9 @@ Instruction *RISCVTargetLowering::emitTrailingFence(IRBuilderBase &Builder,
 
   if (isa<LoadInst>(Inst) && isAcquireOrStronger(Ord))
     return Builder.CreateFence(AtomicOrdering::Acquire);
+  if (Subtarget.enableSeqCstTrailingFence() && isa<StoreInst>(Inst) &&
+      Ord == AtomicOrdering::SequentiallyConsistent)
+    return Builder.CreateFence(AtomicOrdering::SequentiallyConsistent);
   return nullptr;
 }
 

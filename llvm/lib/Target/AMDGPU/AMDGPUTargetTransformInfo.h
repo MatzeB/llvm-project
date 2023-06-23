@@ -102,7 +102,7 @@ class GCNTTIImpl final : public BasicTTIImplBase<GCNTTIImpl> {
 public:
   explicit GCNTTIImpl(const AMDGPUTargetMachine *TM, const Function &F);
 
-  bool hasBranchDivergence() { return true; }
+  bool hasBranchDivergence(const Function *F = nullptr) const;
 
   void getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
                                TTI::UnrollingPreferences &UP,
@@ -192,6 +192,10 @@ public:
          ToAS == AMDGPUAS::CONSTANT_ADDRESS_32BIT))
       return true;
     return false;
+  }
+
+  bool addrspacesMayAlias(unsigned AS0, unsigned AS1) const {
+    return AMDGPU::addrspacesMayAlias(AS0, AS1);
   }
 
   unsigned getFlatAddressSpace() const {

@@ -1775,7 +1775,7 @@ def GPU_CreateCsrOp : GPU_Op<"create_csr", [GPU_AsyncOpInterface]> {
 def GPU_Create2To4SpMatOp : GPU_Op<"create_2to4_spmat", [GPU_AsyncOpInterface]> {
   let summary = "Create sparse matrix with 2:4 sparsity operation";
   let description = [{
-    The `gpu.create_2to4_spmat` operation initializes a sparse matrix in dense 
+    The `gpu.create_2to4_spmat` operation initializes a sparse matrix in dense
     format with 2:4 sparsity.
     The buffers must already be copied from the host to the device prior to
     using this operation. The operation returns a handle to the sparse
@@ -1963,7 +1963,7 @@ def GPU_SpMVOp : GPU_Op<"spmv", [GPU_AsyncOpInterface]> {
   }];
 }
 
-def GPU_SpMMBufferSizeOp : GPU_Op<"spmm_buffer_size", [GPU_AsyncOpInterface]> {
+def GPU_SpMMBufferSizeOp : GPU_Op<"spmm_buffer_size", [GPU_AsyncOpInterface, AttrSizedResultSegments]> {
   let summary = "Precompute buffersize for SpMM operation";
   let description = [{
     The `gpu.spmm_buffer_size` operation returns the buffer size required
@@ -1994,8 +1994,7 @@ def GPU_SpMMBufferSizeOp : GPU_Op<"spmm_buffer_size", [GPU_AsyncOpInterface]> {
                        GPU_SparseDnTensorHandle:$dnmatB,
                        GPU_SparseDnTensorHandle:$dnmatC,
                        TypeAttr:$computeType);
-  let results = (outs Res<AnyTypeOf<[Index, TupleOf<[Index, Index, 
-                                                     Index]>]>>:$bufferSzs, 
+  let results = (outs Variadic<Index>:$bufferSzs,
                       Optional<GPU_AsyncToken>:$asyncToken);
 
   let builders = [OpBuilder<(ins

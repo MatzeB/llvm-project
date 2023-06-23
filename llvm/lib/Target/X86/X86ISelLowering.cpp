@@ -4316,9 +4316,11 @@ SDValue X86TargetLowering::LowerFormalArguments(
     }
 
     // If value is passed via pointer - do a load.
-    if (VA.getLocInfo() == CCValAssign::Indirect && !Ins[I].Flags.isByVal())
+    if (VA.getLocInfo() == CCValAssign::Indirect &&
+        !(Ins[I].Flags.isByVal() && VA.isRegLoc())) {
       ArgValue =
           DAG.getLoad(VA.getValVT(), dl, Chain, ArgValue, MachinePointerInfo());
+    }
 
     InVals.push_back(ArgValue);
   }
@@ -31657,8 +31659,8 @@ static SDValue LowerShift(SDValue Op, const X86Subtarget &Subtarget,
            "Constant build vector expected");
 
     if (VT == MVT::v16i8 && Subtarget.hasInt256()) {
-      R = Opc == ISD::SRA ? DAG.getSExtOrTrunc(R, dl, ExVT)
-                          : DAG.getZExtOrTrunc(R, dl, ExVT);
+      bool IsSigned = Opc == ISD::SRA;
+      R = DAG.getExtOrTrunc(IsSigned, R, dl, ExVT);
       R = DAG.getNode(ISD::MUL, dl, ExVT, R, Amt);
       R = DAG.getNode(X86ISD::VSRLI, dl, ExVT, R, Cst8);
       return DAG.getZExtOrTrunc(R, dl, VT);

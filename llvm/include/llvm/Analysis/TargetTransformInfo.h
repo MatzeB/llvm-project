@@ -402,7 +402,11 @@ public:
   /// Branch divergence has a significantly negative impact on GPU performance
   /// when threads in the same wavefront take different paths due to conditional
   /// branches.
-  bool hasBranchDivergence() const;
+  ///
+  /// If \p F is passed, provides a context function. If \p F is known to only
+  /// execute in a single threaded environment, the target may choose to skip
+  /// uniformity analysis and assume all values are uniform.
+  bool hasBranchDivergence(const Function *F = nullptr) const;
 
   /// Returns whether V is a source of divergence.
   ///
@@ -418,6 +422,9 @@ public:
   /// Query the target whether the specified address space cast from FromAS to
   /// ToAS is valid.
   bool isValidAddrSpaceCast(unsigned FromAS, unsigned ToAS) const;
+
+  /// Return false if a \p AS0 address cannot possibly alias a \p AS1 address.
+  bool addrspacesMayAlias(unsigned AS0, unsigned AS1) const;
 
   /// Returns the address space ID for a target's 'flat' address space. Note
   /// this is not necessarily the same as addrspace(0), which LLVM sometimes
@@ -1686,10 +1693,11 @@ public:
                                              ArrayRef<const Value *> Operands,
                                              TargetCostKind CostKind) = 0;
   virtual BranchProbability getPredictableBranchThreshold() = 0;
-  virtual bool hasBranchDivergence() = 0;
+  virtual bool hasBranchDivergence(const Function *F = nullptr) = 0;
   virtual bool isSourceOfDivergence(const Value *V) = 0;
   virtual bool isAlwaysUniform(const Value *V) = 0;
   virtual bool isValidAddrSpaceCast(unsigned FromAS, unsigned ToAS) const = 0;
+  virtual bool addrspacesMayAlias(unsigned AS0, unsigned AS1) const = 0;
   virtual unsigned getFlatAddressSpace() = 0;
   virtual bool collectFlatAddressOperands(SmallVectorImpl<int> &OpIndexes,
                                           Intrinsic::ID IID) const = 0;
@@ -2062,7 +2070,9 @@ public:
   BranchProbability getPredictableBranchThreshold() override {
     return Impl.getPredictableBranchThreshold();
   }
-  bool hasBranchDivergence() override { return Impl.hasBranchDivergence(); }
+  bool hasBranchDivergence(const Function *F = nullptr) override {
+    return Impl.hasBranchDivergence(F);
+  }
   bool isSourceOfDivergence(const Value *V) override {
     return Impl.isSourceOfDivergence(V);
   }
@@ -2073,6 +2083,10 @@ public:
 
   bool isValidAddrSpaceCast(unsigned FromAS, unsigned ToAS) const override {
     return Impl.isValidAddrSpaceCast(FromAS, ToAS);
+  }
+
+  bool addrspacesMayAlias(unsigned AS0, unsigned AS1) const override {
+    return Impl.addrspacesMayAlias(AS0, AS1);
   }
 
   unsigned getFlatAddressSpace() override { return Impl.getFlatAddressSpace(); }

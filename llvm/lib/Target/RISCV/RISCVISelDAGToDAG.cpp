@@ -579,11 +579,9 @@ void RISCVDAGToDAGISel::selectVSETVLI(SDNode *Node) {
                                             /*MaskAgnostic*/ true);
   SDValue VTypeIOp = CurDAG->getTargetConstant(VTypeI, DL, XLenVT);
 
-  SmallVector<EVT, 2> VTs = {XLenVT};
-
   SDValue VLOperand;
   unsigned Opcode = RISCV::PseudoVSETVLI;
-  if (VLMax) {
+  if (VLMax || isAllOnesConstant(Node->getOperand(1))) {
     VLOperand = CurDAG->getRegister(RISCV::X0, XLenVT);
     Opcode = RISCV::PseudoVSETVLIX0;
   } else {
@@ -593,17 +591,15 @@ void RISCVDAGToDAGISel::selectVSETVLI(SDNode *Node) {
       uint64_t AVL = C->getZExtValue();
       if (isUInt<5>(AVL)) {
         SDValue VLImm = CurDAG->getTargetConstant(AVL, DL, XLenVT);
-        SmallVector<SDValue, 3> Ops = {VLImm, VTypeIOp};
-        ReplaceNode(
-            Node, CurDAG->getMachineNode(RISCV::PseudoVSETIVLI, DL, VTs, Ops));
+        ReplaceNode(Node, CurDAG->getMachineNode(RISCV::PseudoVSETIVLI, DL,
+                                                 XLenVT, VLImm, VTypeIOp));
         return;
       }
     }
   }
 
-  SmallVector<SDValue, 3> Ops = {VLOperand, VTypeIOp};
-
-  ReplaceNode(Node, CurDAG->getMachineNode(Opcode, DL, VTs, Ops));
+  ReplaceNode(Node,
+              CurDAG->getMachineNode(Opcode, DL, XLenVT, VLOperand, VTypeIOp));
 }
 
 bool RISCVDAGToDAGISel::tryShrinkShlLogicImm(SDNode *Node) {
@@ -3164,6 +3160,11 @@ static bool usesAllOnesMask(SDNode *N, unsigned MaskOpIdx) {
          IsVMSet(MaskSetter.getMachineOpcode());
 }
 
+static bool isImplicitDef(SDValue V) {
+  return V.isMachineOpcode() &&
+         V.getMachineOpcode() == TargetOpcode::IMPLICIT_DEF;
+}
+
 // Optimize masked RVV pseudo instructions with a known all-ones mask to their
 // corresponding "unmasked" pseudo versions. The mask we're interested in will
 // take the form of a V0 physical register operand, with a glued
@@ -3181,50 +3182,43 @@ bool RISCVDAGToDAGISel::doPeepholeMaskedRVV(SDNode *N) {
 
   // Retrieve the tail policy operand index, if any.
   std::optional<unsigned> TailPolicyOpIdx;
-  const RISCVInstrInfo &TII = *Subtarget->getInstrInfo();
-  const MCInstrDesc &MaskedMCID = TII.get(N->getMachineOpcode());
+  const MCInstrDesc &MaskedMCID = TII->get(N->getMachineOpcode());
 
   bool UseTUPseudo = false;
   if (RISCVII::hasVecPolicyOp(MaskedMCID.TSFlags)) {
+    TailPolicyOpIdx = getVecPolicyOpIdx(N, MaskedMCID);
     // Some operations are their own TU.
     if (I->UnmaskedTUPseudo == I->UnmaskedPseudo) {
       UseTUPseudo = true;
     } else {
-      TailPolicyOpIdx = getVecPolicyOpIdx(N, MaskedMCID);
-      if (!(N->getConstantOperandVal(*TailPolicyOpIdx) &
-            RISCVII::TAIL_AGNOSTIC)) {
-        // We can't use TA if the tie-operand is not IMPLICIT_DEF
-        if (!N->getOperand(0).isUndef()) {
-          // Keep the true-masked instruction when there is no unmasked TU
-          // instruction
-          if (I->UnmaskedTUPseudo == I->MaskedPseudo)
-            return false;
-          UseTUPseudo = true;
-        }
+      if (!isImplicitDef(N->getOperand(0))) {
+        // Keep the true-masked instruction when there is no unmasked TU
+        // instruction
+        if (I->UnmaskedTUPseudo == I->MaskedPseudo)
+          return false;
+        UseTUPseudo = true;
       }
     }
   }
 
   unsigned Opc = UseTUPseudo ? I->UnmaskedTUPseudo : I->UnmaskedPseudo;
+  const MCInstrDesc &MCID = TII->get(Opc);
 
-  // Check that we're dropping the mask operand and any policy operand
-  // when we transform to this unmasked pseudo. Additionally, if this
-  // instruction is tail agnostic, the unmasked instruction should not have a
-  // tied destination.
+  // If this instruction is tail agnostic, the unmasked instruction should not
+  // have a tied destination.
 #ifndef NDEBUG
-  const MCInstrDesc &MCID = TII.get(Opc);
-  uint64_t TSFlags = MCID.TSFlags;
   bool HasTiedDest = RISCVII::isFirstDefTiedToFirstUse(MCID);
-  assert(UseTUPseudo == HasTiedDest && RISCVII::hasDummyMaskOp(TSFlags) &&
-         "Unexpected pseudo to transform to");
+  assert((UseTUPseudo == HasTiedDest) && "Unexpected pseudo to transform to");
 #endif
 
   SmallVector<SDValue, 8> Ops;
   // Skip the merge operand at index 0 if !UseTUPseudo.
   for (unsigned I = !UseTUPseudo, E = N->getNumOperands(); I != E; I++) {
-    // Skip the mask, the policy, and the Glue.
+    // Skip the mask, the policy (if the unmasked doesn't have a policy op), and
+    // the Glue.
     SDValue Op = N->getOperand(I);
-    if (I == MaskOpIdx || I == TailPolicyOpIdx ||
+    if (I == MaskOpIdx ||
+        (I == TailPolicyOpIdx && !RISCVII::hasVecPolicyOp(MCID.TSFlags)) ||
         Op.getValueType() == MVT::Glue)
       continue;
     Ops.push_back(Op);
@@ -3251,14 +3245,25 @@ bool RISCVDAGToDAGISel::doPeepholeMaskedRVV(SDNode *N) {
 // -Unmasked TU VMERGE_VVM combined with a masked MU TA instruction folds to
 //  masked TU instruction. Both instructions must have the same merge operand.
 //  VMERGE_VVM must have have merge operand same as false operand.
+// Note: The VMERGE_VVM forms above (TA, and TU) refer to the policy implied,
+// not the pseudo name.  That is, a TA VMERGE_VVM can be either the _TU pseudo
+// form with an IMPLICIT_DEF passthrough operand or the unsuffixed (TA) pseudo
+// form.
 bool RISCVDAGToDAGISel::performCombineVMergeAndVOps(SDNode *N, bool IsTA) {
-  unsigned Offset = IsTA ? 0 : 1;
-  uint64_t Policy = IsTA ? RISCVII::TAIL_AGNOSTIC : /*TUMU*/ 0;
 
+  SDValue Merge;
+  if (!IsTA)
+    Merge = N->getOperand(0);
+  unsigned Offset = IsTA ? 0 : 1;
   SDValue False = N->getOperand(0 + Offset);
   SDValue True = N->getOperand(1 + Offset);
   SDValue Mask = N->getOperand(2 + Offset);
   SDValue VL = N->getOperand(3 + Offset);
+
+  // For the _TU psuedo form, we require that either merge and false
+  // are the same, or that merge is undefined.
+  if (!IsTA && Merge != False && !isImplicitDef(Merge))
+    return false;
 
   assert(True.getResNo() == 0 &&
          "Expect True is the first output of an instruction.");
@@ -3279,18 +3284,25 @@ bool RISCVDAGToDAGISel::performCombineVMergeAndVOps(SDNode *N, bool IsTA) {
   const RISCV::RISCVMaskedPseudoInfo *Info =
       RISCV::lookupMaskedIntrinsicByUnmaskedTA(TrueOpc);
   if (!Info && HasTiedDest) {
-    Info = RISCV::getMaskedPseudoInfo(TrueOpc);
-    IsMasked = true;
+    Info = RISCV::lookupMaskedIntrinsicByUnmaskedTU(TrueOpc);
+    if (Info && !isImplicitDef(True->getOperand(0)))
+      // We only support the TA form of the _TU pseudos
+      return false;
+    // FIXME: Expect undef operand here?
+    if (!Info) {
+      Info = RISCV::getMaskedPseudoInfo(TrueOpc);
+      IsMasked = true;
+    }
   }
 
   if (!Info)
     return false;
 
-  if (HasTiedDest) {
+  if (HasTiedDest && !isImplicitDef(True->getOperand(0))) {
     // The vmerge instruction must be TU.
     // FIXME: This could be relaxed, but we need to handle the policy for the
     // resulting op correctly.
-    if (IsTA)
+    if (IsTA || isImplicitDef(Merge))
       return false;
     SDValue MergeOpTrue = True->getOperand(0);
     // Both the vmerge instruction and the True instruction must have the same
@@ -3302,7 +3314,7 @@ bool RISCVDAGToDAGISel::performCombineVMergeAndVOps(SDNode *N, bool IsTA) {
   if (IsMasked) {
     assert(HasTiedDest && "Expected tied dest");
     // The vmerge instruction must be TU.
-    if (IsTA)
+    if (IsTA || isImplicitDef(Merge))
       return false;
     // The vmerge instruction must have an all 1s mask since we're going to keep
     // the mask from the True instruction.
@@ -3368,20 +3380,23 @@ bool RISCVDAGToDAGISel::performCombineVMergeAndVOps(SDNode *N, bool IsTA) {
          "Expected instructions with mask have a tied dest.");
 #endif
 
+  uint64_t Policy = (IsTA || isImplicitDef(N->getOperand(0))) ?
+    RISCVII::TAIL_AGNOSTIC : /*TUMU*/ 0;
+  SDValue PolicyOp =
+    CurDAG->getTargetConstant(Policy, DL, Subtarget->getXLenVT());
+
   SmallVector<SDValue, 8> Ops;
   if (IsMasked) {
-    Ops.append(True->op_begin(), True->op_begin() + TrueVLIndex);
+    Ops.push_back(False);
+    Ops.append(True->op_begin() + 1, True->op_begin() + TrueVLIndex);
     Ops.append({VL, /* SEW */ True.getOperand(TrueVLIndex + 1)});
-    Ops.push_back(
-        CurDAG->getTargetConstant(Policy, DL, Subtarget->getXLenVT()));
+    Ops.push_back(PolicyOp);
     Ops.append(True->op_begin() + TrueVLIndex + 3, True->op_end());
   } else {
-    if (!HasTiedDest)
-      Ops.push_back(False);
-    Ops.append(True->op_begin(), True->op_begin() + TrueVLIndex);
+    Ops.push_back(False);
+    Ops.append(True->op_begin() + HasTiedDest, True->op_begin() + TrueVLIndex);
     Ops.append({Mask, VL, /* SEW */ True.getOperand(TrueVLIndex + 1)});
-    Ops.push_back(
-        CurDAG->getTargetConstant(Policy, DL, Subtarget->getXLenVT()));
+    Ops.push_back(PolicyOp);
 
     // Result node should have chain operand of True.
     if (HasChainOp)
@@ -3467,10 +3482,7 @@ bool RISCVDAGToDAGISel::doPeepholeMergeVVMFold() {
     };
 
     unsigned Opc = N->getMachineOpcode();
-    // The following optimizations require that the merge operand of N is same
-    // as the false operand of N.
-    if ((IsVMergeTU(Opc) && N->getOperand(0) == N->getOperand(1)) ||
-        IsVMergeTA(Opc))
+    if (IsVMergeTU(Opc) || IsVMergeTA(Opc))
       MadeChange |= performCombineVMergeAndVOps(N, IsVMergeTA(Opc));
     if (IsVMergeTU(Opc) && N->getOperand(0) == N->getOperand(1))
       MadeChange |= performVMergeToVMv(N);

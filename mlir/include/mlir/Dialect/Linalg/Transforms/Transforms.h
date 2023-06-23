@@ -299,6 +299,7 @@ LogicalResult promoteSubviewsPrecondition(Operation *op,
 /// Return success if the operation can be vectorized.
 LogicalResult vectorizeOpPrecondition(Operation *op,
                                       ArrayRef<int64_t> inputVectorSizes = {},
+                                      ArrayRef<bool> inputScalableVecDims = {},
                                       bool vectorizeNDExtract = false);
 
 //===----------------------------------------------------------------------===//
@@ -592,8 +593,8 @@ LogicalResult deallocateGPUPrivateMemory(OpBuilder &, Value /*buffer*/);
 /// dynamic shapes.
 LogicalResult vectorize(RewriterBase &rewriter, Operation *op,
                         ArrayRef<int64_t> inputVectorSizes = {},
-                        bool vectorizeNDExtract = false,
-                        bool lastVectorSizeScalable = false);
+                        ArrayRef<bool> inputScalableVecDims = {},
+                        bool vectorizeNDExtract = false);
 
 /// Emit a suitable vector form for a Copy op with fully static shape.
 LogicalResult vectorizeCopy(RewriterBase &builder, memref::CopyOp copyOp);
@@ -1147,15 +1148,6 @@ struct CopyVectorizationPattern : public OpRewritePattern<memref::CopyOp> {
   using OpRewritePattern<memref::CopyOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(memref::CopyOp copyOp,
-                                PatternRewriter &rewriter) const override;
-};
-
-/// tensor::PadOp is not canonicalized away yet, so we provide a
-/// transformation to `linalg.generic`.
-struct PadOpTransformationPattern : public OpRewritePattern<tensor::PadOp> {
-  using OpRewritePattern<tensor::PadOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(tensor::PadOp padOp,
                                 PatternRewriter &rewriter) const override;
 };
 
