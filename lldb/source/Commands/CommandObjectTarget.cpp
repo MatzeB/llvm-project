@@ -1318,7 +1318,7 @@ static void DumpModuleArchitecture(Stream &strm, Module *module,
 
 static void DumpModuleUUID(Stream &strm, Module *module) {
   if (module && module->GetUUID().IsValid())
-    module->GetUUID().Dump(&strm);
+    module->GetUUID().Dump(strm);
   else
     strm.PutCString("                                    ");
 }
@@ -1507,28 +1507,6 @@ static bool LookupAddressInModule(CommandInterpreter &interpreter, Stream &strm,
     ExecutionContextScope *exe_scope =
         interpreter.GetExecutionContext().GetBestExecutionContextScope();
     DumpAddress(exe_scope, so_addr, verbose, all_ranges, strm);
-    //        strm.IndentMore();
-    //        strm.Indent ("    Address: ");
-    //        so_addr.Dump (&strm, exe_scope,
-    //        Address::DumpStyleModuleWithFileAddress);
-    //        strm.PutCString (" (");
-    //        so_addr.Dump (&strm, exe_scope,
-    //        Address::DumpStyleSectionNameOffset);
-    //        strm.PutCString (")\n");
-    //        strm.Indent ("    Summary: ");
-    //        const uint32_t save_indent = strm.GetIndentLevel ();
-    //        strm.SetIndentLevel (save_indent + 13);
-    //        so_addr.Dump (&strm, exe_scope,
-    //        Address::DumpStyleResolvedDescription);
-    //        strm.SetIndentLevel (save_indent);
-    //        // Print out detailed address information when verbose is enabled
-    //        if (verbose)
-    //        {
-    //            strm.EOL();
-    //            so_addr.Dump (&strm, exe_scope,
-    //            Address::DumpStyleDetailedSymbolContext);
-    //        }
-    //        strm.IndentLess();
     return true;
   }
 
@@ -2560,7 +2538,7 @@ protected:
             return true;
           } else {
             StreamString strm;
-            module_spec.GetUUID().Dump(&strm);
+            module_spec.GetUUID().Dump(strm);
             if (module_spec.GetFileSpec()) {
               if (module_spec.GetSymbolFileSpec()) {
                 result.AppendErrorWithFormat(
@@ -2584,7 +2562,7 @@ protected:
           }
         } else {
           StreamString strm;
-          module_spec.GetUUID().Dump(&strm);
+          module_spec.GetUUID().Dump(strm);
           result.AppendErrorWithFormat(
               "Unable to locate the executable or symbol file with UUID %s",
               strm.GetData());
@@ -4240,7 +4218,7 @@ protected:
     StreamString ss_symfile_uuid;
     if (module_spec.GetUUID().IsValid()) {
       ss_symfile_uuid << " (";
-      module_spec.GetUUID().Dump(&ss_symfile_uuid);
+      module_spec.GetUUID().Dump(ss_symfile_uuid);
       ss_symfile_uuid << ')';
     }
     result.AppendErrorWithFormat(
@@ -4275,7 +4253,7 @@ protected:
     if (!DownloadObjectAndSymbolFile(module_spec, result, flush)) {
       StreamString error_strm;
       error_strm.PutCString("unable to find debug symbols for UUID ");
-      module_spec.GetUUID().Dump(&error_strm);
+      module_spec.GetUUID().Dump(error_strm);
       result.AppendError(error_strm.GetString());
       return false;
     }
@@ -5057,7 +5035,7 @@ protected:
         Target::StopHookSP this_hook = target.GetStopHookAtIndex(i);
         if (i > 0)
           result.GetOutputStream().PutCString("\n");
-        this_hook->GetDescription(&(result.GetOutputStream()),
+        this_hook->GetDescription(result.GetOutputStream(),
                                   eDescriptionLevelFull);
       }
     }
@@ -5105,8 +5083,8 @@ public:
   CommandObjectTargetDumpTypesystem(CommandInterpreter &interpreter)
       : CommandObjectParsed(
             interpreter, "target dump typesystem",
-            "Dump the state of the target's internal type system.\n"
-            "Intended to be used for debugging LLDB itself.",
+            "Dump the state of the target's internal type system. Intended to "
+            "be used for debugging LLDB itself.",
             nullptr, eCommandRequiresTarget) {}
 
   ~CommandObjectTargetDumpTypesystem() override = default;
@@ -5123,6 +5101,29 @@ protected:
   }
 };
 
+#pragma mark CommandObjectTargetDumpSectionLoadList
+
+/// Dumps the SectionLoadList of the selected Target.
+class CommandObjectTargetDumpSectionLoadList : public CommandObjectParsed {
+public:
+  CommandObjectTargetDumpSectionLoadList(CommandInterpreter &interpreter)
+      : CommandObjectParsed(
+            interpreter, "target dump section-load-list",
+            "Dump the state of the target's internal section load list. "
+            "Intended to be used for debugging LLDB itself.",
+            nullptr, eCommandRequiresTarget) {}
+
+  ~CommandObjectTargetDumpSectionLoadList() override = default;
+
+protected:
+  bool DoExecute(Args &command, CommandReturnObject &result) override {
+    Target &target = GetSelectedTarget();
+    target.GetSectionLoadList().Dump(result.GetOutputStream(), &target);
+    result.SetStatus(eReturnStatusSuccessFinishResult);
+    return result.Succeeded();
+  }
+};
+
 #pragma mark CommandObjectTargetDump
 
 /// Multi-word command for 'target dump'.
@@ -5133,10 +5134,13 @@ public:
       : CommandObjectMultiword(
             interpreter, "target dump",
             "Commands for dumping information about the target.",
-            "target dump [typesystem]") {
+            "target dump [typesystem|section-load-list]") {
     LoadSubCommand(
         "typesystem",
         CommandObjectSP(new CommandObjectTargetDumpTypesystem(interpreter)));
+    LoadSubCommand("section-load-list",
+                   CommandObjectSP(new CommandObjectTargetDumpSectionLoadList(
+                       interpreter)));
   }
 
   ~CommandObjectTargetDump() override = default;

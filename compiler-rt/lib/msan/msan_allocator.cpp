@@ -82,6 +82,22 @@ struct AP64 {  // Allocator64 parameters. Deliberately using a short name.
 
 typedef SizeClassAllocator64<AP64> PrimaryAllocator;
 
+#elif defined(__loongarch_lp64)
+const uptr kAllocatorSpace = 0x700000000000ULL;
+const uptr kMaxAllowedMallocSize = 8UL << 30;
+
+struct AP64 {  // Allocator64 parameters. Deliberately using a short name.
+  static const uptr kSpaceBeg = kAllocatorSpace;
+  static const uptr kSpaceSize = 0x40000000000;  // 4T.
+  static const uptr kMetadataSize = sizeof(Metadata);
+  typedef DefaultSizeClassMap SizeClassMap;
+  typedef MsanMapUnmapCallback MapUnmapCallback;
+  static const uptr kFlags = 0;
+  using AddressSpaceView = LocalAddressSpaceView;
+};
+
+typedef SizeClassAllocator64<AP64> PrimaryAllocator;
+
 #elif defined(__powerpc64__)
 static const uptr kMaxAllowedMallocSize = 2UL << 30;  // 2G
 
@@ -192,7 +208,10 @@ static void *MsanAllocate(StackTrace *stack, uptr size, uptr alignment,
       reinterpret_cast<Metadata *>(allocator.GetMetaData(allocated));
   meta->requested_size = size;
   if (zeroise) {
-    __msan_clear_and_unpoison(allocated, size);
+    if (allocator.FromPrimary(allocated))
+      __msan_clear_and_unpoison(allocated, size);
+    else
+      __msan_unpoison(allocated, size);  // Mem is already zeroed.
   } else if (flags()->poison_in_malloc) {
     __msan_poison(allocated, size);
     if (__msan_get_track_origins()) {
@@ -215,8 +234,9 @@ void MsanDeallocate(StackTrace *stack, void *p) {
   uptr size = meta->requested_size;
   meta->requested_size = 0;
   // This memory will not be reused by anyone else, so we are free to keep it
-  // poisoned.
-  if (flags()->poison_in_free) {
+  // poisoned. The secondary allocator will unmap and unpoison by
+  // MsanMapUnmapCallback, no need to poison it here.
+  if (flags()->poison_in_free && allocator.FromPrimary(p)) {
     __msan_poison(p, size);
     if (__msan_get_track_origins()) {
       stack->tag = StackTrace::TAG_DEALLOC;

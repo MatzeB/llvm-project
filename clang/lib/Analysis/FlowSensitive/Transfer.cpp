@@ -23,6 +23,7 @@
 #include "clang/Analysis/FlowSensitive/ControlFlowContext.h"
 #include "clang/Analysis/FlowSensitive/DataflowEnvironment.h"
 #include "clang/Analysis/FlowSensitive/NoopAnalysis.h"
+#include "clang/Analysis/FlowSensitive/RecordOps.h"
 #include "clang/Analysis/FlowSensitive/Value.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/OperatorKinds.h"
@@ -152,7 +153,7 @@ static void propagateStorageLocation(const Expr &From, const Expr &To,
     Env.setStorageLocationStrict(To, *Loc);
 }
 
-// Forwards the value or storage location of `From` to `To` in cases where
+// Propagates the value or storage location of `From` to `To` in cases where
 // `From` may be either a glvalue or a prvalue. `To` must be a glvalue iff
 // `From` is a glvalue.
 static void propagateValueOrStorageLocation(const Expr &From, const Expr &To,
@@ -230,6 +231,15 @@ public:
   void VisitDeclRefExpr(const DeclRefExpr *S) {
     const ValueDecl *VD = S->getDecl();
     assert(VD != nullptr);
+
+    // `DeclRefExpr`s to fields and non-static methods aren't glvalues, and
+    // there's also no sensible `Value` we can assign to them, so skip them.
+    if (isa<FieldDecl>(VD))
+      return;
+    if (auto *Method = dyn_cast<CXXMethodDecl>(VD);
+        Method && !Method->isStatic())
+      return;
+
     auto *DeclLoc = Env.getStorageLocation(*VD);
     if (DeclLoc == nullptr)
       return;
@@ -396,8 +406,7 @@ public:
       propagateValueOrStorageLocation(*SubExpr, *S, Env);
       break;
     }
-    case CK_NullToPointer:
-    case CK_NullToMemberPointer: {
+    case CK_NullToPointer: {
       auto &Loc = Env.createStorageLocation(S->getType());
       Env.setStorageLocation(*S, Loc);
 
@@ -406,8 +415,11 @@ public:
       Env.setValue(Loc, NullPointerVal);
       break;
     }
-    case CK_FunctionToPointerDecay:
-    case CK_BuiltinFnToFnPtr: {
+    case CK_NullToMemberPointer:
+      // FIXME: Implement pointers to members. For now, don't associate a value
+      // with this expression.
+      break;
+    case CK_FunctionToPointerDecay: {
       StorageLocation *PointeeLoc =
           Env.getStorageLocation(*SubExpr, SkipPast::Reference);
       if (PointeeLoc == nullptr)
@@ -419,6 +431,12 @@ public:
       Env.setValue(PointerLoc, PointerVal);
       break;
     }
+    case CK_BuiltinFnToFnPtr:
+      // Despite its name, the result type of `BuiltinFnToFnPtr` is a function,
+      // not a function pointer. In addition, builtin functions can only be
+      // called directly; it is not legal to take their address. We therefore
+      // don't need to create a value or storage location for them.
+      break;
     default:
       break;
     }
@@ -439,14 +457,12 @@ public:
       break;
     }
     case UO_AddrOf: {
-      // Do not form a pointer to a reference. If `SubExpr` is assigned a
-      // `ReferenceValue` then form a value that points to the location of its
-      // pointee.
-      StorageLocation *PointeeLoc = Env.getStorageLocationStrict(*SubExpr);
-      if (PointeeLoc == nullptr)
+      // FIXME: Model pointers to members.
+      if (S->getType()->isMemberPointerType())
         break;
 
-      Env.setValueStrict(*S, Env.create<PointerValue>(*PointeeLoc));
+      if (StorageLocation *PointeeLoc = Env.getStorageLocationStrict(*SubExpr))
+        Env.setValueStrict(*S, Env.create<PointerValue>(*PointeeLoc));
       break;
     }
     case UO_LNot: {
@@ -571,18 +587,7 @@ public:
   void VisitCXXDefaultInitExpr(const CXXDefaultInitExpr *S) {
     const Expr *InitExpr = S->getExpr();
     assert(InitExpr != nullptr);
-
-    Value *InitExprVal = Env.getValue(*InitExpr, SkipPast::None);
-    if (InitExprVal == nullptr)
-      return;
-
-    const FieldDecl *Field = S->getField();
-    assert(Field != nullptr);
-
-    auto &ThisLoc =
-        *cast<AggregateStorageLocation>(Env.getThisPointeeStorageLocation());
-    auto &FieldLoc = ThisLoc.getChild(*Field);
-    Env.setValue(FieldLoc, *InitExprVal);
+    propagateValueOrStorageLocation(*InitExpr, *S, Env);
   }
 
   void VisitCXXConstructExpr(const CXXConstructExpr *S) {
@@ -597,16 +602,21 @@ public:
       const Expr *Arg = S->getArg(0);
       assert(Arg != nullptr);
 
-      if (S->isElidable()) {
-        auto *ArgLoc = Env.getStorageLocation(*Arg, SkipPast::Reference);
-        if (ArgLoc == nullptr)
-          return;
+      auto *ArgLoc = cast_or_null<AggregateStorageLocation>(
+          Env.getStorageLocation(*Arg, SkipPast::Reference));
+      if (ArgLoc == nullptr)
+        return;
 
+      if (S->isElidable()) {
         Env.setStorageLocation(*S, *ArgLoc);
-      } else if (auto *ArgVal = Env.getValue(*Arg, SkipPast::Reference)) {
-        auto &Loc = Env.createStorageLocation(*S);
+      } else {
+        auto &Loc =
+            cast<AggregateStorageLocation>(Env.createStorageLocation(*S));
         Env.setStorageLocation(*S, Loc);
-        Env.setValue(Loc, *ArgVal);
+        if (Value *Val = Env.createValue(S->getType())) {
+          Env.setValue(Loc, *Val);
+          copyRecord(*ArgLoc, Loc, Env);
+        }
       }
       return;
     }
@@ -638,16 +648,17 @@ public:
           !Method->isMoveAssignmentOperator())
         return;
 
-      auto *ObjectLoc = Env.getStorageLocation(*Arg0, SkipPast::Reference);
+      auto *ObjectLoc = cast_or_null<AggregateStorageLocation>(
+          Env.getStorageLocation(*Arg0, SkipPast::Reference));
       if (ObjectLoc == nullptr)
         return;
 
-      auto *Val = Env.getValue(*Arg1, SkipPast::Reference);
-      if (Val == nullptr)
+      auto *ArgLoc = cast_or_null<AggregateStorageLocation>(
+          Env.getStorageLocation(*Arg1, SkipPast::Reference));
+      if (ArgLoc == nullptr)
         return;
 
-      // Assign a value to the storage location of the object.
-      Env.setValue(*ObjectLoc, *Val);
+      copyRecord(*ArgLoc, *ObjectLoc, Env);
 
       // FIXME: Add a test for the value of the whole expression.
       // Assign a storage location for the whole expression.
@@ -865,7 +876,7 @@ private:
     assert(BlockToOutputState);
     assert(ExitBlock < BlockToOutputState->size());
 
-    auto ExitState = (*BlockToOutputState)[ExitBlock];
+    auto &ExitState = (*BlockToOutputState)[ExitBlock];
     assert(ExitState);
 
     Env.popCall(S, ExitState->Env);

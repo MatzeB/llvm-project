@@ -343,6 +343,10 @@ struct Client {
 private:
   Process<false, Packet<gpu::LANE_SIZE>> process;
 };
+static_assert(cpp::is_trivially_copyable<Client>::value &&
+                  sizeof(Process<false, Packet<1>>) ==
+                      sizeof(Process<false, Packet<32>>),
+              "The client is not trivially copyable from the server");
 
 /// The RPC server used to respond to the client.
 template <uint32_t lane_size> struct Server {
@@ -431,7 +435,6 @@ LIBC_INLINE void Port<T, S>::recv_and_send(W work) {
 /// thread private pointers to the underlying value.
 template <bool T, typename S>
 LIBC_INLINE void Port<T, S>::send_n(const void *src, uint64_t size) {
-  static_assert(is_process_gpu(), "Only valid when running on the GPU");
   const void **src_ptr = &src;
   uint64_t *size_ptr = &size;
   send_n(src_ptr, size_ptr);

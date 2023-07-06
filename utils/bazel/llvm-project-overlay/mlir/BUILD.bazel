@@ -1777,6 +1777,7 @@ cc_library(
         ":ArmSMEIncGen",
         ":IR",
         ":LLVMDialect",
+        ":SCFDialect",
         ":SideEffectInterfaces",
         "//llvm:Core",
         "//llvm:Support",
@@ -1789,12 +1790,16 @@ cc_library(
     hdrs = glob(["include/mlir/Dialect/ArmSME/Transforms/*.h"]),
     includes = ["include"],
     deps = [
+        ":ArithDialect",
         ":ArmSMEDialect",
         ":ArmSMETransformsPassIncGen",
         ":FuncDialect",
-        ":FuncIncGen",
+        ":IR",
         ":LLVMCommonConversion",
+        ":LLVMDialect",
         ":Pass",
+        ":SCFDialect",
+        ":VectorDialect",
     ],
 )
 
@@ -2404,6 +2409,7 @@ cc_library(
         ":AffineUtils",
         ":FuncDialect",
         ":IR",
+        ":LoopLikeInterface",
         ":SCFDialect",
         ":SCFTransformOpsIncGen",
         ":SCFTransforms",
@@ -2557,7 +2563,18 @@ cc_library(
 
 cc_library(
     name = "SparseTensorDialect",
-    srcs = ["lib/Dialect/SparseTensor/IR/SparseTensorDialect.cpp"],
+    srcs = [
+        "lib/Dialect/SparseTensor/IR/Detail/DimLvlMap.cpp",
+        "lib/Dialect/SparseTensor/IR/Detail/DimLvlMap.h",
+        "lib/Dialect/SparseTensor/IR/Detail/DimLvlMapParser.cpp",
+        "lib/Dialect/SparseTensor/IR/Detail/DimLvlMapParser.h",
+        "lib/Dialect/SparseTensor/IR/Detail/LvlTypeParser.cpp",
+        "lib/Dialect/SparseTensor/IR/Detail/LvlTypeParser.h",
+        "lib/Dialect/SparseTensor/IR/Detail/TemplateExtras.h",
+        "lib/Dialect/SparseTensor/IR/Detail/Var.cpp",
+        "lib/Dialect/SparseTensor/IR/Detail/Var.h",
+        "lib/Dialect/SparseTensor/IR/SparseTensorDialect.cpp",
+    ],
     hdrs = [
         "include/mlir/Dialect/SparseTensor/IR/SparseTensor.h",
         "include/mlir/Dialect/SparseTensor/IR/SparseTensorStorageLayout.h",
@@ -2566,6 +2583,7 @@ cc_library(
     includes = ["include"],
     deps = [
         ":ArithDialect",
+        ":DialectUtils",
         ":IR",
         ":InferTypeOpInterface",
         ":SparseTensorAttrDefsIncGen",
@@ -2755,6 +2773,64 @@ cc_library(
         ":SideEffectInterfaces",
         "//llvm:Core",
         "//llvm:Support",
+    ],
+)
+
+cc_library(
+    name = "NVGPUTransformOps",
+    srcs = glob([
+        "lib/Dialect/NVGPU/TransformOps/*.cpp",
+    ]),
+    hdrs = glob([
+        "include/mlir/Dialect/NVGPU/TransformOps/*.h",
+    ]),
+    includes = ["include"],
+    deps = [
+        ":AffineDialect",
+        ":ArithDialect",
+        ":ArithUtils",
+        ":DialectUtils",
+        ":GPUDialect",
+        ":IR",
+        ":LinalgDialect",
+        ":MemRefDialect",
+        ":NVGPUDialect",
+        ":NVGPUTransformOpsIncGen",
+        ":Support",
+        ":TransformDialect",
+        ":VectorDialect",
+        "//llvm:Support",
+    ],
+)
+
+td_library(
+    name = "NVGPUTransformOpsTdFiles",
+    srcs = glob([
+        "include/mlir/Dialect/NVGPU/TransformOps/*.td",
+    ]),
+    includes = ["include"],
+    deps = [
+        ":TransformDialectTdFiles",
+    ],
+)
+
+gentbl_cc_library(
+    name = "NVGPUTransformOpsIncGen",
+    strip_include_prefix = "include",
+    tbl_outs = [
+        (
+            ["-gen-op-decls"],
+            "include/mlir/Dialect/NVGPU/TransformOps/NVGPUTransformOps.h.inc",
+        ),
+        (
+            ["-gen-op-defs"],
+            "include/mlir/Dialect/NVGPU/TransformOps/NVGPUTransformOps.cpp.inc",
+        ),
+    ],
+    tblgen = ":mlir-tblgen",
+    td_file = "include/mlir/Dialect/NVGPU/TransformOps/NVGPUTransformOps.td",
+    deps = [
+        ":NVGPUTransformOpsTdFiles",
     ],
 )
 
@@ -7684,6 +7760,7 @@ cc_library(
         ":NVGPUDialect",
         ":NVGPUPassIncGen",
         ":NVGPUToNVVM",
+        ":NVGPUTransformOps",
         ":NVGPUTransforms",
         ":NVVMDialect",
         ":OpenACCDialect",
@@ -9236,6 +9313,7 @@ cc_library(
         ":Analysis",
         ":ArithDialect",
         ":AsmParser",
+        ":BufferizationTransforms",
         ":DialectUtils",
         ":FuncDialect",
         ":GPUDialect",
@@ -9878,6 +9956,7 @@ cc_library(
         ":LoopLikeInterface",
         ":Pass",
         ":QuantOps",
+        ":Support",
         ":TensorDialect",
         ":TosaDialectIncGen",
         ":TosaInterfacesIncGen",
@@ -10161,6 +10240,7 @@ cc_library(
         ":CastInterfaces",
         ":ControlFlowInterfaces",
         ":IR",
+        ":LoopLikeInterface",
         ":Pass",
         ":Rewrite",
         ":SideEffectInterfaces",

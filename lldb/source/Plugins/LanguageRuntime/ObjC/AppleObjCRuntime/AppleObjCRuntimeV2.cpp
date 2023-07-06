@@ -1685,7 +1685,7 @@ AppleObjCRuntimeV2::SharedCacheImageHeaders::CreateSharedCacheImageHeaders(
                                   entsize));
   if (auto Err = shared_cache_image_headers->UpdateIfNeeded()) {
     LLDB_LOG_ERROR(log, std::move(Err),
-                   "Failed to update SharedCacheImageHeaders");
+                   "Failed to update SharedCacheImageHeaders: {0}");
     return nullptr;
   }
 
@@ -1745,7 +1745,7 @@ bool AppleObjCRuntimeV2::SharedCacheImageHeaders::IsImageLoaded(
   if (auto Err = UpdateIfNeeded()) {
     Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
     LLDB_LOG_ERROR(log, std::move(Err),
-                   "Failed to update SharedCacheImageHeaders");
+                   "Failed to update SharedCacheImageHeaders: {0}");
   }
   return m_loaded_images.test(image_index);
 }
@@ -1754,7 +1754,7 @@ uint64_t AppleObjCRuntimeV2::SharedCacheImageHeaders::GetVersion() {
   if (auto Err = UpdateIfNeeded()) {
     Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
     LLDB_LOG_ERROR(log, std::move(Err),
-                   "Failed to update SharedCacheImageHeaders");
+                   "Failed to update SharedCacheImageHeaders: {0}");
   }
   return m_version;
 }
@@ -2308,7 +2308,10 @@ AppleObjCRuntimeV2::SharedCacheClassInfoExtractor::UpdateISAToDescriptorMap() {
 
   // The number of entries to pre-allocate room for.
   // Each entry is (addrsize + 4) bytes
-  const uint32_t max_num_classes = 163840;
+  // FIXME: It is not sustainable to continue incrementing this value every time
+  // the shared cache grows. This is because it requires allocating memory in
+  // the inferior process and some inferior processes have small memory limits.
+  const uint32_t max_num_classes = 212992;
 
   UtilityFunction *get_class_info_code = GetClassInfoUtilityFunction(exe_ctx);
   if (!get_class_info_code) {

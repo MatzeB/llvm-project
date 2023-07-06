@@ -1279,7 +1279,7 @@ bool LLParser::parseGlobal(const std::string &Name, LocTy NameLoc,
   GV->setUnnamedAddr(UnnamedAddr);
 
   if (GVal) {
-    if (GVal->getType() != Ty->getPointerTo(AddrSpace))
+    if (GVal->getAddressSpace() != AddrSpace)
       return error(
           TyLoc,
           "forward reference and definition of global have different types");
@@ -2279,9 +2279,9 @@ bool LLParser::parseAllocKind(AllocFnKind &Kind) {
 static std::optional<MemoryEffects::Location> keywordToLoc(lltok::Kind Tok) {
   switch (Tok) {
   case lltok::kw_argmem:
-    return MemoryEffects::ArgMem;
+    return IRMemLocation::ArgMem;
   case lltok::kw_inaccessiblemem:
-    return MemoryEffects::InaccessibleMem;
+    return IRMemLocation::InaccessibleMem;
   default:
     return std::nullopt;
   }
@@ -2318,7 +2318,7 @@ std::optional<MemoryEffects> LLParser::parseMemoryAttr() {
 
   bool SeenLoc = false;
   do {
-    std::optional<MemoryEffects::Location> Loc = keywordToLoc(Lex.getKind());
+    std::optional<IRMemLocation> Loc = keywordToLoc(Lex.getKind());
     if (Loc) {
       Lex.Lex();
       if (!EatIfPresent(lltok::colon)) {

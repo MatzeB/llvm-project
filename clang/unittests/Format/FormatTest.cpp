@@ -4612,6 +4612,24 @@ TEST_F(FormatTest, FormatsInlineASM) {
             format("__asm   {\n"
                    "}\n"
                    "int   i;"));
+
+  auto Style = getLLVMStyleWithColumns(0);
+  const StringRef Code1{"asm(\"xyz\" : \"=a\"(a), \"=d\"(b) : \"a\"(data));"};
+  const StringRef Code2{"asm(\"xyz\"\n"
+                        "    : \"=a\"(a), \"=d\"(b)\n"
+                        "    : \"a\"(data));"};
+  const StringRef Code3{"asm(\"xyz\" : \"=a\"(a), \"=d\"(b)\n"
+                        "    : \"a\"(data));"};
+
+  Style.BreakBeforeInlineASMColon = FormatStyle::BBIAS_OnlyMultiline;
+  verifyFormat(Code1, Style);
+  verifyNoChange(Code2, Style);
+  verifyNoChange(Code3, Style);
+
+  Style.BreakBeforeInlineASMColon = FormatStyle::BBIAS_Always;
+  verifyFormat(Code2, Code1, Style);
+  verifyNoChange(Code2, Style);
+  verifyFormat(Code2, Code3, Style);
 }
 
 TEST_F(FormatTest, FormatTryCatch) {
@@ -11561,6 +11579,12 @@ TEST_F(FormatTest, UnderstandsUsesOfStarAndAmp) {
                    "    return s << a.DebugString(); \\\n"
                    "  }",
                    getLLVMStyleWithColumns(50)));
+
+  verifyFormat("#define FOO             \\\n"
+               "  void foo() {          \\\n"
+               "    operator+(a * b);   \\\n"
+               "  }",
+               getLLVMStyleWithColumns(25));
 
   // FIXME: We cannot handle this case yet; we might be able to figure out that
   // foo<x> d > v; doesn't make sense.
