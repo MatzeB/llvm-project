@@ -1,0 +1,30 @@
+set(LLVM_LINK_COMPONENTS
+  AggressiveInstCombine
+  Analysis
+  AsmParser
+  BitWriter
+  CFGuard
+  CodeGen
+  Core
+  Coroutines
+  Extensions
+  IPO
+  IRReader
+  IRPrinter
+  InstCombine
+  Instrumentation
+  MC
+  ObjCARCOpts
+  Remarks
+  ScalarOpts
+  Support
+  Target
+  TargetParser
+  TransformUtils
+  Vectorize
+  Passes
+)
+
+add_llvm_tool(llvm-memaccess
+  LlvmMemaccess.cpp
+)

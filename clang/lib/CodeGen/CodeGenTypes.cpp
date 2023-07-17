@@ -51,6 +51,10 @@ void CodeGenTypes::addRecordTypeName(const RecordDecl *RD,
                                      StringRef suffix) {
   SmallString<256> TypeName;
   llvm::raw_svector_ostream OS(TypeName);
+#if 1
+  CGM.getCXXABI().getMangleContext().mangleCXXRTTIName(Context.getRecordType(RD), OS);
+#else
+
   OS << RD->getKindName() << '.';
 
   // FIXME: We probably want to make more tweaks to the printing policy. For
@@ -78,6 +82,7 @@ void CodeGenTypes::addRecordTypeName(const RecordDecl *RD,
   } else
     OS << "anon";
 
+#endif
   if (!suffix.empty())
     OS << suffix;
 
