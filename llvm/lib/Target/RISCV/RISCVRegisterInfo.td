@@ -165,6 +165,15 @@ def SP : GPRRegisterClass<(add X2)>;
 def SR07 : GPRRegisterClass<(add (sequence "X%u", 8, 9),
                                  (sequence "X%u", 18, 23))>;
 
+// Registers saveable by PUSH/POP instruction in Zcmp extension
+def PGPR : RegisterClass<"RISCV", [XLenVT], 32, (add
+    (sequence "X%u", 8, 9),
+    (sequence "X%u", 18, 27),
+    X1
+  )> {
+  let RegInfos = XLenRI;
+}
+
 // Floating point registers
 let RegAltNameIndices = [ABIRegAltName] in {
   def F0_H  : RISCVReg16<0, "f0", ["ft0"]>, DwarfRegNum<[32]>;
@@ -215,7 +224,7 @@ let RegAltNameIndices = [ABIRegAltName] in {
 // meaning caller-save regs are listed before callee-save.
 // We start by allocating argument registers in reverse order since they are
 // compressible.
-def FPR16 : RegisterClass<"RISCV", [f16], 16, (add
+def FPR16 : RegisterClass<"RISCV", [f16, bf16], 16, (add
     (sequence "F%u_H", 15, 10), // fa5-fa0
     (sequence "F%u_H", 0, 7),   // ft0-f7
     (sequence "F%u_H", 16, 17), // fa6-fa7
@@ -526,8 +535,23 @@ def GPRF16  : RegisterClass<"RISCV", [f16], 16, (add GPR)>;
 def GPRF32  : RegisterClass<"RISCV", [f32], 32, (add GPR)>;
 } // RegInfos = XLenRI
 
+// Dummy zero register for use in the register pair containing X0 (as X1 is
+// not read to or written when the X0 register pair is used).
+def DUMMY_REG_PAIR_WITH_X0 : RISCVReg<0, "0">;
+
+// Must add DUMMY_REG_PAIR_WITH_X0 to a separate register class to prevent the
+// register's existence from changing codegen (due to the regPressureSetLimit
+// for the GPR register class being altered).
+def GPRAll : GPRRegisterClass<(add GPR, DUMMY_REG_PAIR_WITH_X0)>;
+
 let RegAltNameIndices = [ABIRegAltName] in {
-  foreach I = 0-15 in {
+  def X0_PD : RISCVRegWithSubRegs<0, X0.AsmName,
+                                     [X0, DUMMY_REG_PAIR_WITH_X0],
+                                     X0.AltNames> {
+    let SubRegIndices = [sub_32, sub_32_hi];
+    let CoveredBySubRegs = 1;
+  }
+  foreach I = 1-15 in {
     defvar Index = !shl(I, 1);
     defvar Reg = !cast<Register>("X"#Index);
     defvar RegP1 = !cast<Register>("X"#!add(Index,1));

@@ -2965,9 +2965,11 @@ bool AMDGPULegalizerInfo::legalizeFMad(
 
   // TODO: Always legal with future ftz flag.
   // FIXME: Do we need just output?
-  if (Ty == LLT::scalar(32) && !MFI->getMode().allFP32Denormals())
+  if (Ty == LLT::scalar(32) &&
+      MFI->getMode().FP32Denormals == DenormalMode::getPreserveSign())
     return true;
-  if (Ty == LLT::scalar(16) && !MFI->getMode().allFP64FP16Denormals())
+  if (Ty == LLT::scalar(16) &&
+      MFI->getMode().FP64FP16Denormals == DenormalMode::getPreserveSign())
     return true;
 
   MachineIRBuilder HelperBuilder(MI);
@@ -4642,7 +4644,7 @@ bool AMDGPULegalizerInfo::legalizeFDIV32(MachineInstr &MI,
 
   // FIXME: Doesn't correctly model the FP mode switch, and the FP operations
   // aren't modeled as reading it.
-  if (!Mode.allFP32Denormals())
+  if (Mode.FP32Denormals != DenormalMode::getIEEE())
     toggleSPDenormMode(true, B, ST, Mode);
 
   auto Fma0 = B.buildFMA(S32, NegDivScale0, ApproxRcp, One, Flags);
@@ -4652,7 +4654,9 @@ bool AMDGPULegalizerInfo::legalizeFDIV32(MachineInstr &MI,
   auto Fma3 = B.buildFMA(S32, Fma2, Fma1, Mul, Flags);
   auto Fma4 = B.buildFMA(S32, NegDivScale0, Fma3, NumeratorScaled, Flags);
 
-  if (!Mode.allFP32Denormals())
+  // FIXME: This mishandles dynamic denormal mode. We need to query the
+  // current mode and restore the original.
+  if (Mode.FP32Denormals != DenormalMode::getIEEE())
     toggleSPDenormMode(false, B, ST, Mode);
 
   auto Fmas = B.buildIntrinsic(Intrinsic::amdgcn_div_fmas, {S32}, false)
@@ -4802,9 +4806,9 @@ bool AMDGPULegalizerInfo::legalizeFDIVFastIntrin(MachineInstr &MI,
   auto Abs = B.buildFAbs(S32, RHS, Flags);
   const APFloat C0Val(1.0f);
 
-  auto C0 = B.buildConstant(S32, 0x6f800000);
-  auto C1 = B.buildConstant(S32, 0x2f800000);
-  auto C2 = B.buildConstant(S32, llvm::bit_cast<uint32_t>(1.0f));
+  auto C0 = B.buildFConstant(S32, 0x1p+96f);
+  auto C1 = B.buildFConstant(S32, 0x1p-32f);
+  auto C2 = B.buildFConstant(S32, 1.0f);
 
   auto CmpRes = B.buildFCmp(CmpInst::FCMP_OGT, S1, Abs, C0, Flags);
   auto Sel = B.buildSelect(S32, CmpRes, C1, C2, Flags);

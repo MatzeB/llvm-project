@@ -55,8 +55,9 @@ The new requirements are as follows:
 Changes to the LLVM IR
 ----------------------
 
-* Typed pointers are no longer supported. See the `opaque pointers
-  <OpaquePointers.html>`__ documentation for migration instructions.
+* Typed pointers are no longer supported and the ``-opaque-pointers`` option
+  has been removed. See the `opaque pointers <OpaquePointers.html>`__
+  documentation for migration instructions.
 
 * The ``nofpclass`` attribute was introduced. This allows more
   optimizations around special floating point value comparisons.
@@ -69,6 +70,10 @@ Changes to the LLVM IR
   removed:
 
   * ``select``
+
+* Introduced a set of experimental `convergence control intrinsics
+  <ConvergentOperations.html>`__ to explicitly define the semantics of convergent
+  operations.
 
 Changes to LLVM infrastructure
 ------------------------------
@@ -93,6 +98,9 @@ Changes to building LLVM
 
 Changes to TableGen
 -------------------
+
+* Named arguments are supported. Arguments can be specified in the form of
+  ``name=value``.
 
 Changes to Interprocedural Optimizations
 ----------------------------------------
@@ -253,11 +261,17 @@ Changes to the RISC-V Backend
 * Assembly support was added for the experimental Zfbfmin (scalar BF16
   conversions), Zvfbfmin (vector BF16 conversions), and Zvfbfwma (vector BF16
   widening mul-add) extensions.
+* Added assembler/disassembler support for the experimental Zacas (atomic
+  compare-and-swap) extension.
+* Zvfh extension version was upgraded to 1.0 and is no longer experimental.
 
 Changes to the WebAssembly Backend
 ----------------------------------
 
-* ...
+* Function annotations (``__attribute__((annotate(<name>)))``)
+  now generate custom sections in the Wasm output file. A custom section
+  for each unique name will be created that contains each function
+  index the annotation applies to.
 
 Changes to the Windows Target
 -----------------------------
@@ -267,7 +281,11 @@ Changes to the X86 Backend
 
 * ``__builtin_unpredictable`` (unpredictable metadata in LLVM IR), is handled by X86 Backend.
   ``X86CmovConversion`` pass now respects this builtin and does not convert CMOVs to branches.
-
+* Add support for the ``PBNDKB`` instruction.
+* Support ISA of ``SHA512``.
+* Support ISA of ``SM3``.
+* Support ISA of ``SM4``.
+* Support ISA of ``AVX-VNNI-INT16``.
 
 Changes to the OCaml bindings
 -----------------------------

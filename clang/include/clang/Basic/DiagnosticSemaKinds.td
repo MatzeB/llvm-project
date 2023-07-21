@@ -83,8 +83,8 @@ def err_typecheck_converted_constant_expression_indirect : Error<
   "bind reference to a temporary">;
 def err_expr_not_cce : Error<
   "%select{case value|enumerator value|non-type template argument|"
-  "array size|explicit specifier argument|noexcept specifier argument}0 "
-  "is not a constant expression">;
+  "array size|explicit specifier argument|noexcept specifier argument|"
+  "call to 'size()'|call to 'data()'}0 is not a constant expression">;
 def ext_cce_narrowing : ExtWarn<
   "%select{case value|enumerator value|non-type template argument|"
   "array size|explicit specifier argument|noexcept specifier argument}0 "
@@ -406,6 +406,9 @@ def warn_reserved_extern_symbol: Warning<
   "it starts with '_' followed by a capital letter|"
   "it contains '__'}1">,
   InGroup<ReservedIdentifier>, DefaultIgnore;
+def warn_deprecated_literal_operator_id: Warning<
+  "identifier %0 preceded by whitespace in a literal operator declaration "
+  "is deprecated">, InGroup<DeprecatedLiteralOperator>, DefaultIgnore;
 def warn_reserved_module_name : Warning<
   "%0 is a reserved name for a module">, InGroup<ReservedModuleIdentifier>;
 
@@ -433,9 +436,6 @@ def err_ellipsis_first_param : Error<
   "ISO C requires a named parameter before '...'">;
 def err_declarator_need_ident : Error<"declarator requires an identifier">;
 def err_language_linkage_spec_unknown : Error<"unknown linkage language">;
-def err_language_linkage_spec_not_ascii : Error<
-  "string literal in language linkage specifier cannot have an "
-  "encoding-prefix">;
 def ext_use_out_of_scope_declaration : ExtWarn<
   "use of out-of-scope declaration of %0%select{| whose type is not "
   "compatible with that of an implicit declaration}1">,
@@ -450,7 +450,7 @@ def warn_qual_return_type : Warning<
 def warn_deprecated_redundant_constexpr_static_def : Warning<
   "out-of-line definition of constexpr static data member is redundant "
   "in C++17 and is deprecated">,
-  InGroup<Deprecated>, DefaultIgnore;
+  InGroup<DeprecatedRedundantConstexprStaticDef>, DefaultIgnore;
 
 def warn_decl_shadow :
   Warning<"declaration shadows a %select{"
@@ -1545,6 +1545,24 @@ def err_static_assert_requirement_failed : Error<
   "static assertion failed due to requirement '%0'%select{: %2|}1">;
 def note_expr_evaluates_to : Note<
   "expression evaluates to '%0 %1 %2'">;
+def err_static_assert_invalid_message : Error<
+  "the message in a static assertion must be a string literal or an "
+  "object with 'data()' and 'size()' member functions">;
+def err_static_assert_missing_member_function : Error<
+  "the message object in this static assertion is missing %select{"
+  "a 'size()' member function|"
+  "a 'data()' member function|"
+  "'data()' and 'size()' member functions}0">;
+def err_static_assert_invalid_mem_fn_ret_ty : Error<
+  "the message in a static assertion must have a '%select{size|data}0()' member "
+  "function returning an object convertible to '%select{std::size_t|const char *}0'">;
+def warn_static_assert_message_constexpr : Warning<
+  "the message in this static assertion is not a "
+  "constant expression">,
+  DefaultError, InGroup<DiagGroup<"invalid-static-assert-message">>;
+def err_static_assert_message_constexpr : Error<
+  "the message in a static assertion must be produced by a "
+  "constant expression">;
 
 def warn_consteval_if_always_true : Warning<
   "consteval if is always true in an %select{unevaluated|immediate}0 context">,
@@ -2674,7 +2692,7 @@ def note_immediate_function_reason : Note<
   "expression}3">;
 
 def note_invalid_consteval_initializer : Note<
-  "in the default initalizer of %0">;
+  "in the default initializer of %0">;
 def note_invalid_consteval_initializer_here : Note<
   "initialized here %0">;
 def err_invalid_consteval_decl_kind : Error<
@@ -9264,8 +9282,8 @@ def ext_string_literal_operator_template : ExtWarn<
   "string literal operator templates are a GNU extension">,
   InGroup<GNUStringLiteralOperatorTemplate>;
 def warn_user_literal_reserved : Warning<
-  "user-defined literal suffixes not starting with '_' are reserved"
-  "%select{; no literal will invoke this operator|}0">,
+  "user-defined literal suffixes %select{<ERROR>|not starting with '_'|containing '__'}0 are reserved"
+  "%select{; no literal will invoke this operator|}1">,
   InGroup<UserDefinedLiterals>;
 
 // C++ conversion functions
@@ -9663,7 +9681,7 @@ def note_lambda_capture_initializer : Note<
   "%select{implicitly |}2captured%select{| by reference}3"
   "%select{%select{ due to use|}2 here|"
   " via initialization of lambda capture %0}1">;
-def note_init_with_default_member_initalizer : Note<
+def note_init_with_default_member_initializer : Note<
   "initializing field %0 with default member initializer">;
 
 // Check for initializing a member variable with the address or a reference to

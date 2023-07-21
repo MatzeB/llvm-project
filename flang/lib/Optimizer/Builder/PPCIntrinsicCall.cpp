@@ -68,9 +68,64 @@ static constexpr IntrinsicHandler ppcHandlers[]{
          &PI::genVecCmp<VecOp::Cmplt>),
      {{{"arg1", asValue}, {"arg2", asValue}}},
      /*isElemental=*/true},
+    {"__ppc_vec_convert",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecConvert<VecOp::Convert>),
+     {{{"v", asValue}, {"mold", asValue}}},
+     /*isElemental=*/false},
+    {"__ppc_vec_ctf",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecConvert<VecOp::Ctf>),
+     {{{"arg1", asValue}, {"arg2", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_cvf",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecConvert<VecOp::Cvf>),
+     {{{"arg1", asValue}}},
+     /*isElemental=*/true},
     {"__ppc_vec_mul",
      static_cast<IntrinsicLibrary::ExtendedGenerator>(
          &PI::genVecAddAndMulSubXor<VecOp::Mul>),
+     {{{"arg1", asValue}, {"arg2", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_sl",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecShift<VecOp::Sl>),
+     {{{"arg1", asValue}, {"arg2", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_sld",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecShift<VecOp::Sld>),
+     {{{"arg1", asValue}, {"arg2", asValue}, {"arg3", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_sldw",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecShift<VecOp::Sldw>),
+     {{{"arg1", asValue}, {"arg2", asValue}, {"arg3", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_sll",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecShift<VecOp::Sll>),
+     {{{"arg1", asValue}, {"arg2", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_slo",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecShift<VecOp::Slo>),
+     {{{"arg1", asValue}, {"arg2", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_sr",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecShift<VecOp::Sr>),
+     {{{"arg1", asValue}, {"arg2", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_srl",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecShift<VecOp::Srl>),
+     {{{"arg1", asValue}, {"arg2", asValue}}},
+     /*isElemental=*/true},
+    {"__ppc_vec_sro",
+     static_cast<IntrinsicLibrary::ExtendedGenerator>(
+         &PI::genVecShift<VecOp::Sro>),
      {{{"arg1", asValue}, {"arg2", asValue}}},
      /*isElemental=*/true},
     {"__ppc_vec_sub",
@@ -639,6 +694,266 @@ PPCIntrinsicLibrary::genVecCmp(mlir::Type resultType,
     llvm_unreachable("invalid vector type");
 
   return res;
+}
+
+static inline mlir::Value swapVectorWordPairs(fir::FirOpBuilder &builder,
+                                              mlir::Location loc,
+                                              mlir::Value arg) {
+  auto ty = arg.getType();
+  auto context{builder.getContext()};
+  auto vtype{mlir::VectorType::get(16, mlir::IntegerType::get(context, 8))};
+
+  if (ty != vtype)
+    arg = builder.create<mlir::LLVM::BitcastOp>(loc, vtype, arg).getResult();
+
+  llvm::SmallVector<int64_t, 16> mask{4,  5,  6,  7,  0, 1, 2,  3,
+                                      12, 13, 14, 15, 8, 9, 10, 11};
+  arg = builder.create<mlir::vector::ShuffleOp>(loc, arg, arg, mask);
+  if (ty != vtype)
+    arg = builder.create<mlir::LLVM::BitcastOp>(loc, ty, arg);
+  return arg;
+}
+
+// VEC_CONVERT, VEC_CTF, VEC_CVF
+template <VecOp vop>
+fir::ExtendedValue
+PPCIntrinsicLibrary::genVecConvert(mlir::Type resultType,
+                                   llvm::ArrayRef<fir::ExtendedValue> args) {
+  auto context{builder.getContext()};
+  auto argBases{getBasesForArgs(args)};
+  auto vecTyInfo{getVecTypeFromFir(argBases[0])};
+  auto mlirTy{vecTyInfo.toMlirVectorType(context)};
+  auto vArg1{builder.createConvert(loc, mlirTy, argBases[0])};
+  const auto i32Ty{mlir::IntegerType::get(context, 32)};
+
+  switch (vop) {
+  case VecOp::Ctf: {
+    assert(args.size() == 2);
+    auto convArg{builder.createConvert(loc, i32Ty, argBases[1])};
+    auto eTy{vecTyInfo.eleTy.dyn_cast<mlir::IntegerType>()};
+    assert(eTy && "Unsupported vector type");
+    const auto isUnsigned{eTy.isUnsignedInteger()};
+    const auto width{eTy.getWidth()};
+
+    if (width == 32) {
+      auto ftype{(isUnsigned)
+                     ? genFuncType<Ty::RealVector<4>, Ty::UnsignedVector<4>,
+                                   Ty::Integer<4>>(context, builder)
+                     : genFuncType<Ty::RealVector<4>, Ty::IntegerVector<4>,
+                                   Ty::Integer<4>>(context, builder)};
+      const llvm::StringRef fname{(isUnsigned) ? "llvm.ppc.altivec.vcfux"
+                                               : "llvm.ppc.altivec.vcfsx"};
+      auto funcOp{builder.addNamedFunction(loc, fname, ftype)};
+      mlir::Value newArgs[] = {argBases[0], convArg};
+      auto callOp{builder.create<fir::CallOp>(loc, funcOp, newArgs)};
+
+      return callOp.getResult(0);
+    } else if (width == 64) {
+      auto fTy{mlir::FloatType::getF64(context)};
+      auto ty{mlir::VectorType::get(2, fTy)};
+
+      // vec_vtf(arg1, arg2) = fmul(1.0 / (1 << arg2), llvm.sitofp(arg1))
+      auto convOp{(isUnsigned)
+                      ? builder.create<mlir::LLVM::UIToFPOp>(loc, ty, vArg1)
+                      : builder.create<mlir::LLVM::SIToFPOp>(loc, ty, vArg1)};
+
+      // construct vector<1./(1<<arg1), 1.0/(1<<arg1)>
+      auto constInt{
+          mlir::dyn_cast<mlir::arith::ConstantOp>(argBases[1].getDefiningOp())
+              .getValue()
+              .dyn_cast_or_null<mlir::IntegerAttr>()};
+      assert(constInt && "expected integer constant argument");
+      double f{1.0 / (1 << constInt.getInt())};
+      llvm::SmallVector<double> vals{f, f};
+      auto constOp{builder.create<mlir::arith::ConstantOp>(
+          loc, ty, builder.getF64VectorAttr(vals))};
+
+      auto mulOp{builder.create<mlir::LLVM::FMulOp>(
+          loc, ty, convOp->getResult(0), constOp)};
+
+      return builder.createConvert(loc, fir::VectorType::get(2, fTy), mulOp);
+    }
+    llvm_unreachable("invalid element integer kind");
+  }
+  case VecOp::Convert: {
+    assert(args.size() == 2);
+    // resultType has mold type (if scalar) or element type (if array)
+    auto resTyInfo{getVecTypeFromFirType(resultType)};
+    auto moldTy{resTyInfo.toMlirVectorType(context)};
+    auto firTy{resTyInfo.toFirVectorType()};
+
+    // vec_convert(v, mold) = bitcast v to "type of mold"
+    auto conv{builder.create<mlir::LLVM::BitcastOp>(loc, moldTy, vArg1)};
+
+    return builder.createConvert(loc, firTy, conv);
+  }
+  case VecOp::Cvf: {
+    assert(args.size() == 1);
+
+    mlir::Value newArgs[]{vArg1};
+    if (vecTyInfo.isFloat32()) {
+      // TODO: Handle element ordering
+      newArgs[0] = swapVectorWordPairs(builder, loc, newArgs[0]);
+
+      const llvm::StringRef fname{"llvm.ppc.vsx.xvcvspdp"};
+      auto ftype{
+          genFuncType<Ty::RealVector<8>, Ty::RealVector<4>>(context, builder)};
+      auto funcOp{builder.addNamedFunction(loc, fname, ftype)};
+      auto callOp{builder.create<fir::CallOp>(loc, funcOp, newArgs)};
+
+      return callOp.getResult(0);
+    } else if (vecTyInfo.isFloat64()) {
+      const llvm::StringRef fname{"llvm.ppc.vsx.xvcvdpsp"};
+      auto ftype{
+          genFuncType<Ty::RealVector<4>, Ty::RealVector<8>>(context, builder)};
+      auto funcOp{builder.addNamedFunction(loc, fname, ftype)};
+      newArgs[0] =
+          builder.create<fir::CallOp>(loc, funcOp, newArgs).getResult(0);
+      auto fvf32Ty{newArgs[0].getType()};
+      auto f32type{mlir::FloatType::getF32(context)};
+      auto mvf32Ty{mlir::VectorType::get(4, f32type)};
+      newArgs[0] = builder.createConvert(loc, mvf32Ty, newArgs[0]);
+
+      // TODO: Handle element ordering
+      newArgs[0] = swapVectorWordPairs(builder, loc, newArgs[0]);
+
+      return builder.createConvert(loc, fvf32Ty, newArgs[0]);
+    }
+    llvm_unreachable("invalid element integer kind");
+  }
+  default:
+    llvm_unreachable("Invalid vector operation for generator");
+  }
+}
+
+// VEC_SL, VEC_SLD, VEC_SLDW, VEC_SLL, VEC_SLO, VEC_SR, VEC_SRL, VEC_SRO
+template <VecOp vop>
+fir::ExtendedValue
+PPCIntrinsicLibrary::genVecShift(mlir::Type resultType,
+                                 llvm::ArrayRef<fir::ExtendedValue> args) {
+  auto context{builder.getContext()};
+  auto argBases{getBasesForArgs(args)};
+  auto argTypes{getTypesForArgs(argBases)};
+
+  llvm::SmallVector<VecTypeInfo, 2> vecTyInfoArgs;
+  vecTyInfoArgs.push_back(getVecTypeFromFir(argBases[0]));
+  vecTyInfoArgs.push_back(getVecTypeFromFir(argBases[1]));
+
+  // Convert the first two arguments to MLIR vectors
+  llvm::SmallVector<mlir::Type, 2> mlirTyArgs;
+  mlirTyArgs.push_back(vecTyInfoArgs[0].toMlirVectorType(context));
+  mlirTyArgs.push_back(vecTyInfoArgs[1].toMlirVectorType(context));
+
+  llvm::SmallVector<mlir::Value, 2> mlirVecArgs;
+  mlirVecArgs.push_back(builder.createConvert(loc, mlirTyArgs[0], argBases[0]));
+  mlirVecArgs.push_back(builder.createConvert(loc, mlirTyArgs[1], argBases[1]));
+
+  mlir::Value shftRes{nullptr};
+
+  if (vop == VecOp::Sl || vop == VecOp::Sr) {
+    assert(args.size() == 2);
+    // Construct the mask
+    auto width{
+        mlir::dyn_cast<mlir::IntegerType>(vecTyInfoArgs[1].eleTy).getWidth()};
+    auto vecVal{builder.createIntegerConstant(
+        loc, getConvertedElementType(context, vecTyInfoArgs[0].eleTy), width)};
+    auto mask{
+        builder.create<mlir::vector::BroadcastOp>(loc, mlirTyArgs[1], vecVal)};
+    auto shft{builder.create<mlir::arith::RemUIOp>(loc, mlirVecArgs[1], mask)};
+
+    mlir::Value res{nullptr};
+    if (vop == VecOp::Sr)
+      res = builder.create<mlir::arith::ShRUIOp>(loc, mlirVecArgs[0], shft);
+    else if (vop == VecOp::Sl)
+      res = builder.create<mlir::arith::ShLIOp>(loc, mlirVecArgs[0], shft);
+
+    shftRes = builder.createConvert(loc, argTypes[0], res);
+  } else if (vop == VecOp::Sll || vop == VecOp::Slo || vop == VecOp::Srl ||
+             vop == VecOp::Sro) {
+    assert(args.size() == 2);
+
+    // Bitcast to vector<4xi32>
+    auto bcVecTy{mlir::VectorType::get(4, builder.getIntegerType(32))};
+    if (mlirTyArgs[0] != bcVecTy)
+      mlirVecArgs[0] =
+          builder.create<mlir::vector::BitCastOp>(loc, bcVecTy, mlirVecArgs[0]);
+    if (mlirTyArgs[1] != bcVecTy)
+      mlirVecArgs[1] =
+          builder.create<mlir::vector::BitCastOp>(loc, bcVecTy, mlirVecArgs[1]);
+
+    llvm::StringRef funcName;
+    switch (vop) {
+    case VecOp::Srl:
+      funcName = "llvm.ppc.altivec.vsr";
+      break;
+    case VecOp::Sro:
+      funcName = "llvm.ppc.altivec.vsro";
+      break;
+    case VecOp::Sll:
+      funcName = "llvm.ppc.altivec.vsl";
+      break;
+    case VecOp::Slo:
+      funcName = "llvm.ppc.altivec.vslo";
+      break;
+    default:
+      llvm_unreachable("unknown vector shift operation");
+    }
+    auto funcTy{genFuncType<Ty::IntegerVector<4>, Ty::IntegerVector<4>,
+                            Ty::IntegerVector<4>>(context, builder)};
+    mlir::func::FuncOp funcOp{builder.addNamedFunction(loc, funcName, funcTy)};
+    auto callOp{builder.create<fir::CallOp>(loc, funcOp, mlirVecArgs)};
+
+    // If the result vector type is different from the original type, need
+    // to convert to mlir vector, bitcast and then convert back to fir vector.
+    if (callOp.getResult(0).getType() != argTypes[0]) {
+      auto res = builder.createConvert(loc, bcVecTy, callOp.getResult(0));
+      res = builder.create<mlir::vector::BitCastOp>(loc, mlirTyArgs[0], res);
+      shftRes = builder.createConvert(loc, argTypes[0], res);
+    } else {
+      shftRes = callOp.getResult(0);
+    }
+  } else if (vop == VecOp::Sld || vop == VecOp::Sldw) {
+    assert(args.size() == 3);
+    auto constIntOp =
+        mlir::dyn_cast<mlir::arith::ConstantOp>(argBases[2].getDefiningOp())
+            .getValue()
+            .dyn_cast_or_null<mlir::IntegerAttr>();
+    assert(constIntOp && "expected integer constant argument");
+
+    // Bitcast to vector<16xi8>
+    auto vi8Ty{mlir::VectorType::get(16, builder.getIntegerType(8))};
+    if (mlirTyArgs[0] != vi8Ty) {
+      mlirVecArgs[0] =
+          builder.create<mlir::LLVM::BitcastOp>(loc, vi8Ty, mlirVecArgs[0])
+              .getResult();
+      mlirVecArgs[1] =
+          builder.create<mlir::LLVM::BitcastOp>(loc, vi8Ty, mlirVecArgs[1])
+              .getResult();
+    }
+
+    // Construct the mask for shuffling
+    auto shiftVal{constIntOp.getInt()};
+    if (vop == VecOp::Sldw)
+      shiftVal = shiftVal << 2;
+    shiftVal &= 0xF;
+    llvm::SmallVector<int64_t, 16> mask;
+    for (int i = 16; i < 32; ++i)
+      mask.push_back(i - shiftVal);
+
+    // Shuffle with mask
+    shftRes = builder.create<mlir::vector::ShuffleOp>(loc, mlirVecArgs[1],
+                                                      mlirVecArgs[0], mask);
+
+    // Bitcast to the original type
+    if (shftRes.getType() != mlirTyArgs[0])
+      shftRes =
+          builder.create<mlir::LLVM::BitcastOp>(loc, mlirTyArgs[0], shftRes);
+
+    return builder.createConvert(loc, resultType, shftRes);
+  } else
+    llvm_unreachable("Invalid vector operation for generator");
+
+  return shftRes;
 }
 
 } // namespace fir

@@ -17,7 +17,29 @@ namespace fir {
 
 /// Enums used to templatize vector intrinsic function generators. Enum does
 /// not contain every vector intrinsic, only intrinsics that share generators.
-enum class VecOp { Add, And, Anyge, Cmpge, Cmpgt, Cmple, Cmplt, Mul, Sub, Xor };
+enum class VecOp {
+  Add,
+  And,
+  Anyge,
+  Cmpge,
+  Cmpgt,
+  Cmple,
+  Cmplt,
+  Convert,
+  Ctf,
+  Cvf,
+  Mul,
+  Sl,
+  Sld,
+  Sldw,
+  Sll,
+  Slo,
+  Sr,
+  Srl,
+  Sro,
+  Sub,
+  Xor
+};
 
 // Wrapper struct to encapsulate information for a vector type. Preserves
 // sign of eleTy if eleTy is signed/unsigned integer. Helps with vector type
@@ -94,8 +116,16 @@ struct PPCIntrinsicLibrary : IntrinsicLibrary {
                                llvm::ArrayRef<fir::ExtendedValue> args);
 
   template <VecOp>
+  fir::ExtendedValue genVecConvert(mlir::Type resultType,
+                                   llvm::ArrayRef<fir::ExtendedValue> args);
+
+  template <VecOp>
   fir::ExtendedValue genVecAnyCompare(mlir::Type resultType,
                                       llvm::ArrayRef<fir::ExtendedValue> args);
+
+  template <VecOp>
+  fir::ExtendedValue genVecShift(mlir::Type,
+                                 llvm::ArrayRef<fir::ExtendedValue>);
 };
 
 const IntrinsicHandler *findPPCIntrinsicHandler(llvm::StringRef name);

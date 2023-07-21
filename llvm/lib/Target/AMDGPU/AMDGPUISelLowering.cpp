@@ -1496,6 +1496,17 @@ static SDValue peekFNeg(SDValue Val) {
 
   return Val;
 }
+
+static SDValue peekFPSignOps(SDValue Val) {
+  if (Val.getOpcode() == ISD::FNEG)
+    Val = Val.getOperand(0);
+  if (Val.getOpcode() == ISD::FABS)
+    Val = Val.getOperand(0);
+  if (Val.getOpcode() == ISD::FCOPYSIGN)
+    Val = Val.getOperand(0);
+  return Val;
+}
+
 SDValue AMDGPUTargetLowering::combineFMinMaxLegacyImpl(
     const SDLoc &DL, EVT VT, SDValue LHS, SDValue RHS, SDValue True,
     SDValue False, SDValue CC, DAGCombinerInfo &DCI) const {
@@ -1872,7 +1883,8 @@ SDValue AMDGPUTargetLowering::LowerDIVREM24(SDValue Op, SelectionDAG &DAG,
   bool UseFmadFtz = false;
   if (Subtarget->isGCN()) {
     const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
-    UseFmadFtz = MFI->getMode().allFP32Denormals();
+    UseFmadFtz =
+        MFI->getMode().FP32Denormals != DenormalMode::getPreserveSign();
   }
 
   // float fr = mad(fqneg, fb, fa);
@@ -1964,11 +1976,11 @@ void AMDGPUTargetLowering::LowerUDIVREM64(SDValue Op,
     const SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
     // Compute denominator reciprocal.
-    unsigned FMAD = !Subtarget->hasMadMacF32Insts() ?
-                    (unsigned)ISD::FMA :
-                    !MFI->getMode().allFP32Denormals() ?
-                    (unsigned)ISD::FMAD :
-                    (unsigned)AMDGPUISD::FMAD_FTZ;
+    unsigned FMAD =
+        !Subtarget->hasMadMacF32Insts() ? (unsigned)ISD::FMA
+        : MFI->getMode().FP32Denormals == DenormalMode::getPreserveSign()
+            ? (unsigned)ISD::FMAD
+            : (unsigned)AMDGPUISD::FMAD_FTZ;
 
     SDValue Cvt_Lo = DAG.getNode(ISD::UINT_TO_FP, DL, MVT::f32, RHS_Lo);
     SDValue Cvt_Hi = DAG.getNode(ISD::UINT_TO_FP, DL, MVT::f32, RHS_Hi);
@@ -3663,6 +3675,17 @@ SDValue AMDGPUTargetLowering::performIntrinsicWOChainCombine(
     // FIXME: This is probably wrong. If src is an sNaN, it won't be quieted
     SDValue Src = N->getOperand(1);
     return Src.isUndef() ? Src : SDValue();
+  }
+  case Intrinsic::amdgcn_frexp_exp: {
+    // frexp_exp (fneg x) -> frexp_exp x
+    // frexp_exp (fabs x) -> frexp_exp x
+    // frexp_exp (fneg (fabs x)) -> frexp_exp x
+    SDValue Src = N->getOperand(1);
+    SDValue PeekSign = peekFPSignOps(Src);
+    if (PeekSign == Src)
+      return SDValue();
+    return SDValue(DCI.DAG.UpdateNodeOperands(N, N->getOperand(0), PeekSign),
+                   0);
   }
   default:
     return SDValue();
@@ -5659,7 +5682,7 @@ bool AMDGPUTargetLowering::isKnownNeverNaNForTargetNode(SDValue Op,
 
 bool AMDGPUTargetLowering::isReassocProfitable(MachineRegisterInfo &MRI,
                                                Register N0, Register N1) const {
-  return true; // FIXME: handle regbanks
+  return MRI.hasOneNonDBGUse(N0); // FIXME: handle regbanks
 }
 
 TargetLowering::AtomicExpansionKind

@@ -952,8 +952,13 @@ static void addMask(SmallVectorImpl<int> &Mask, ArrayRef<int> SubMask,
                     bool ExtendingManyInputs = false) {
   if (SubMask.empty())
     return;
-  assert((!ExtendingManyInputs || SubMask.size() > Mask.size()) &&
-         "SubMask with many inputs support must be larger than the mask.");
+  assert(
+      (!ExtendingManyInputs || SubMask.size() > Mask.size() ||
+       // Check if input scalars were extended to match the size of other node.
+       (SubMask.size() == Mask.size() &&
+        std::all_of(std::next(Mask.begin(), Mask.size() / 2), Mask.end(),
+                    [](int Idx) { return Idx == PoisonMaskElem; }))) &&
+      "SubMask with many inputs support must be larger than the mask.");
   if (Mask.empty()) {
     Mask.append(SubMask.begin(), SubMask.end());
     return;
@@ -6151,7 +6156,7 @@ unsigned BoUpSLP::canMapToVector(Type *T, const DataLayout &DL) const {
   unsigned N = 1;
   Type *EltTy = T;
 
-  while (isa<StructType, ArrayType, VectorType>(EltTy)) {
+  while (isa<StructType, ArrayType, FixedVectorType>(EltTy)) {
     if (auto *ST = dyn_cast<StructType>(EltTy)) {
       // Check that struct is homogeneous.
       for (const auto *Ty : ST->elements())
@@ -6172,7 +6177,8 @@ unsigned BoUpSLP::canMapToVector(Type *T, const DataLayout &DL) const {
   if (!isValidElementType(EltTy))
     return 0;
   uint64_t VTSize = DL.getTypeStoreSizeInBits(FixedVectorType::get(EltTy, N));
-  if (VTSize < MinVecRegSize || VTSize > MaxVecRegSize || VTSize != DL.getTypeStoreSizeInBits(T))
+  if (VTSize < MinVecRegSize || VTSize > MaxVecRegSize ||
+      VTSize != DL.getTypeStoreSizeInBits(T))
     return 0;
   return N;
 }
@@ -7001,6 +7007,17 @@ class BoUpSLP::ShuffleCostEstimator : public BaseShuffleAnalysis {
         const TreeEntry *E2 = P2.get<const TreeEntry *>();
         if (E->Scalars.size() == E2->Scalars.size())
           CommonVF = VF = E->Scalars.size();
+      } else {
+        // P2 is empty, check that we have same node + reshuffle (if any).
+        if (E->Scalars.size() == Mask.size() && VF != Mask.size()) {
+          VF = E->Scalars.size();
+          SmallVector<int> CommonMask(Mask.begin(), Mask.end());
+          ::addMask(CommonMask, E->getCommonMask());
+          V1 = Constant::getNullValue(
+              FixedVectorType::get(E->Scalars.front()->getType(), VF));
+          return BaseShuffleAnalysis::createShuffle<InstructionCost>(
+              V1, nullptr, CommonMask, Builder);
+        }
       }
       V1 = Constant::getNullValue(
           FixedVectorType::get(E->Scalars.front()->getType(), VF));
@@ -7281,7 +7298,17 @@ BoUpSLP::getEntryCost(const TreeEntry *E, ArrayRef<Value *> VectorizedVals,
             dbgs()
             << "SLP: perfect diamond match for gather bundle that starts with "
             << *VL.front() << ".\n");
-        return 0;
+        // Restore the mask for previous partially matched values.
+        for (auto [I, V] : enumerate(E->Scalars)) {
+          if (isa<PoisonValue>(V)) {
+            Mask[I] = PoisonMaskElem;
+            continue;
+          }
+          if (Mask[I] == PoisonMaskElem)
+            Mask[I] = Entries.front()->findLaneForValue(V);
+        }
+        Estimator.add(Entries.front(), Mask);
+        return Estimator.finalize(E->ReuseShuffleIndices);
       }
       if (!Resized) {
         unsigned VF1 = Entries.front()->getVectorFactor();
@@ -8654,17 +8681,19 @@ BoUpSLP::isGatherShuffledEntry(const TreeEntry *TE, ArrayRef<Value *> VL,
     for (const TreeEntry *TEPtr : ValueToGatherNodes.find(V)->second) {
       if (TEPtr == TE)
         continue;
-      if (!any_of(TEPtr->Scalars, [&GatheredScalars](Value *V) {
-            return GatheredScalars.contains(V);
-          }))
-        continue;
+      assert(any_of(TEPtr->Scalars,
+                    [&](Value *V) { return GatheredScalars.contains(V); }) &&
+             "Must contain at least single gathered value.");
       assert(TEPtr->UserTreeIndices.size() == 1 &&
              "Expected only single user of the gather node.");
-      Instruction &EntryUserInst =
-          getLastInstructionInBundle(TEPtr->UserTreeIndices.front().UserTE);
       PHINode *EntryPHI =
           dyn_cast<PHINode>(TEPtr->UserTreeIndices.front().UserTE->getMainOp());
-      if (&UserInst == &EntryUserInst && !EntryPHI) {
+      Instruction *EntryUserInst =
+          EntryPHI ? nullptr
+                   : &getLastInstructionInBundle(
+                         TEPtr->UserTreeIndices.front().UserTE);
+      if (&UserInst == EntryUserInst) {
+        assert(!EntryPHI && "Unexpected phi node entry.");
         // If 2 gathers are operands of the same entry, compare operands
         // indices, use the earlier one as the base.
         if (TE->UserTreeIndices.front().UserTE ==
@@ -8675,18 +8704,18 @@ BoUpSLP::isGatherShuffledEntry(const TreeEntry *TE, ArrayRef<Value *> VL,
       }
       // Check if the user node of the TE comes after user node of EntryPtr,
       // otherwise EntryPtr depends on TE.
-      auto *EntryI = EntryPHI
-                         ? EntryPHI
-                               ->getIncomingBlock(
-                                   TEPtr->UserTreeIndices.front().EdgeIdx)
-                               ->getTerminator()
-                         : &EntryUserInst;
-      if (!CheckOrdering(EntryI) &&
-          (ParentBB != EntryI->getParent() ||
-           TE->UserTreeIndices.front().UserTE !=
-               TEPtr->UserTreeIndices.front().UserTE ||
+      auto *EntryI =
+          EntryPHI
+              ? EntryPHI
+                    ->getIncomingBlock(TEPtr->UserTreeIndices.front().EdgeIdx)
+                    ->getTerminator()
+              : EntryUserInst;
+      if ((ParentBB != EntryI->getParent() ||
            TE->UserTreeIndices.front().EdgeIdx <
-               TEPtr->UserTreeIndices.front().EdgeIdx))
+               TEPtr->UserTreeIndices.front().EdgeIdx ||
+           TE->UserTreeIndices.front().UserTE !=
+               TEPtr->UserTreeIndices.front().UserTE) &&
+          !CheckOrdering(EntryI))
         continue;
       VToTEs.insert(TEPtr);
     }
@@ -8987,6 +9016,9 @@ void BoUpSLP::reorderInputsAccordingToOpcode(
 }
 
 Instruction &BoUpSLP::getLastInstructionInBundle(const TreeEntry *E) {
+  auto &Res = EntryToLastInstruction.FindAndConstruct(E);
+  if (Res.second)
+    return *Res.second;
   // Get the basic block this bundle is in. All instructions in the bundle
   // should be in this block (except for extractelement-like instructions with
   // constant indeces).
@@ -9001,7 +9033,7 @@ Instruction &BoUpSLP::getLastInstructionInBundle(const TreeEntry *E) {
            isVectorLikeInstWithConstOps(I);
   }));
 
-  auto &&FindLastInst = [E, Front, this, &BB]() {
+  auto FindLastInst = [&]() {
     Instruction *LastInst = Front;
     for (Value *V : E->Scalars) {
       auto *I = dyn_cast<Instruction>(V);
@@ -9037,7 +9069,7 @@ Instruction &BoUpSLP::getLastInstructionInBundle(const TreeEntry *E) {
     return LastInst;
   };
 
-  auto &&FindFirstInst = [E, Front, this]() {
+  auto FindFirstInst = [&]() {
     Instruction *FirstInst = Front;
     for (Value *V : E->Scalars) {
       auto *I = dyn_cast<Instruction>(V);
@@ -9077,7 +9109,6 @@ Instruction &BoUpSLP::getLastInstructionInBundle(const TreeEntry *E) {
   if (doesNotNeedToSchedule(E->Scalars) ||
       (E->State != TreeEntry::NeedToGather &&
        all_of(E->Scalars, isVectorLikeInstWithConstOps))) {
-    Instruction *InsertInst;
     if ((E->getOpcode() == Instruction::GetElementPtr &&
          any_of(E->Scalars,
                 [](Value *V) {
@@ -9086,14 +9117,11 @@ Instruction &BoUpSLP::getLastInstructionInBundle(const TreeEntry *E) {
         all_of(E->Scalars, [](Value *V) {
           return !isVectorLikeInstWithConstOps(V) && isUsedOutsideBlock(V);
         }))
-      InsertInst = FindLastInst();
+      Res.second = FindLastInst();
     else
-      InsertInst = FindFirstInst();
-    return *InsertInst;
+      Res.second = FindFirstInst();
+    return *Res.second;
   }
-
-  // The last instruction in the bundle in program order.
-  Instruction *LastInst = nullptr;
 
   // Find the last instruction. The common case should be that BB has been
   // scheduled, and the last instruction is VL.back(). So we start with
@@ -9107,7 +9135,7 @@ Instruction &BoUpSLP::getLastInstructionInBundle(const TreeEntry *E) {
     if (Bundle && Bundle->isPartOfBundle())
       for (; Bundle; Bundle = Bundle->NextInBundle)
         if (Bundle->OpValue == Bundle->Inst)
-          LastInst = Bundle->Inst;
+          Res.second = Bundle->Inst;
   }
 
   // LastInst can still be null at this point if there's either not an entry
@@ -9128,15 +9156,15 @@ Instruction &BoUpSLP::getLastInstructionInBundle(const TreeEntry *E) {
   // not ideal. However, this should be exceedingly rare since it requires that
   // we both exit early from buildTree_rec and that the bundle be out-of-order
   // (causing us to iterate all the way to the end of the block).
-  if (!LastInst)
-    LastInst = FindLastInst();
-  assert(LastInst && "Failed to find last instruction in bundle");
-  return *LastInst;
+  if (!Res.second)
+    Res.second = FindLastInst();
+  assert(Res.second && "Failed to find last instruction in bundle");
+  return *Res.second;
 }
 
 void BoUpSLP::setInsertPointAfterBundle(const TreeEntry *E) {
   auto *Front = E->getMainOp();
-  Instruction *LastInst = EntryToLastInstruction.lookup(E);
+  Instruction *LastInst = &getLastInstructionInBundle(E);
   assert(LastInst && "Failed to find last instruction in bundle");
   // If the instruction is PHI, set the insert point after all the PHIs.
   bool IsPHI = isa<PHINode>(LastInst);
@@ -9657,7 +9685,7 @@ Value *BoUpSLP::vectorizeOperand(TreeEntry *E, unsigned NodeIdx) {
   IRBuilder<>::InsertPointGuard Guard(Builder);
   if (E->getOpcode() != Instruction::InsertElement &&
       E->getOpcode() != Instruction::PHI) {
-    Instruction *LastInst = EntryToLastInstruction.lookup(E);
+    Instruction *LastInst = &getLastInstructionInBundle(E);
     assert(LastInst && "Failed to find last instruction in bundle");
     Builder.SetInsertPoint(LastInst);
   }
@@ -10676,18 +10704,9 @@ Value *BoUpSLP::vectorizeTree(
   for (auto &BSIter : BlocksSchedules) {
     scheduleBlock(BSIter.second.get());
   }
-
-  // Pre-gather last instructions.
-  for (const std::unique_ptr<TreeEntry> &E : VectorizableTree) {
-    if ((E->State == TreeEntry::NeedToGather &&
-         (!E->getMainOp() || E->Idx > 0)) ||
-        (E->State != TreeEntry::NeedToGather &&
-         E->getOpcode() == Instruction::ExtractValue) ||
-        E->getOpcode() == Instruction::InsertElement)
-        continue;
-    Instruction *LastInst = &getLastInstructionInBundle(E.get());
-    EntryToLastInstruction.try_emplace(E.get(), LastInst);
-  }
+  // Clean Entry-to-LastInstruction table. It can be affected after scheduling,
+  // need to rebuild it.
+  EntryToLastInstruction.clear();
 
   Builder.SetInsertPoint(ReductionRoot ? ReductionRoot
                                        : &F->getEntryBlock().front());
@@ -12701,6 +12720,9 @@ class HorizontalReduction {
       return I->getFastMathFlags().noNaNs();
     }
 
+    if (Kind == RecurKind::FMaximum || Kind == RecurKind::FMinimum)
+      return true;
+
     return I->isAssociative();
   }
 
@@ -12751,6 +12773,18 @@ class HorizontalReduction {
                                minnum(cast<ConstantFP>(LHS)->getValueAPF(),
                                       cast<ConstantFP>(RHS)->getValueAPF()));
       return Builder.CreateBinaryIntrinsic(Intrinsic::minnum, LHS, RHS);
+    case RecurKind::FMaximum:
+      if (IsConstant)
+        return ConstantFP::get(LHS->getType(),
+                               maximum(cast<ConstantFP>(LHS)->getValueAPF(),
+                                      cast<ConstantFP>(RHS)->getValueAPF()));
+      return Builder.CreateBinaryIntrinsic(Intrinsic::maximum, LHS, RHS);
+    case RecurKind::FMinimum:
+      if (IsConstant)
+        return ConstantFP::get(LHS->getType(),
+                               minimum(cast<ConstantFP>(LHS)->getValueAPF(),
+                                      cast<ConstantFP>(RHS)->getValueAPF()));
+      return Builder.CreateBinaryIntrinsic(Intrinsic::minimum, LHS, RHS);
     case RecurKind::SMax:
       if (IsConstant || UseSelect) {
         Value *Cmp = Builder.CreateICmpSGT(LHS, RHS, Name);
@@ -12833,6 +12867,10 @@ public:
     if (match(I, m_Intrinsic<Intrinsic::minnum>(m_Value(), m_Value())))
       return RecurKind::FMin;
 
+    if (match(I, m_Intrinsic<Intrinsic::maximum>(m_Value(), m_Value())))
+      return RecurKind::FMaximum;
+    if (match(I, m_Intrinsic<Intrinsic::minimum>(m_Value(), m_Value())))
+      return RecurKind::FMinimum;
     // This matches either cmp+select or intrinsics. SLP is expected to handle
     // either form.
     // TODO: If we are canonicalizing to intrinsics, we can remove several
@@ -13800,6 +13838,8 @@ private:
     }
     case RecurKind::FMax:
     case RecurKind::FMin:
+    case RecurKind::FMaximum:
+    case RecurKind::FMinimum:
     case RecurKind::SMax:
     case RecurKind::SMin:
     case RecurKind::UMax:
@@ -14130,6 +14170,10 @@ static bool matchRdxBop(Instruction *I, Value *&V0, Value *&V1) {
   if (match(I, m_Intrinsic<Intrinsic::maxnum>(m_Value(V0), m_Value(V1))))
     return true;
   if (match(I, m_Intrinsic<Intrinsic::minnum>(m_Value(V0), m_Value(V1))))
+    return true;
+  if (match(I, m_Intrinsic<Intrinsic::maximum>(m_Value(V0), m_Value(V1))))
+    return true;
+  if (match(I, m_Intrinsic<Intrinsic::minimum>(m_Value(V0), m_Value(V1))))
     return true;
   if (match(I, m_Intrinsic<Intrinsic::smax>(m_Value(V0), m_Value(V1))))
     return true;
