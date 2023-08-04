@@ -7519,8 +7519,9 @@ void ResolveNamesVisitor::HandleProcedureName(
                    currScope().context().GetPPCBuiltinsScope()) {
       // Check if it is a builtin from the predefined module
       symbol = FindSymbol(*ppcBuiltinScope, name);
-      if (!symbol)
+      if (!symbol) {
         symbol = &MakeSymbol(context().globalScope(), name.source, Attrs{});
+      }
     } else {
       symbol = &MakeSymbol(context().globalScope(), name.source, Attrs{});
     }
@@ -8029,6 +8030,15 @@ bool ResolveNamesVisitor::Pre(const parser::PointerAssignmentStmt &x) {
         MakeHostAssocSymbol(*name, *symbol);
       }
       return false;
+    }
+    // Can also reference a global external procedure here
+    if (auto it{context().globalScope().find(name->source)};
+        it != context().globalScope().end()) {
+      Symbol &global{*it->second};
+      if (IsProcedure(global)) {
+        Resolve(*name, global);
+        return false;
+      }
     }
   }
   Walk(expr);
@@ -8589,8 +8599,7 @@ void ResolveNamesVisitor::FinishDerivedTypeInstantiation(Scope &scope) {
             auto origDetails{origComp.get<ObjectEntityDetails>()};
             if (const MaybeExpr & init{origDetails.init()}) {
               SomeExpr newInit{*init};
-              MaybeExpr folded{
-                  evaluate::Fold(foldingContext, std::move(newInit))};
+              MaybeExpr folded{FoldExpr(std::move(newInit))};
               details->set_init(std::move(folded));
             }
           }
