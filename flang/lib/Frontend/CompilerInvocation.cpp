@@ -920,10 +920,10 @@ bool CompilerInvocation::createFromArgs(
 
   // Parse the arguments
   const llvm::opt::OptTable &opts = clang::driver::getDriverOptTable();
-  const unsigned includedFlagsBitmask = clang::driver::options::FC1Option;
+  llvm::opt::Visibility visibilityMask(clang::driver::options::FC1Option);
   unsigned missingArgIndex, missingArgCount;
   llvm::opt::InputArgList args = opts.ParseArgs(
-      commandLineArgs, missingArgIndex, missingArgCount, includedFlagsBitmask);
+      commandLineArgs, missingArgIndex, missingArgCount, visibilityMask);
 
   // Check for missing argument error.
   if (missingArgCount) {
@@ -936,7 +936,7 @@ bool CompilerInvocation::createFromArgs(
   for (const auto *a : args.filtered(clang::driver::options::OPT_UNKNOWN)) {
     auto argString = a->getAsString(args);
     std::string nearest;
-    if (opts.findNearest(argString, nearest, includedFlagsBitmask) > 1)
+    if (opts.findNearest(argString, nearest, visibilityMask) > 1)
       diags.Report(clang::diag::err_drv_unknown_argument) << argString;
     else
       diags.Report(clang::diag::err_drv_unknown_argument_with_suggestion)
@@ -952,6 +952,11 @@ bool CompilerInvocation::createFromArgs(
 
   if (args.hasArg(clang::driver::options::OPT_flang_experimental_polymorphism)) {
     res.loweringOpts.setPolymorphicTypeImpl(true);
+  }
+
+  // -fno-ppc-native-vector-element-order
+  if (args.hasArg(clang::driver::options::OPT_fno_ppc_native_vec_elem_order)) {
+    res.loweringOpts.setNoPPCNativeVecElemOrder(true);
   }
 
   success &= parseFrontendArgs(res.getFrontendOpts(), args, diags);

@@ -702,7 +702,8 @@ void CoroCloner::salvageDebugInfo() {
       collectDbgVariableIntrinsics(*NewF);
   SmallDenseMap<Argument *, AllocaInst *, 4> ArgToAllocaMap;
   for (DbgVariableIntrinsic *DVI : Worklist)
-    coro::salvageDebugInfo(ArgToAllocaMap, DVI, Shape.OptimizeFrame);
+    coro::salvageDebugInfo(ArgToAllocaMap, DVI, Shape.OptimizeFrame,
+                           false /*IsEntryPoint*/);
 
   // Remove all salvaged dbg.declare intrinsics that became
   // either unreachable or stale due to the CoroSplit transformation.
@@ -937,9 +938,22 @@ void CoroCloner::create() {
     // abstract specification, since the DWARF backend expects the
     // abstract specification to contain the linkage name and asserts
     // that they are identical.
-    if (!SP->getDeclaration() && SP->getUnit() &&
-        SP->getUnit()->getSourceLanguage() == dwarf::DW_LANG_Swift)
+    if (SP->getUnit() &&
+        SP->getUnit()->getSourceLanguage() == dwarf::DW_LANG_Swift) {
       SP->replaceLinkageName(MDString::get(Context, NewF->getName()));
+      if (auto *Decl = SP->getDeclaration()) {
+        auto *NewDecl = DISubprogram::get(
+            Decl->getContext(), Decl->getScope(), Decl->getName(),
+            NewF->getName(), Decl->getFile(), Decl->getLine(), Decl->getType(),
+            Decl->getScopeLine(), Decl->getContainingType(),
+            Decl->getVirtualIndex(), Decl->getThisAdjustment(),
+            Decl->getFlags(), Decl->getSPFlags(), Decl->getUnit(),
+            Decl->getTemplateParams(), nullptr, Decl->getRetainedNodes(),
+            Decl->getThrownTypes(), Decl->getAnnotations(),
+            Decl->getTargetFuncName());
+        SP->replaceDeclaration(NewDecl);
+      }
+    }
   }
 
   NewF->setLinkage(savedLinkage);
@@ -1982,7 +1996,8 @@ splitCoroutine(Function &F, SmallVectorImpl<Function *> &Clones,
   // coroutine funclets.
   SmallDenseMap<Argument *, AllocaInst *, 4> ArgToAllocaMap;
   for (auto *DDI : collectDbgVariableIntrinsics(F))
-    coro::salvageDebugInfo(ArgToAllocaMap, DDI, Shape.OptimizeFrame);
+    coro::salvageDebugInfo(ArgToAllocaMap, DDI, Shape.OptimizeFrame,
+                           true /*IsEntryPoint*/);
 
   return Shape;
 }

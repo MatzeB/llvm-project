@@ -29,11 +29,17 @@ public:
 
     getDerived()->traverseEnumRecords();
 
+    getDerived()->traverseStaticFieldRecords();
+
+    getDerived()->traverseCXXClassRecords();
+
     getDerived()->traverseStructRecords();
 
     getDerived()->traverseObjCInterfaces();
 
     getDerived()->traverseObjCProtocols();
+
+    getDerived()->traverseObjCCategories();
 
     getDerived()->traverseMacroDefinitionRecords();
 
@@ -60,6 +66,16 @@ public:
       getDerived()->visitStructRecord(*Struct.second);
   }
 
+  void traverseStaticFieldRecords() {
+    for (const auto &StaticField : API.getStaticFields())
+      getDerived()->visitStaticFieldRecord(*StaticField.second);
+  }
+
+  void traverseCXXClassRecords() {
+    for (const auto &Class : API.getCXXClasses())
+      getDerived()->visitCXXClassRecord(*Class.second);
+  }
+
   void traverseObjCInterfaces() {
     for (const auto &Interface : API.getObjCInterfaces())
       getDerived()->visitObjCContainerRecord(*Interface.second);
@@ -68,6 +84,11 @@ public:
   void traverseObjCProtocols() {
     for (const auto &Protocol : API.getObjCProtocols())
       getDerived()->visitObjCContainerRecord(*Protocol.second);
+  }
+
+  void traverseObjCCategories() {
+    for (const auto &Category : API.getObjCCategories())
+      getDerived()->visitObjCCategoryRecord(*Category.second);
   }
 
   void traverseMacroDefinitionRecords() {
@@ -92,8 +113,15 @@ public:
   /// Visit a struct record.
   void visitStructRecord(const StructRecord &Record){};
 
+  void visitStaticFieldRecord(const StaticFieldRecord &Record){};
+
+  void visitCXXClassRecord(const CXXClassRecord &Record){};
+
   /// Visit an Objective-C container record.
   void visitObjCContainerRecord(const ObjCContainerRecord &Record){};
+
+  /// Visit an Objective-C category record.
+  void visitObjCCategoryRecord(const ObjCCategoryRecord &Record){};
 
   /// Visit a macro definition record.
   void visitMacroDefinitionRecord(const MacroDefinitionRecord &Record){};

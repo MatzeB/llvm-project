@@ -21,6 +21,7 @@
 #include "clang/ExtractAPI/APIIgnoresList.h"
 #include "clang/ExtractAPI/Serialization/SerializerBase.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/VersionTuple.h"
 #include "llvm/Support/raw_ostream.h"
@@ -87,6 +88,10 @@ public:
     /// The source symbol conforms to the target symbol.
     /// For example Objective-C protocol conformances.
     ConformsTo,
+
+    /// The source symbol is an extension to the target symbol.
+    /// For example Objective-C categories extending an external type.
+    ExtensionTo,
   };
 
   /// Get the string representation of the relationship kind.
@@ -147,6 +152,8 @@ protected:
 
   SymbolGraphSerializerOption Options;
 
+  llvm::StringSet<> visitedCategories;
+
 public:
   /// Visit a global function record.
   void visitGlobalFunctionRecord(const GlobalFunctionRecord &Record);
@@ -160,8 +167,15 @@ public:
   /// Visit a struct record.
   void visitStructRecord(const StructRecord &Record);
 
+  void visitStaticFieldRecord(const StaticFieldRecord &Record);
+
+  void visitCXXClassRecord(const CXXClassRecord &Record);
+
   /// Visit an Objective-C container record.
   void visitObjCContainerRecord(const ObjCContainerRecord &Record);
+
+  /// Visit an Objective-C category record.
+  void visitObjCCategoryRecord(const ObjCCategoryRecord &Record);
 
   /// Visit a macro definition record.
   void visitMacroDefinitionRecord(const MacroDefinitionRecord &Record);
