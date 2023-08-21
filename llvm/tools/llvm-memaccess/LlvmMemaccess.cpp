@@ -93,8 +93,18 @@ static const Value *guessGEP(const DataLayout &DL, const GetElementPtrInst &GEP,
                              Guess *G) {
   unsigned AS = GEP.getAddressSpace();
   APInt Offset = APInt::getZero(DL.getPointerSizeInBits(AS));
-  if (!GEP.accumulateConstantOffset(DL, Offset))
+
+  // Perform a similar operation as GetElementPtr::accumulateConstantOffset
+  // but for dynamic array indices we just choose 0 as a "representative
+  // value".
+  bool offset_valid = cast<GEPOperator>(GEP).accumulateConstantOffset(
+      DL, Offset, [](Value &V, APInt &Offset) -> bool {
+        Offset.clearAllBits();
+        return true;
+      });
+  if (!offset_valid)
     return nullptr;
+
   const Type *PointeeType = GEP.getSourceElementType();
   if (tryLLVMType(G, PointeeType)) {
     G->Offset += Offset;
