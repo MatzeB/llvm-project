@@ -76,7 +76,7 @@ struct Guess {
 };
 
 static bool tryLLVMType(Guess *G, const llvm::Type *type) {
-  const StructType* ST = dyn_cast<StructType>(type);
+  const StructType *ST = dyn_cast<StructType>(type);
   if (ST == nullptr)
     return false;
   if (ST->isLiteral()) {
@@ -95,7 +95,7 @@ static const Value *guessGEP(const DataLayout &DL, const GetElementPtrInst &GEP,
   APInt Offset = APInt::getZero(DL.getPointerSizeInBits(AS));
   if (!GEP.accumulateConstantOffset(DL, Offset))
     return nullptr;
-  const Type* PointeeType = GEP.getSourceElementType();
+  const Type *PointeeType = GEP.getSourceElementType();
   if (tryLLVMType(G, PointeeType)) {
     G->Offset += Offset;
     return GEP.getPointerOperand();
@@ -104,7 +104,7 @@ static const Value *guessGEP(const DataLayout &DL, const GetElementPtrInst &GEP,
 }
 
 void guessAlloca(const DataLayout &DL, const AllocaInst &AI, Guess *G) {
-  const Type* type = AI.getAllocatedType();
+  const Type *type = AI.getAllocatedType();
   tryLLVMType(G, type);
 }
 
@@ -127,20 +127,21 @@ static const DIType *skipDerived(const DIType *Type) {
   return Type;
 }
 
-static bool tryDwarfType(const DIType *Type, Guess *G) {
+static const DIType *skipPointsTo(const DIType *Type) {
   const DIDerivedType *TypeD = dyn_cast<DIDerivedType>(skipDerived(Type));
   if (TypeD == nullptr)
-    return false;
+    return nullptr;
   unsigned tag = TypeD->getTag();
   if (tag != dwarf::DW_TAG_pointer_type &&
       tag != dwarf::DW_TAG_reference_type &&
       tag != dwarf::DW_TAG_rvalue_reference_type)
-    return false;
-  const DIType* Base = TypeD->getBaseType();
-  if (Base == nullptr)
-    return false;
-  const DIType *BaseS = skipDerived(Base);
-  const DICompositeType *BaseC = dyn_cast<DICompositeType>(BaseS);
+    return nullptr;
+  return TypeD->getBaseType();
+}
+
+static bool tryDwarfType(const DIType *Type, Guess *G) {
+  const DIType *TypeS = skipDerived(Type);
+  const DICompositeType *BaseC = dyn_cast<DICompositeType>(TypeS);
   if (BaseC == nullptr)
     return false;
   G->llvm_type = nullptr;
@@ -162,7 +163,11 @@ static void guessCall(const CallBase &Call, Guess *G) {
   if (Types.size() == 0)
     return;
   const DIType *RetType = Types[0];
-  tryDwarfType(RetType, G);
+  if (const DIType *RetPointeeType = skipPointsTo(RetType)) {
+    tryDwarfType(RetPointeeType, G);
+  } else {
+    tryDwarfType(RetType, G);
+  }
 }
 
 static const DbgVariableIntrinsic *findDebugValueFor(const BasicBlock &BB,
@@ -189,9 +194,12 @@ static void guessArgument(const Argument &Arg, Guess *G) {
 
   if (DbgVar->getIntrinsicID() == Intrinsic::dbg_value) {
     DILocalVariable *Var = DbgVar->getVariable();
+    if (const DIType *PointeeType = skipPointsTo(Var->getType())) {
+      tryDwarfType(PointeeType, G);
+    }
+  } else if (DbgVar->getIntrinsicID() == Intrinsic::dbg_declare) {
+    DILocalVariable *Var = DbgVar->getVariable();
     tryDwarfType(Var->getType(), G);
-  } else {
-    // TODO: dbg_declare for structs passed by val?
   }
 }
 
@@ -245,8 +253,7 @@ void Dumper::dumpTypeGuess(const DataLayout &DL, const Value &Ptr) {
     dumpDwarfTypeIdent(*G.dwarf_type);
     OS << ",\n      \"trace_offset\": " << G.Offset;
   } else if (G.llvm_type != nullptr) {
-    OS << ",\n      \"trace_type\": \"" << G.llvm_type->getStructName()
-      << "\"";
+    OS << ",\n      \"trace_type\": \"" << G.llvm_type->getStructName() << "\"";
     OS << ",\n      \"trace_offset\": " << G.Offset;
   }
 }
@@ -263,7 +270,8 @@ void Dumper::dumpAA(const Instruction &I) {
   const MDString &AccessTyName = cast<MDString>(*AccessTy.getOperand(0));
   OS << ",\n      \"aa_access_type\": \"" << AccessTyName.getString() << "\"";
   const ConstantAsMetadata &Offset = cast<ConstantAsMetadata>(*TBAA->getOperand(2));
-  OS << ",\n      \"aa_offset\": " << cast<ConstantInt>(Offset.getValue())->getSExtValue();
+  OS << ",\n      \"aa_offset\": "
+     << cast<ConstantInt>(Offset.getValue())->getSExtValue();
 }
 
 void Dumper::dumpOp(const DataLayout &DL, Type &OpType, Align A) {
@@ -282,7 +290,8 @@ void Dumper::dumpCompositeType(const DICompositeType &CT) {
   OS << ",\n      \"ident\": ";
   dumpDwarfTypeIdent(CT);
   OS << ",\n      \"is_decl\": " << (CT.isForwardDecl() ? "true" : "false");
-  OS << ",\n      \"is_odr\": " << (CT.getIdentifier().size() > 0 ? "true" : "false");
+  OS << ",\n      \"is_odr\": "
+     << (CT.getIdentifier().size() > 0 ? "true" : "false");
 
   unsigned tag = CT.getTag();
   const char *tag_name = nullptr;
