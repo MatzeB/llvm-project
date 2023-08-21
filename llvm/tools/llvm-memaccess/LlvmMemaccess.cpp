@@ -303,6 +303,10 @@ void Dumper::dumpCompositeType(const DICompositeType &CT) {
   OS << ",\n      \"is_odr\": "
      << (CT.getIdentifier().size() > 0 ? "true" : "false");
 
+  if (CT.getSizeInBits() > 0) {
+    OS << ",\n      \"size_bits\": " << CT.getSizeInBits();
+  }
+
   unsigned tag = CT.getTag();
   const char *tag_name = nullptr;
   if (tag == dwarf::DW_TAG_structure_type) {
@@ -311,6 +315,8 @@ void Dumper::dumpCompositeType(const DICompositeType &CT) {
     tag_name = "DW_TAG_class_type";
   } else if (tag == dwarf::DW_TAG_union_type) {
     tag_name = "DW_TAG_union_type";
+  } else if (tag == dwarf::DW_TAG_enumeration_type) {
+    tag_name = "DW_TAG_enumeration_type";
   }
   OS << ",\n      \"tag\": " << CT.getTag();
   if (tag_name != nullptr) {

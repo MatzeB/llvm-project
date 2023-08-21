@@ -37,11 +37,12 @@ class Field:
 @dataclass
 class TypeInfo:
     ident: str
+    kind: str
     file: str
     line: Optional[int]
     odr: bool
     decl: bool
-    placeholder: bool
+    size: Optional[int]
     reads: int
     writes: int
     fields: list[Field]
@@ -49,17 +50,33 @@ class TypeInfo:
     def __str__(self):
         return self.ident
 
-    def __init__(self, ident, file="", line=None, odr=False, decl=True):
+    def __init__(self, ident, kind, file="", line=None, odr=False, decl=False):
         self.ident = ident
+        self.kind = kind
         self.file = file
         self.line = line
         self.odr = odr
         self.decl = decl
-        self.placeholder = False
+        self.size = None
         self.reads = 0
         self.writes = 0
         self.fields = []
 
+    def merge_from(self, other):
+        assert self.ident == other.ident
+        self.file = other.file
+        self.kind = other.kind
+        self.line = other.line
+        self.odr = other.odr
+        self.decl = other.decl
+        self.size = other.size
+        self.reads += other.reads
+        self.writes += other.writes
+        self.fields = other.fields
+
+        other.ident = "$merged"
+        other.field = "$merged"
+        other.fields = []
 
 def apply_op(type_info, kind, profile_count, offset, size):
     if offset < 0:
@@ -89,30 +106,18 @@ def apply_op(type_info, kind, profile_count, offset, size):
             apply_op(f.type, kind, profile_count, offset - f.offset, size)
 
 
-def guess_type_size(type_info: TypeInfo) -> int:
+def guess_type_size(info: TypeInfo) -> int:
+    size = info.size
+    if size is not None:
+        return size
     size = 0
-    for f in type_info.fields:
+    for f in info.fields:
         if f.size == -1:
             f.size = guess_type_size(f.type)
         f_end = f.offset + f.size
         if f_end > size:
             size = f_end
     return size
-
-
-def merge_type(dst, src):
-    assert dst.ident == src.ident
-    dst.file = src.file
-    dst.line = src.line
-    dst.odr = src.odr
-    dst.decl = src.decl
-    dst.reads += src.reads
-    dst.writes += src.writes
-    dst.fields = src.fields
-
-    src.ident = "$merged"
-    src.field = "$merged"
-    src.fields = []
 
 
 def log_check_failure(message, info0, info1):
@@ -163,15 +168,27 @@ def merge_types(types, info):
         types[ident] = info
         return
 
-    if not existing_type.decl and not info.decl:
-        compare_defs(existing_type, info)
-        if existing_type.odr and info.odr:
-            check_odr(existing_type, info)
+    if info.kind == "placeholder" or info.decl:
+        return
 
-    if not info.decl and not existing_type.decl:
-        merge_type(existing_type, info)
+    if existing_type.kind == "placeholder":
+        if info.kind != "placeholder":
+            existing_type.merge_from(info)
+        return
 
-    return existing_type
+    if existing_type.decl:
+        if not info.decl:
+            existing_type.merge_from(info)
+        return
+
+    if info.decl:
+        return
+
+    # Both are definitions, check if they match...
+    compare_defs(existing_type, info)
+    if existing_type.odr and info.odr:
+        check_odr(existing_type, info)
+    existing_type.merge_from(info)
 
 
 def read_types(types, filename, file_ident):
@@ -188,7 +205,27 @@ def read_types(types, filename, file_ident):
         line = t.get("line", None)
         odr = t["is_odr"]
         decl = t["is_decl"]
-        info = TypeInfo(ident, file=file, line=line, odr=odr, decl=decl)
+        tag_name = t.get("tag_name")
+        if tag_name is None:
+            kind = "?"
+        elif tag_name == "DW_TAG_structure_type":
+            kind = "struct"
+        elif tag_name == "DW_TAG_class_type":
+            kind = "class"
+        elif tag_name == "DW_TAG_union_type":
+            kind = "union"
+        elif tag_name == "DW_TAG_enumeration_type":
+            kind = "enum"
+        else:
+            kind = f"? {tag_name}"
+        info = TypeInfo(ident, kind=kind, file=file, line=line, odr=odr, decl=decl)
+
+        size_bits = t.get("size_bits")
+        if size_bits is not None:
+            if size_bits % 8 != 0:
+                stderr.write(f"Warning: Ignoring size_bits {size_bits}\n")
+            else:
+                info.size = size_bits // 8
 
         for e in t["elements"]:
             # Ignore static members
@@ -197,9 +234,8 @@ def read_types(types, filename, file_ident):
             base_type = e["base_type"]
             base_type_info = types.get(base_type)
             if base_type_info is None:
-                base_type_info = TypeInfo(intern(base_type))
-                base_type_info.decl = True
-                base_type_info.placeholder = True
+                base_type_info = TypeInfo(intern(base_type), kind="placeholder",
+                        decl=True)
                 types[base_type] = base_type_info
 
             offset_bits = e["offset_bits"]
@@ -377,15 +413,17 @@ def main():
                 fields.append(result_field)
             result_type = {
                 "ident": t.ident,
+                "kind": t.kind,
                 "file": t.file,
                 "line": t.line,
                 "odr": t.odr,
                 "decl": t.decl,
-                "placeholder": t.placeholder,
                 "reads": t.reads,
                 "writes": t.writes,
                 "fields": fields,
             }
+            if t.size is not None:
+                result_type["size"] = t.size
             result_json.append(result_type)
         with open(out, "w", encoding="utf-8") as fp:
             json.dump(result_json, fp)
