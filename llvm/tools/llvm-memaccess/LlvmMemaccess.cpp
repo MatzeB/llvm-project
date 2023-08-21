@@ -29,49 +29,54 @@ cl::opt<std::string>
 InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
     cl::init("-"), cl::value_desc("filename"));
 
-class DumperPass : public PassInfoMixin<DumperPass> {
+class Dumper : public PassInfoMixin<Dumper> {
 public:
-  DumperPass() {}
+  Dumper() : OS(outs()) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
+
+private:
+  void dumpDwarfTypeIdent(const DICompositeType &CT);
+  void dumpTypeGuess(const DataLayout &DL, const Value &Ptr);
+  void dumpAA(const Instruction &I);
+  void dumpOp(const DataLayout &DL, Type &OpType, Align A);
+  void dumpCompositeType(const DICompositeType &CT);
+  void dumpDwarfTypes(const Module &M);
+
+  raw_ostream &OS;
 };
 
-struct FieldFrequency {
-  unsigned Offset;
-  float ReadFreq;
-  float WriteFreq;
-
-  bool operator <(const FieldFrequency& O) const {
-    return Offset < O.Offset;
-  }
-};
-
-struct TypeFieldFrequencies {
-  TypeFieldFrequencies() {}
-
-  FieldFrequency& FreqForOffset(unsigned Offset) {
-    FrequenciesType::iterator I = std::lower_bound(Frequencies.begin(),
-                                                   Frequencies.end(), Offset,
-                     [](const FieldFrequency &F, unsigned Offset) {
-                      return F.Offset < Offset;
-                     });
-    if (I->Offset != Offset) {
-      I = Frequencies.insert(I, FieldFrequency());
+static void dumpJSONEscaped(raw_ostream &OS, StringRef S) {
+  size_t I = 0;
+  for (;;) {
+    size_t next_backslash = S.find('\\', I);
+    size_t next_quote = S.find('"', I);
+    size_t next_special = std::min(next_backslash, next_quote);
+    if (next_special == StringRef::npos) {
+      OS << S.substr(I);
+      break;
+    } else {
+      OS << S.substr(I, next_special - I);
     }
-    return *I;
+    OS << '\\' << S[next_special];
+    I = next_special + 1;
   }
-  using FrequenciesType = SmallVector<FieldFrequency>;
-  FrequenciesType Frequencies;
-};
+}
+
+static void dumpJSONString(raw_ostream &OS, StringRef S) {
+  OS << '\"';
+  dumpJSONEscaped(OS, S);
+  OS << '\"';
+}
 
 struct Guess {
-  StructType *llvm_type = nullptr;
-  DICompositeType *dwarf_type = nullptr;
+  const StructType *llvm_type = nullptr;
+  const DICompositeType *dwarf_type = nullptr;
   APInt Offset;
 };
 
-static bool tryLLVMType(Guess *G, llvm::Type *type) {
-  StructType* ST = dyn_cast<StructType>(type);
+static bool tryLLVMType(Guess *G, const llvm::Type *type) {
+  const StructType* ST = dyn_cast<StructType>(type);
   if (ST == nullptr)
     return false;
   if (ST->isLiteral()) {
@@ -90,7 +95,7 @@ static const Value *guessGEP(const DataLayout &DL, const GetElementPtrInst &GEP,
   APInt Offset = APInt::getZero(DL.getPointerSizeInBits(AS));
   if (!GEP.accumulateConstantOffset(DL, Offset))
     return nullptr;
-  Type* PointeeType = GEP.getSourceElementType();
+  const Type* PointeeType = GEP.getSourceElementType();
   if (tryLLVMType(G, PointeeType)) {
     G->Offset += Offset;
     return GEP.getPointerOperand();
@@ -99,12 +104,12 @@ static const Value *guessGEP(const DataLayout &DL, const GetElementPtrInst &GEP,
 }
 
 void guessAlloca(const DataLayout &DL, const AllocaInst &AI, Guess *G) {
-  Type* type = AI.getAllocatedType();
+  const Type* type = AI.getAllocatedType();
   tryLLVMType(G, type);
 }
 
-static DIType *skipDerived(DIType *Type) {
-  DIDerivedType *Derived = dyn_cast<DIDerivedType>(Type);
+static const DIType *skipDerived(const DIType *Type) {
+  const DIDerivedType *Derived = dyn_cast<DIDerivedType>(Type);
   if (Derived == nullptr)
     return Type;
   unsigned tag = Derived->getTag();
@@ -114,7 +119,7 @@ static DIType *skipDerived(DIType *Type) {
       tag == dwarf::DW_TAG_packed_type ||
       tag == dwarf::DW_TAG_atomic_type ||
       tag == dwarf::DW_TAG_immutable_type) {
-    DIType *Base = Derived->getBaseType();
+    const DIType *Base = Derived->getBaseType();
     if (Base == nullptr)
       return Type;
     return skipDerived(Base);
@@ -122,8 +127,8 @@ static DIType *skipDerived(DIType *Type) {
   return Type;
 }
 
-static bool tryDwarfType(DIType *Type, Guess *G) {
-  DIDerivedType *TypeD = dyn_cast<DIDerivedType>(skipDerived(Type));
+static bool tryDwarfType(const DIType *Type, Guess *G) {
+  const DIDerivedType *TypeD = dyn_cast<DIDerivedType>(skipDerived(Type));
   if (TypeD == nullptr)
     return false;
   unsigned tag = TypeD->getTag();
@@ -131,11 +136,11 @@ static bool tryDwarfType(DIType *Type, Guess *G) {
       tag != dwarf::DW_TAG_reference_type &&
       tag != dwarf::DW_TAG_rvalue_reference_type)
     return false;
-  DIType* Base = TypeD->getBaseType();
+  const DIType* Base = TypeD->getBaseType();
   if (Base == nullptr)
     return false;
-  DIType *BaseS = skipDerived(Base);
-  DICompositeType *BaseC = dyn_cast<DICompositeType>(BaseS);
+  const DIType *BaseS = skipDerived(Base);
+  const DICompositeType *BaseC = dyn_cast<DICompositeType>(BaseS);
   if (BaseC == nullptr)
     return false;
   G->llvm_type = nullptr;
@@ -143,63 +148,20 @@ static bool tryDwarfType(DIType *Type, Guess *G) {
   return true;
 }
 
-static void dumpEscaped(StringRef S) {
-  size_t I = 0;
-  for (;;) {
-    size_t next_backslash = S.find('\\', I);
-    size_t next_quote = S.find('"', I);
-    size_t next_special = std::min(next_backslash, next_quote);
-    if (next_special == StringRef::npos) {
-      outs() << S.substr(I);
-      break;
-    } else {
-      outs() << S.substr(I, next_special - I);
-    }
-    outs() << '\\' << S[next_special];
-    I = next_special + 1;
-  }
-}
-
-static void dumpString(StringRef S) {
-  outs() << '\"';
-  dumpEscaped(S);
-  outs() << '\"';
-}
-
-static void dumpDwarfTypeIdent(const DICompositeType &CT) {
-  if (CT.getTag() == dwarf::DW_TAG_array_type) {
-    // not really handled yet...
-    outs() << "\"$array\"";
-    return;
-  }
-  StringRef OdrIdent = CT.getIdentifier();
-  if (OdrIdent.size() > 0) {
-    dumpString(OdrIdent);
-    return;
-  }
-  // It's a local type.
-  // hack: for now let's just assume there's no two types with the same name
-  // defined on the same line...
-  assert(CT.getLine() > 0);
-  outs() << "\"L.";
-  dumpEscaped(CT.getName());
-  outs() << ':' << CT.getLine() << "\"";
-}
-
 static void guessCall(const CallBase &Call, Guess *G) {
-  Function *Callee = Call.getCalledFunction();
+  const Function *Callee = Call.getCalledFunction();
   if (Callee == nullptr)
     return;
-  DISubprogram *SP = Callee->getSubprogram();
+  const DISubprogram *SP = Callee->getSubprogram();
   if (SP == nullptr)
     return;
-  DISubroutineType *Type = SP->getType();
+  const DISubroutineType *Type = SP->getType();
   if (Type == nullptr)
     return;
-  DITypeRefArray Types = Type->getTypeArray();
+  const DITypeRefArray Types = Type->getTypeArray();
   if (Types.size() == 0)
     return;
-  DIType *RetType = Types[0];
+  const DIType *RetType = Types[0];
   tryDwarfType(RetType, G);
 }
 
@@ -233,7 +195,27 @@ static void guessArgument(const Argument &Arg, Guess *G) {
   }
 }
 
-void dumpTypeGuess(const DataLayout &DL, const Value &Ptr) {
+void Dumper::dumpDwarfTypeIdent(const DICompositeType &CT) {
+  if (CT.getTag() == dwarf::DW_TAG_array_type) {
+    // not really handled yet...
+    OS << "\"$array\"";
+    return;
+  }
+  StringRef OdrIdent = CT.getIdentifier();
+  if (OdrIdent.size() > 0) {
+    dumpJSONString(OS, OdrIdent);
+    return;
+  }
+  // It's a local type.
+  // hack: for now let's just assume there's no two types with the same name
+  // defined on the same line...
+  assert(CT.getLine() > 0);
+  OS << "\"L.";
+  dumpJSONEscaped(OS, CT.getName());
+  OS << ':' << CT.getLine() << "\"";
+}
+
+void Dumper::dumpTypeGuess(const DataLayout &DL, const Value &Ptr) {
   Guess G;
   G.Offset = APInt::getZero(64);
 
@@ -259,48 +241,48 @@ void dumpTypeGuess(const DataLayout &DL, const Value &Ptr) {
   }
 
   if (G.dwarf_type != nullptr) {
-    outs() << ",\n      \"trace_type\": ";
+    OS << ",\n      \"trace_type\": ";
     dumpDwarfTypeIdent(*G.dwarf_type);
-    outs() << ",\n      \"trace_offset\": " << G.Offset;
+    OS << ",\n      \"trace_offset\": " << G.Offset;
   } else if (G.llvm_type != nullptr) {
-    outs() << ",\n      \"trace_type\": \"" << G.llvm_type->getStructName()
+    OS << ",\n      \"trace_type\": \"" << G.llvm_type->getStructName()
       << "\"";
-    outs() << ",\n      \"trace_offset\": " << G.Offset;
+    OS << ",\n      \"trace_offset\": " << G.Offset;
   }
 }
 
-void dumpAA(const Instruction &I) {
+void Dumper::dumpAA(const Instruction &I) {
   AAMDNodes AAMD = I.getAAMetadata();
   const MDNode *TBAA = AAMD.TBAA;
   if (TBAA == nullptr)
     return;
   const MDNode &BaseTy = cast<MDNode>(*TBAA->getOperand(0));
   const MDString &BaseTyName = cast<MDString>(*BaseTy.getOperand(0));
-  outs() << ",\n      \"aa_struct\": \"" << BaseTyName.getString() << "\"";
+  OS << ",\n      \"aa_struct\": \"" << BaseTyName.getString() << "\"";
   const MDNode &AccessTy = cast<MDNode>(*TBAA->getOperand(1));
   const MDString &AccessTyName = cast<MDString>(*AccessTy.getOperand(0));
-  outs() << ",\n      \"aa_access_type\": \"" << AccessTyName.getString() << "\"";
+  OS << ",\n      \"aa_access_type\": \"" << AccessTyName.getString() << "\"";
   const ConstantAsMetadata &Offset = cast<ConstantAsMetadata>(*TBAA->getOperand(2));
-  outs() << ",\n      \"aa_offset\": " << cast<ConstantInt>(Offset.getValue())->getSExtValue();
+  OS << ",\n      \"aa_offset\": " << cast<ConstantInt>(Offset.getValue())->getSExtValue();
 }
 
-void dumpOp(const DataLayout &DL, Type* OpType, Align A) {
-  TypeSize Sz = DL.getTypeStoreSize(OpType);
-  outs() << ",\n      \"size_bytes\": " << Sz.getFixedValue();
-  outs() << ",\n      \"align_bytes\": " << A.value();
+void Dumper::dumpOp(const DataLayout &DL, Type &OpType, Align A) {
+  TypeSize Sz = DL.getTypeStoreSize(&OpType);
+  OS << ",\n      \"size_bytes\": " << Sz.getFixedValue();
+  OS << ",\n      \"align_bytes\": " << A.value();
 }
 
-void dumpCompositeType(const DICompositeType &CT) {
-  outs() << "    {";
-  outs() << "\n      \"name\": ";
-  dumpString(CT.getName());
-  outs() << ",\n      \"file\": ";
-  dumpString(CT.getFilename());
-  outs() << ",\n      \"line\": " << CT.getLine();
-  outs() << ",\n      \"ident\": ";
+void Dumper::dumpCompositeType(const DICompositeType &CT) {
+  OS << "    {";
+  OS << "\n      \"name\": ";
+  dumpJSONString(OS, CT.getName());
+  OS << ",\n      \"file\": ";
+  dumpJSONString(OS, CT.getFilename());
+  OS << ",\n      \"line\": " << CT.getLine();
+  OS << ",\n      \"ident\": ";
   dumpDwarfTypeIdent(CT);
-  outs() << ",\n      \"is_decl\": " << (CT.isForwardDecl() ? "true" : "false");
-  outs() << ",\n      \"is_odr\": " << (CT.getIdentifier().size() > 0 ? "true" : "false");
+  OS << ",\n      \"is_decl\": " << (CT.isForwardDecl() ? "true" : "false");
+  OS << ",\n      \"is_odr\": " << (CT.getIdentifier().size() > 0 ? "true" : "false");
 
   unsigned tag = CT.getTag();
   const char *tag_name = nullptr;
@@ -311,17 +293,17 @@ void dumpCompositeType(const DICompositeType &CT) {
   } else if (tag == dwarf::DW_TAG_union_type) {
     tag_name = "DW_TAG_union_type";
   }
-  outs() << ",\n      \"tag\": " << CT.getTag();
+  OS << ",\n      \"tag\": " << CT.getTag();
   if (tag_name != nullptr) {
-    outs() << ",\n      \"tag_name\": \"" << tag_name << "\"";
+    OS << ",\n      \"tag_name\": \"" << tag_name << "\"";
   }
 
-  outs() << ",\n      \"elements\": [";
+  OS << ",\n      \"elements\": [";
   bool first_element = true;
   for (DINode *E : CT.getElements()) {
     if (DIDerivedType *DIT = dyn_cast<DIDerivedType>(E)) {
       if (!first_element) {
-        outs() << ",";
+        OS << ",";
       } else {
         first_element = false;
       }
@@ -333,42 +315,42 @@ void dumpCompositeType(const DICompositeType &CT) {
       } else if (tag == dwarf::DW_TAG_inheritance) {
         tag_name = "DW_TAG_inheritance";
       }
-      outs() << "\n        {";
-      outs() << "\n          \"name\": ";
-      dumpString(DIT->getName());
-      outs() << ",\n          \"tag\": " << tag;
+      OS << "\n        {";
+      OS << "\n          \"name\": ";
+      dumpJSONString(OS, DIT->getName());
+      OS << ",\n          \"tag\": " << tag;
       if (tag_name != nullptr) {
-        outs() << ",\n          \"tag_name\": \"" << tag_name << "\"";
+        OS << ",\n          \"tag_name\": \"" << tag_name << "\"";
       }
-      outs() << ",\n          \"base_type\": ";
+      OS << ",\n          \"base_type\": ";
       DIType *Base = DIT->getBaseType();
       if (Base == nullptr) {
-        outs() << "null";
+        OS << "null";
       } else if (DICompositeType *BaseCT = dyn_cast<DICompositeType>(Base)) {
         dumpDwarfTypeIdent(*BaseCT);
       } else {
-        dumpString(Base->getName());
+        dumpJSONString(OS, Base->getName());
       }
-      outs() << ",\n          \"offset_bits\": " << DIT->getOffsetInBits();
+      OS << ",\n          \"offset_bits\": " << DIT->getOffsetInBits();
       // This seems to be incorreclty 0 for DW_TAG_inheritance? So don't
       // output in this case (analyzer can recompute instead).
       if (DIT->getSizeInBits() != 0 || tag != dwarf::DW_TAG_inheritance) {
-        outs() << ",\n          \"size_bits\": " << DIT->getSizeInBits();
+        OS << ",\n          \"size_bits\": " << DIT->getSizeInBits();
       }
 
       if (DIT->getFlags() & DINode::FlagStaticMember) {
-        outs() << ",\n          \"is_static\": true";
+        OS << ",\n          \"is_static\": true";
       }
 
-      outs() << "\n        }";
+      OS << "\n        }";
     }
   }
-  outs() << "\n      ]";
+  OS << "\n      ]";
 
-  outs() << "\n    }";
+  OS << "\n    }";
 }
 
-void dumpDwarfTypes(const Module &M) {
+void Dumper::dumpDwarfTypes(const Module &M) {
   std::vector<Metadata*> Queue;
 
   DenseSet<Metadata*> Seen;
@@ -392,11 +374,11 @@ void dumpDwarfTypes(const Module &M) {
         if (CT->getTag() == dwarf::DW_TAG_array_type)
           continue;
         if (!first) {
-          outs() << ',';
+          OS << ',';
         } else {
           first = false;
         }
-        outs() << '\n';
+        OS << '\n';
 
         dumpCompositeType(*CT);
       }
@@ -411,14 +393,14 @@ void dumpDwarfTypes(const Module &M) {
   }
 }
 
-PreservedAnalyses DumperPass::run(Module &M, ModuleAnalysisManager &MAM) {
-  outs() << "{";
-  outs() << "\n  \"source_filename\": \"" << M.getSourceFileName() << "\"";
-  outs() << ",\n  \"dwarf_types\": [";
+PreservedAnalyses Dumper::run(Module &M, ModuleAnalysisManager &MAM) {
+  OS << "{";
+  OS << "\n  \"source_filename\": \"" << M.getSourceFileName() << "\"";
+  OS << ",\n  \"dwarf_types\": [";
   dumpDwarfTypes(M);
-  outs() << "\n  ]";
+  OS << "\n  ]";
 
-  outs() << ",\n  \"load_stores\": [";
+  OS << ",\n  \"load_stores\": [";
   bool first = true;
   const DataLayout &DL = M.getDataLayout();
   FunctionAnalysisManager &FAM =
@@ -451,22 +433,22 @@ PreservedAnalyses DumperPass::run(Module &M, ModuleAnalysisManager &MAM) {
           }
 
           if (!first) {
-            outs() << ',';
+            OS << ',';
           } else {
             first = false;
           }
-          outs() << "\n    {";
-          outs() << "\n      \"kind\": \"" << kind << "\"";
-          outs() << ",\n      \"function\": ";
-          dumpString(F.getName());
+          OS << "\n    {";
+          OS << "\n      \"kind\": \"" << kind << "\"";
+          OS << ",\n      \"function\": ";
+          dumpJSONString(OS, F.getName());
 #if DUMP_IR
-          outs() << ",\n      \"IR\": \"" << I << "\"";
+          OS << ",\n      \"IR\": \"" << I << "\"";
 #endif
-          outs() << ",\n      \"profile_count\": " << ProfileCount;
+          OS << ",\n      \"profile_count\": " << ProfileCount;
           dumpAA(I);
-          dumpOp(DL, OpType, OpAlign);
+          dumpOp(DL, *OpType, OpAlign);
           dumpTypeGuess(DL, *Ptr);
-          outs() << "\n    }";
+          OS << "\n    }";
         } else if (const IntrinsicInst *Intrin = dyn_cast<IntrinsicInst>(&I)) {
           Intrinsic::ID ID = Intrin->getIntrinsicID();
           unsigned ReadOp = ~0u;
@@ -502,49 +484,49 @@ PreservedAnalyses DumperPass::run(Module &M, ModuleAnalysisManager &MAM) {
           uint64_t Size = cast<ConstantInt>(SizeVal)->getZExtValue();
           if (ReadOp != ~0u) {
             if (!first) {
-              outs() << ',';
+              OS << ',';
             } else {
               first = false;
             }
-            outs() << "\n    {";
-            outs() << "\n      \"kind\": \"load\"";
-            outs() << ",\n      \"ikind\": \"" << Kind << "\"";
-            outs() << ",\n      \"function\": ";
-            dumpString(F.getName());
+            OS << "\n    {";
+            OS << "\n      \"kind\": \"load\"";
+            OS << ",\n      \"ikind\": \"" << Kind << "\"";
+            OS << ",\n      \"function\": ";
+            dumpJSONString(OS, F.getName());
 #ifdef DUMP_IR
-            outs() << ",\n      \"IR\": \"" << I << "\"";
+            OS << ",\n      \"IR\": \"" << I << "\"";
 #endif
-            outs() << ",\n      \"profile_count\": " << ProfileCount;
-            outs() << ",\n      \"size_bytes\": " << Size;
+            OS << ",\n      \"profile_count\": " << ProfileCount;
+            OS << ",\n      \"size_bytes\": " << Size;
             dumpTypeGuess(DL, *Intrin->getOperand(ReadOp));
-            outs() << "\n    }";
+            OS << "\n    }";
           }
           if (WriteOp != ~0u) {
             if (!first) {
-              outs() << ',';
+              OS << ',';
             } else {
               first = false;
             }
-            outs() << "\n    {";
-            outs() << "\n      \"kind\": \"store\"";
-            outs() << ",\n      \"ikind\": \"" << Kind << "\"";
-            outs() << ",\n      \"function\": ";
-            dumpString(F.getName());
+            OS << "\n    {";
+            OS << "\n      \"kind\": \"store\"";
+            OS << ",\n      \"ikind\": \"" << Kind << "\"";
+            OS << ",\n      \"function\": ";
+            dumpJSONString(OS, F.getName());
 #ifdef DUMP_IR
-            outs() << ",\n      \"IR\": \"" << I << "\"";
+            OS << ",\n      \"IR\": \"" << I << "\"";
 #endif
-            outs() << ",\n      \"profile_count\": " << ProfileCount;
-            outs() << ",\n      \"size_bytes\": " << Size;
+            OS << ",\n      \"profile_count\": " << ProfileCount;
+            OS << ",\n      \"size_bytes\": " << Size;
             dumpTypeGuess(DL, *Intrin->getOperand(WriteOp));
-            outs() << "\n    }";
+            OS << "\n    }";
           }
         }
       }
     }
   }
-  outs() << "\n  ]";
-  outs() << "\n}";
-  outs() << '\n';
+  OS << "\n  ]";
+  OS << "\n}";
+  OS << '\n';
   return PreservedAnalyses::all();
 }
 
@@ -598,7 +580,7 @@ int main(int argc, char **argv) {
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
   ModulePassManager MPM;
-  MPM.addPass(DumperPass());
+  MPM.addPass(Dumper());
 
   MPM.run(*M, MAM);
 
