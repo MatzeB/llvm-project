@@ -138,7 +138,8 @@ static const DIType *skipDerived(const DIType *Type) {
 }
 
 static const DIType *skipPointsTo(const DIType *Type) {
-  const DIDerivedType *TypeD = dyn_cast<DIDerivedType>(skipDerived(Type));
+  const DIType *TypeB = skipDerived(Type);
+  const DIDerivedType *TypeD = dyn_cast<DIDerivedType>(TypeB);
   if (TypeD == nullptr)
     return nullptr;
   unsigned tag = TypeD->getTag();
@@ -149,13 +150,33 @@ static const DIType *skipPointsTo(const DIType *Type) {
   return TypeD->getBaseType();
 }
 
+static const DIType *skipArrays(const DIType *Type) {
+  const DIType *TypeB = skipDerived(Type);
+  const DICompositeType *TypeC = dyn_cast<DICompositeType>(TypeB);
+  if (TypeC == nullptr)
+    return nullptr;
+  if (TypeC->getTag() != dwarf::DW_TAG_array_type)
+    return nullptr;
+  const DIType *Base = TypeC->getBaseType();
+  if (Base == nullptr)
+    return nullptr;
+  // Try to skip additional arrays.
+  for (;;) {
+    const DIType *Skip = skipArrays(Base);
+    if (Skip == nullptr)
+      break;
+    Base = Skip;
+  }
+  return Base;
+}
+
 static bool tryDwarfType(const DIType *Type, Guess *G) {
-  const DIType *TypeS = skipDerived(Type);
-  const DICompositeType *BaseC = dyn_cast<DICompositeType>(TypeS);
-  if (BaseC == nullptr)
+  const DIType *TypeB = skipDerived(Type);
+  const DICompositeType *TypeC = dyn_cast<DICompositeType>(TypeB);
+  if (TypeC == nullptr)
     return false;
   G->llvm_type = nullptr;
-  G->dwarf_type = BaseC;
+  G->dwarf_type = TypeC;
   return true;
 }
 
@@ -347,14 +368,20 @@ void Dumper::dumpCompositeType(const DICompositeType &CT) {
       if (tag_name != nullptr) {
         OS << ",\n          \"tag_name\": \"" << tag_name << "\"";
       }
-      OS << ",\n          \"base_type\": ";
-      DIType *Base = DIT->getBaseType();
+      const DIType *Base = DIT->getBaseType();
       if (Base == nullptr) {
-        OS << "null";
-      } else if (DICompositeType *BaseCT = dyn_cast<DICompositeType>(Base)) {
-        dumpDwarfTypeIdent(*BaseCT);
+        OS << ",\n          \"base_type\": null";
       } else {
-        dumpJSONString(OS, Base->getName());
+        if (const DIType *ArraySkip = skipArrays(Base)) {
+          OS << ",\n          \"is_array\": true";
+          Base = ArraySkip;
+        }
+        OS << ",\n          \"base_type\": ";
+        if (const DICompositeType *BaseCT = dyn_cast<DICompositeType>(Base)) {
+          dumpDwarfTypeIdent(*BaseCT);
+        } else {
+          dumpJSONString(OS, Base->getName());
+        }
       }
       OS << ",\n          \"offset_bits\": " << DIT->getOffsetInBits();
       // This seems to be incorreclty 0 for DW_TAG_inheritance? So don't

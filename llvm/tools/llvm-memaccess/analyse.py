@@ -16,6 +16,7 @@ DEBUG = False
 class Field:
     name: str
     type: Optional[TypeInfo]
+    array: bool
     offset: int
     size: int
     offset_bits: int
@@ -23,9 +24,10 @@ class Field:
     reads: int
     writes: int
 
-    def __init__(self, name, type, offset, size, offset_bits, size_bits):
+    def __init__(self, name, type, array, offset, size, offset_bits, size_bits):
         self.name = name
         self.type = type
+        self.array = array
         self.offset = offset
         self.size = size
         self.offset_bits = offset_bits
@@ -69,7 +71,8 @@ class TypeInfo:
         self.line = other.line
         self.odr = other.odr
         self.decl = other.decl
-        self.size = other.size
+        if other.size is not None:
+            self.size = other.size
         self.reads += other.reads
         self.writes += other.writes
         self.fields = other.fields
@@ -129,6 +132,14 @@ def log_check_failure(message, info0, info1):
 
 
 def check_odr(info0, info1):
+    size0 = info0.size
+    size1 = info1.size
+    if size0 is not None and size1 is not None and size0 != size1:
+        log_check_failure("Type size mismatch", info0, info1)
+
+    if info0.kind != info1.kind:
+        log_check_failure("Type kind mismatch", info0, info1)
+
     fields0 = info0.fields
     fields1 = info1.fields
     if len(fields0) != len(fields1):
@@ -153,10 +164,10 @@ def compare_defs(info0, info1):
     mismatch = []
     if info0.odr != info1.odr:
         mismatch.append("is_odr")
-    if info0.file != info1.file:
-        mismatch.append("file")
-    if info0.line != info1.line:
-        mismatch.append("line")
+    #if info0.file != info1.file:
+    #    mismatch.append("file")
+    #if info0.line != info1.line:
+    #    mismatch.append("line")
     if mismatch:
         log_check_failure(f"def mismatch {' '.join(mismatch)}", info0, info1)
 
@@ -247,9 +258,11 @@ def read_types(types, filename, file_ident):
                 size = 0
             else:
                 size = (7 + (offset_bits % 8) + size_bits) // 8
+            is_array = e.get("is_array", False)
             field = Field(
                 name=intern(e["name"]),
                 type=base_type_info,
+                array=is_array,
                 offset=offset,
                 size=size,
                 offset_bits=offset_bits,
@@ -403,6 +416,7 @@ def main():
                 result_field = {
                     "name": f.name,
                     "type": f.type.ident,
+                    "array": f.array,
                     "offset": f.offset,
                     "size": f.size,
                     "offset_bits": f.offset_bits,
