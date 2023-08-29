@@ -44,6 +44,8 @@ private:
   void dumpDwarfTypes(const Module &M);
 
   raw_ostream &OS;
+  using TypeNames = DenseMap<const DICompositeType*, std::string>;
+  TypeNames LocalDwarfTypeNames;
 };
 
 static void dumpJSONEscaped(raw_ostream &OS, StringRef S) {
@@ -236,9 +238,8 @@ static void guessArgument(const Argument &Arg, Guess *G) {
 
 void Dumper::dumpDwarfTypeIdent(const DICompositeType &CT) {
   if (CT.getTag() == dwarf::DW_TAG_array_type) {
-    // not really handled yet...
-    OS << "\"$array\"";
-    return;
+    // we shouldn't get here...
+    abort();
   }
   StringRef OdrIdent = CT.getIdentifier();
   if (OdrIdent.size() > 0) {
@@ -246,12 +247,15 @@ void Dumper::dumpDwarfTypeIdent(const DICompositeType &CT) {
     return;
   }
   // It's a local type.
-  // hack: for now let's just assume there's no two types with the same name
-  // defined on the same line...
-  assert(CT.getLine() > 0);
-  OS << "\"L.";
-  dumpJSONEscaped(OS, CT.getName());
-  OS << ':' << CT.getLine() << "\"";
+  TypeNames::const_iterator I = LocalDwarfTypeNames.find(&CT);
+  if (I != LocalDwarfTypeNames.end()) {
+    dumpJSONString(OS, I->second);
+    return;
+  }
+  unsigned N = LocalDwarfTypeNames.size();
+  std::string name = (Twine("L.") + CT.getName() + "." + Twine(N)).str();
+  dumpJSONString(OS, name);
+  LocalDwarfTypeNames.insert(std::make_pair(&CT, std::move(name)));
 }
 
 void Dumper::dumpTypeGuess(const DataLayout &DL, const Value &Ptr) {
