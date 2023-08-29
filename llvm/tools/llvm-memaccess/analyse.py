@@ -41,6 +41,7 @@ class TypeInfo:
     ident: str
     kind: str
     file: str
+    dwarf_file: str
     line: Optional[int]
     odr: bool
     decl: bool
@@ -56,6 +57,7 @@ class TypeInfo:
         self.ident = ident
         self.kind = kind
         self.file = file
+        self.dwarf_file = None
         self.line = line
         self.odr = odr
         self.decl = decl
@@ -66,8 +68,9 @@ class TypeInfo:
 
     def merge_from(self, other):
         assert self.ident == other.ident
-        self.file = other.file
         self.kind = other.kind
+        self.dwarf_file = other.dwarf_file
+        self.file = other.file
         self.line = other.line
         self.odr = other.odr
         self.decl = other.decl
@@ -230,6 +233,7 @@ def read_types(types, filename, file_ident):
         else:
             kind = f"? {tag_name}"
         info = TypeInfo(ident, kind=kind, file=file, line=line, odr=odr, decl=decl)
+        info.dwarf_file = data["ir_filename"]
 
         size_bits = t.get("size_bits")
         if size_bits is not None:
@@ -344,7 +348,13 @@ def expand_response_file_args(args: list[str]) -> list[str]:
     return new_args
 
 
-def do_per_file(
+def _shorten(string, prefix_max, suffix_max):
+    if len(string) <= (prefix_max + suffix_max - 2):
+        return string
+    return f"{string[:prefix_max]}..{string[-suffix_max:]}"
+
+
+def _do_per_file(
     description: str, filenames: list[str], function: Callable[[str], None]
 ) -> bool:
     """Run `function` on each file in the list. Abort if `function` returns False."""
@@ -352,7 +362,7 @@ def do_per_file(
     for idx, filename in enumerate(filenames):
         if stderr.isatty():
             stderr.write("\r")
-        stderr.write(f"{description} {idx:4d}/{num_files}")
+        stderr.write(f"{description} {idx:4d}/{num_files} {_shorten(filename, 10, 40)}")
         if stderr.isatty():
             stderr.flush()
         else:
@@ -387,7 +397,7 @@ def main():
             stderr.write(f"\n{filename}: error: {e}\n")
             import_failures += 1
 
-    do_per_file("read types", filenames, do_read_types)
+    _do_per_file("read types", filenames, do_read_types)
 
     def do_process_load_stores(filename):
         try:
@@ -395,7 +405,7 @@ def main():
         except Exception as e:
             stderr.write(f"\n{filename}: error: {e}\n")
 
-    do_per_file("process load/stores", filenames, do_process_load_stores)
+    _do_per_file("process load/stores", filenames, do_process_load_stores)
 
     typelist = list(types.values())
     typelist.sort(key=lambda x: x.reads + x.writes, reverse=True)
@@ -428,6 +438,7 @@ def main():
             result_type = {
                 "ident": t.ident,
                 "kind": t.kind,
+                "dwarf_file": t.dwarf_file,
                 "file": t.file,
                 "line": t.line,
                 "odr": t.odr,

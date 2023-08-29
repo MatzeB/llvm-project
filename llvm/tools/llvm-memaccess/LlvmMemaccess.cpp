@@ -447,7 +447,10 @@ void Dumper::dumpDwarfTypes(const Module &M) {
 
 PreservedAnalyses Dumper::run(Module &M, ModuleAnalysisManager &MAM) {
   OS << "{";
-  OS << "\n  \"source_filename\": \"" << M.getSourceFileName() << "\"";
+  OS << "\n  \"source_filename\": ";
+  dumpJSONString(OS, M.getSourceFileName());
+  OS << ",\n  \"ir_filename\": ";
+  dumpJSONString(OS, InputFilename);
   OS << ",\n  \"dwarf_types\": [";
   dumpDwarfTypes(M);
   OS << "\n  ]";
