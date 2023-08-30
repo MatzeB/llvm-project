@@ -291,7 +291,8 @@ void Dumper::dumpTypeGuess(const DataLayout &DL, const Value &Ptr) {
     dumpDwarfTypeIdent(*G.dwarf_type);
     OS << ",\n      \"trace_offset\": " << G.Offset;
   } else if (G.llvm_type != nullptr) {
-    OS << ",\n      \"trace_type\": \"" << G.llvm_type->getStructName() << "\"";
+    OS << ",\n      \"trace_type\": ";
+    dumpJSONString(OS, G.llvm_type->getStructName());
     OS << ",\n      \"trace_offset\": " << G.Offset;
   }
 }
@@ -303,10 +304,12 @@ void Dumper::dumpAA(const Instruction &I) {
     return;
   const MDNode &BaseTy = cast<MDNode>(*TBAA->getOperand(0));
   const MDString &BaseTyName = cast<MDString>(*BaseTy.getOperand(0));
-  OS << ",\n      \"aa_struct\": \"" << BaseTyName.getString() << "\"";
+  OS << ",\n      \"aa_struct\": ";
+  dumpJSONString(OS, BaseTyName.getString());
   const MDNode &AccessTy = cast<MDNode>(*TBAA->getOperand(1));
   const MDString &AccessTyName = cast<MDString>(*AccessTy.getOperand(0));
-  OS << ",\n      \"aa_access_type\": \"" << AccessTyName.getString() << "\"";
+  OS << ",\n      \"aa_access_type\": ";
+  dumpJSONString(OS, AccessTyName.getString());
   const ConstantAsMetadata &Offset = cast<ConstantAsMetadata>(*TBAA->getOperand(2));
   OS << ",\n      \"aa_offset\": "
      << cast<ConstantInt>(Offset.getValue())->getSExtValue();
@@ -387,6 +390,9 @@ void Dumper::dumpCompositeType(const DICompositeType &CT) {
         OS << ",\n          \"base_type\": ";
         if (const DICompositeType *BaseCT = dyn_cast<DICompositeType>(Base)) {
           dumpDwarfTypeIdent(*BaseCT);
+        } else if (Base->getTag() == dwarf::DW_TAG_pointer_type ||
+                   Base->getTag() == dwarf::DW_TAG_reference_type) {
+          OS << "\"any pointer\"";
         } else {
           dumpJSONString(OS, Base->getName());
         }

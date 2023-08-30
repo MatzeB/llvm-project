@@ -175,7 +175,11 @@ def compare_defs(info0, info1):
     mismatch = []
     if info0.odr != info1.odr:
         mismatch.append("is_odr")
-    # if info0.file != info1.file:
+    # These produce too much noise... They trigger for things like:
+    #    - explicit template instantations used as location when available,
+    #      otherwise class declaration is used.
+    #    - thrift sometimes generates same class in multiple .h files
+    #if info0.file != info1.file:
     #    mismatch.append("file")
     # if info0.line != info1.line:
     #    mismatch.append("line")

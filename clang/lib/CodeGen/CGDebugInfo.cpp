@@ -1102,8 +1102,13 @@ static SmallString<256> getTypeIdentifier(const TagType *Ty, CodeGenModule &CGM,
   SmallString<256> Identifier;
   const TagDecl *TD = Ty->getDecl();
 
+#if 0
   if (!needsTypeIdentifier(TD, CGM, TheCU))
     return Identifier;
+#else
+  if (!hasCXXMangling(TD, TheCU))
+    return false;
+#endif
 
 #if 0
   if (const auto *RD = dyn_cast<CXXRecordDecl>(TD))
@@ -1167,8 +1172,8 @@ CGDebugInfo::getOrCreateRecordFwdDecl(const RecordType *Ty,
   // Create the type.
   SmallString<256> Identifier;
   // Don't include a linkage name in line tables only.
-  if (CGM.getCodeGenOpts().hasReducedDebugInfo())
-    Identifier = getTypeIdentifier(Ty, CGM, TheCU);
+  //if (CGM.getCodeGenOpts().hasReducedDebugInfo())
+  Identifier = getTypeIdentifier(Ty, CGM, TheCU);
   llvm::DICompositeType *RetTy = DBuilder.createReplaceableCompositeType(
       getTagForRecord(RD), RDName, Ctx, DefUnit, Line, 0, Size, Align, Flags,
       Identifier);
