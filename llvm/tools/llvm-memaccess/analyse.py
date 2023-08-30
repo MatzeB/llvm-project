@@ -4,10 +4,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import traceback
 from dataclasses import dataclass
 from pprint import pprint
 from sys import intern, stderr
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 DEBUG = False
 
@@ -84,6 +85,7 @@ class TypeInfo:
         other.field = "$merged"
         other.fields = []
 
+
 def apply_op(type_info, kind, profile_count, offset, size):
     if offset < 0:
         size -= offset
@@ -127,7 +129,8 @@ def guess_type_size(info: TypeInfo) -> int:
 
 
 def log_check_failure(message, info0, info1):
-    stderr.write(f"{message}\n")
+    if message:
+        stderr.write(f"{message}\n")
     stderr.write("== Type A\n")
     pprint(info0, stderr)
     stderr.write("== Type B\n")
@@ -135,21 +138,21 @@ def log_check_failure(message, info0, info1):
 
 
 def check_odr(info0, info1):
+    failures = []
     size0 = info0.size
     size1 = info1.size
     if size0 is not None and size1 is not None and size0 != size1:
-        log_check_failure("Type size mismatch", info0, info1)
+        failures.append("Type size mismatch")
 
     if info0.kind != info1.kind:
-        log_check_failure("Type kind mismatch", info0, info1)
+        failures.append("Type kind mismatch")
 
     fields0 = info0.fields
     fields1 = info1.fields
     if len(fields0) != len(fields1):
-        log_check_failure("different number of fields", info0, info1)
-        return
+        failures.append("different number of fields")
 
-    for i in range(0, len(fields0)):
+    for i in range(0, min(len(fields0), len(fields1))):
         field0 = fields0[i]
         field1 = fields1[i]
         if (
@@ -160,16 +163,21 @@ def check_odr(info0, info1):
             or field0.offset_bits != field1.offset_bits
             or field0.size_bits != field1.size_bits
         ):
-            log_check_failure(f"difference for field {i}: {field0.name}", info0, info1)
+            failures.append(f"difference for field {i}: {field0.name}")
+    if failures:
+        stderr.write("= Type mismatch (ODR violation?)\n")
+        for f in failures:
+            stderr.write(f"  - {f}\n")
+        log_check_failure("", info0, info1)
 
 
 def compare_defs(info0, info1):
     mismatch = []
     if info0.odr != info1.odr:
         mismatch.append("is_odr")
-    #if info0.file != info1.file:
+    # if info0.file != info1.file:
     #    mismatch.append("file")
-    #if info0.line != info1.line:
+    # if info0.line != info1.line:
     #    mismatch.append("line")
     if mismatch:
         log_check_failure(f"def mismatch {' '.join(mismatch)}", info0, info1)
@@ -249,8 +257,9 @@ def read_types(types, filename, file_ident):
             base_type = e["base_type"]
             base_type_info = types.get(base_type)
             if base_type_info is None:
-                base_type_info = TypeInfo(intern(base_type), kind="placeholder",
-                        decl=True)
+                base_type_info = TypeInfo(
+                    intern(base_type), kind="placeholder", decl=True
+                )
                 types[base_type] = base_type_info
 
             offset_bits = e["offset_bits"]
@@ -394,6 +403,7 @@ def main():
         try:
             read_types(types, filename, file_idents[filename])
         except Exception as e:
+            traceback.print_exc()
             stderr.write(f"\n{filename}: error: {e}\n")
             import_failures += 1
 

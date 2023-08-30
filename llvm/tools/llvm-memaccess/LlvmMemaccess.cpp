@@ -130,7 +130,8 @@ static const DIType *skipDerived(const DIType *Type) {
       tag == dwarf::DW_TAG_volatile_type ||
       tag == dwarf::DW_TAG_packed_type ||
       tag == dwarf::DW_TAG_atomic_type ||
-      tag == dwarf::DW_TAG_immutable_type) {
+      tag == dwarf::DW_TAG_immutable_type ||
+      tag == dwarf::DW_TAG_typedef) {
     const DIType *Base = Derived->getBaseType();
     if (Base == nullptr)
       return Type;
@@ -176,6 +177,8 @@ static bool tryDwarfType(const DIType *Type, Guess *G) {
   const DIType *TypeB = skipDerived(Type);
   const DICompositeType *TypeC = dyn_cast<DICompositeType>(TypeB);
   if (TypeC == nullptr)
+    return false;
+  if (TypeC->getTag() == dwarf::DW_TAG_array_type)
     return false;
   G->llvm_type = nullptr;
   G->dwarf_type = TypeC;
@@ -238,7 +241,7 @@ static void guessArgument(const Argument &Arg, Guess *G) {
 
 void Dumper::dumpDwarfTypeIdent(const DICompositeType &CT) {
   if (CT.getTag() == dwarf::DW_TAG_array_type) {
-    // we shouldn't get here...
+    // we should have already skipped these...
     abort();
   }
   StringRef OdrIdent = CT.getIdentifier();
@@ -380,6 +383,7 @@ void Dumper::dumpCompositeType(const DICompositeType &CT) {
           OS << ",\n          \"is_array\": true";
           Base = ArraySkip;
         }
+        Base = skipDerived(Base);
         OS << ",\n          \"base_type\": ";
         if (const DICompositeType *BaseCT = dyn_cast<DICompositeType>(Base)) {
           dumpDwarfTypeIdent(*BaseCT);
