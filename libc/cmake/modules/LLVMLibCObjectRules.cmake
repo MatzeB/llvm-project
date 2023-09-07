@@ -21,7 +21,12 @@ function(_get_common_compile_options output_var flags)
   set(compile_options ${LIBC_COMPILE_OPTIONS_DEFAULT} ${ARGN})
   if(LLVM_COMPILER_IS_GCC_COMPATIBLE)
     list(APPEND compile_options "-fpie")
-    list(APPEND compile_options "-ffreestanding")
+
+    if(LLVM_LIBC_FULL_BUILD)
+      # Only add -ffreestanding flag in full build mode.
+      list(APPEND compile_options "-ffreestanding")
+    endif()
+
     list(APPEND compile_options "-fno-builtin")
     list(APPEND compile_options "-fno-exceptions")
     list(APPEND compile_options "-fno-lax-vector-conversions")
@@ -63,6 +68,11 @@ function(_get_common_compile_options output_var flags)
   if (LIBC_TARGET_ARCHITECTURE_IS_GPU)
     list(APPEND compile_options "-nogpulib")
     list(APPEND compile_options "-fvisibility=hidden")
+
+    # Manually disable all standard include paths and include the resource
+    # directory to prevent system headers from being included.
+    list(APPEND compile_options "-isystem${COMPILER_RESOURCE_DIR}/include")
+    list(APPEND compile_options "-nostdinc")
   endif()
   set(${output_var} ${compile_options} PARENT_SCOPE)
 endfunction()
@@ -103,6 +113,10 @@ function(get_nvptx_compile_options output_var gpu_arch)
   elseif(${gpu_arch} STREQUAL "sm_80")
     list(APPEND nvptx_options "--cuda-feature=+ptx72")
   elseif(${gpu_arch} STREQUAL "sm_86")
+    list(APPEND nvptx_options "--cuda-feature=+ptx72")
+  elseif(${gpu_arch} STREQUAL "sm_89")
+    list(APPEND nvptx_options "--cuda-feature=+ptx72")
+  elseif(${gpu_arch} STREQUAL "sm_90")
     list(APPEND nvptx_options "--cuda-feature=+ptx72")
   else()
     message(FATAL_ERROR "Unknown Nvidia GPU architecture '${gpu_arch}'")
@@ -355,9 +369,8 @@ function(create_object_library fq_target_name)
     target_include_directories(
       ${fq_target_name}
       PRIVATE
-        ${LIBC_BUILD_DIR}/include
         ${LIBC_SOURCE_DIR}
-        ${LIBC_BUILD_DIR}
+        ${LIBC_INCLUDE_DIR}
     )
     target_compile_options(${fq_target_name} PRIVATE ${compile_options})
   endif()

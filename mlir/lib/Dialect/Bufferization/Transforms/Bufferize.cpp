@@ -16,7 +16,9 @@
 #include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
@@ -221,6 +223,12 @@ struct OneShotBufferizePass
       // Configure type converter.
       LayoutMapOption unknownTypeConversionOption =
           parseLayoutMapOption(unknownTypeConversion);
+      if (unknownTypeConversionOption == LayoutMapOption::InferLayoutMap) {
+        emitError(UnknownLoc::get(&getContext()),
+                  "Invalid option: 'infer-layout-map' is not a valid value for "
+                  "'unknown-type-conversion'");
+        return signalPassFailure();
+      }
       opt.unknownTypeConverterFn = [=](Value value, Attribute memorySpace,
                                        const BufferizationOptions &options) {
         auto tensorType = cast<TensorType>(value.getType());
@@ -248,6 +256,31 @@ struct OneShotBufferizePass
       opt = *options;
     }
 
+    if (opt.copyBeforeWrite && opt.testAnalysisOnly) {
+      // These two flags do not make sense together: "copy-before-write"
+      // indicates that copies should be inserted before every memory write,
+      // but "test-analysis-only" indicates that only the analysis should be
+      // tested. (I.e., no IR is bufferized.)
+      emitError(UnknownLoc::get(&getContext()),
+                "Invalid option: 'copy-before-write' cannot be used with "
+                "'test-analysis-only'");
+      return signalPassFailure();
+    }
+
+    if (opt.printConflicts && !opt.testAnalysisOnly) {
+      emitError(
+          UnknownLoc::get(&getContext()),
+          "Invalid option: 'print-conflicts' requires 'test-analysis-only'");
+      return signalPassFailure();
+    }
+
+    if (opt.dumpAliasSets && !opt.testAnalysisOnly) {
+      emitError(
+          UnknownLoc::get(&getContext()),
+          "Invalid option: 'dump-alias-sets' requires 'test-analysis-only'");
+      return signalPassFailure();
+    }
+
     BufferizationStatistics statistics;
     ModuleOp moduleOp = getOperation();
     if (opt.bufferizeFunctionBoundaries) {
@@ -256,8 +289,12 @@ struct OneShotBufferizePass
         return;
       }
     } else {
-      assert(opt.noAnalysisFuncFilter.empty() &&
-             "invalid combination of bufferization flags");
+      if (!opt.noAnalysisFuncFilter.empty()) {
+        emitError(UnknownLoc::get(&getContext()),
+                  "Invalid option: 'no-analysis-func-filter' requires "
+                  "'bufferize-function-boundaries'");
+        return signalPassFailure();
+      }
       if (failed(runOneShotBufferize(moduleOp, opt, &statistics))) {
         signalPassFailure();
         return;
@@ -321,6 +358,16 @@ static bool isaTensor(Type t) { return isa<TensorType>(t); }
 
 /// Return true if the given op has a tensor result or a tensor operand.
 static bool hasTensorSemantics(Operation *op) {
+  bool hasTensorBlockArgument = any_of(op->getRegions(), [](Region &r) {
+    return any_of(r.getBlocks(), [](Block &b) {
+      return any_of(b.getArguments(), [](BlockArgument bbArg) {
+        return isaTensor(bbArg.getType());
+      });
+    });
+  });
+  if (hasTensorBlockArgument)
+    return true;
+
   if (auto funcOp = dyn_cast<FunctionOpInterface>(op)) {
     bool hasTensorArg = any_of(funcOp.getArgumentTypes(), isaTensor);
     bool hasTensorResult = any_of(funcOp.getResultTypes(), isaTensor);
@@ -580,6 +627,43 @@ bufferization::bufferizeBlockSignature(Block *block, RewriterBase &rewriter,
       for (OpOperand *use : bbArgUses)
         use->set(toTensorOp);
     }
+  }
+
+  // Bufferize callers of the block.
+  for (Operation *op : block->getUsers()) {
+    auto branchOp = dyn_cast<BranchOpInterface>(op);
+    if (!branchOp)
+      return op->emitOpError("cannot bufferize ops with block references that "
+                             "do not implement BranchOpInterface");
+
+    auto it = llvm::find(op->getSuccessors(), block);
+    assert(it != op->getSuccessors().end() && "could find successor");
+    int64_t successorIdx = std::distance(op->getSuccessors().begin(), it);
+
+    SuccessorOperands operands = branchOp.getSuccessorOperands(successorIdx);
+    SmallVector<Value> newOperands;
+    for (auto [operand, type] :
+         llvm::zip(operands.getForwardedOperands(), newTypes)) {
+      if (operand.getType() == type) {
+        // Not a tensor type. Nothing to do for this operand.
+        newOperands.push_back(operand);
+        continue;
+      }
+      FailureOr<BaseMemRefType> operandBufferType =
+          bufferization::getBufferType(operand, options);
+      if (failed(operandBufferType))
+        return failure();
+      rewriter.setInsertionPointAfterValue(operand);
+      Value bufferizedOperand = rewriter.create<bufferization::ToMemrefOp>(
+          operand.getLoc(), *operandBufferType, operand);
+      // A cast is needed if the operand and the block argument have different
+      // bufferized types.
+      if (type != *operandBufferType)
+        bufferizedOperand = rewriter.create<memref::CastOp>(
+            operand.getLoc(), type, bufferizedOperand);
+      newOperands.push_back(bufferizedOperand);
+    }
+    operands.getMutableForwardedOperands().assign(newOperands);
   }
 
   return success();

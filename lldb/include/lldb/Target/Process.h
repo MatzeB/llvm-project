@@ -1224,7 +1224,7 @@ public:
   /// this function if the platform fails to identify the host OS version. The
   /// platform should be checked first in case you are running a simulator
   /// platform that might itself be running natively, but have different
-  /// heuristics for figuring out which OS is is emulating.
+  /// heuristics for figuring out which OS is emulating.
   ///
   /// \return
   ///     Returns the version tuple of the host OS. In case of failure an empty
@@ -1840,7 +1840,7 @@ public:
   ///
   /// \param[in] load_addr
   ///     The load address to query the range_info for. May include non
-  ///     address bits, these will be removed by the the ABI plugin if there is
+  ///     address bits, these will be removed by the ABI plugin if there is
   ///     one.
   ///
   /// \param[out] range_info
@@ -3008,6 +3008,7 @@ protected:
       m_unix_signals_sp; /// This is the current signal set for this process.
   lldb::ABISP m_abi_sp;
   lldb::IOHandlerSP m_process_input_reader;
+  mutable std::mutex m_process_input_reader_mutex;
   ThreadedCommunication m_stdio_communication;
   std::recursive_mutex m_stdio_communication_mutex;
   bool m_stdin_forward; /// Remember if stdin must be forwarded to remote debug
@@ -3133,6 +3134,7 @@ protected:
   bool ProcessIOHandlerIsActive();
 
   bool ProcessIOHandlerExists() const {
+    std::lock_guard<std::mutex> guard(m_process_input_reader_mutex);
     return static_cast<bool>(m_process_input_reader);
   }
 

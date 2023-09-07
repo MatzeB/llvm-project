@@ -293,6 +293,10 @@ def GetPtrBasePop : Opcode {
   let Args = [ArgUint32];
 }
 
+def GetPtrDerivedPop : Opcode {
+  let Args = [ArgUint32];
+}
+
 // [Pointer] -> [Pointer]
 def GetPtrVirtBase : Opcode {
   // RecordDecl of base class.
@@ -352,6 +356,12 @@ def InitGlobal : AccessOpcode;
 // [Value] -> []
 def InitGlobalTemp : AccessOpcode {
   let Args = [ArgUint32, ArgLETD];
+}
+// [Pointer] -> [Pointer]
+def InitGlobalTempComp : Opcode {
+  let Args = [ArgLETD];
+  let Types = [];
+  let HasGroup = 0;
 }
 // [Value] -> []
 def SetGlobal : AccessOpcode;

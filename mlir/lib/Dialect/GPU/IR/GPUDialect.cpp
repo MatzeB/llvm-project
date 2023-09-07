@@ -20,11 +20,11 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/FunctionImplementation.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/TypeUtilities.h"
+#include "mlir/Interfaces/FunctionImplementation.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Transforms/InliningUtils.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -1578,7 +1578,7 @@ void GPUModuleOp::build(OpBuilder &builder, OperationState &result,
 void GPUModuleOp::build(OpBuilder &builder, OperationState &result,
                         StringRef name, ArrayRef<Attribute> targets) {
   build(builder, result, name,
-        targets.size() > 0 ? builder.getArrayAttr(targets) : ArrayAttr());
+        targets.empty() ? ArrayAttr() : builder.getArrayAttr(targets));
 }
 
 ParseResult GPUModuleOp::parse(OpAsmParser &parser, OperationState &result) {
@@ -1661,7 +1661,7 @@ void BinaryOp::build(OpBuilder &builder, OperationState &result, StringRef name,
 void BinaryOp::build(OpBuilder &builder, OperationState &result, StringRef name,
                      Attribute offloadingHandler, ArrayRef<Attribute> objects) {
   build(builder, result, name, offloadingHandler,
-        objects.size() > 0 ? builder.getArrayAttr(objects) : ArrayAttr());
+        objects.empty() ? ArrayAttr() : builder.getArrayAttr(objects));
 }
 
 static ParseResult parseOffloadingHandler(OpAsmParser &parser,
@@ -2006,11 +2006,20 @@ std::pair<llvm::BumpPtrAllocator, SmallVector<const char *>>
 TargetOptions::tokenizeCmdOptions() const {
   std::pair<llvm::BumpPtrAllocator, SmallVector<const char *>> options;
   llvm::StringSaver stringSaver(options.first);
+  StringRef opts = cmdOptions;
+  // For a correct tokenization of the command line options `opts` must be
+  // unquoted, otherwise the tokenization function returns a single string: the
+  // unquoted `cmdOptions` -which is not the desired behavior.
+  // Remove any quotes if they are at the beginning and end of the string:
+  if (!opts.empty() && opts.front() == '"' && opts.back() == '"')
+    opts.consume_front("\""), opts.consume_back("\"");
+  if (!opts.empty() && opts.front() == '\'' && opts.back() == '\'')
+    opts.consume_front("'"), opts.consume_back("'");
 #ifdef _WIN32
-  llvm::cl::TokenizeWindowsCommandLine(cmdOptions, stringSaver, options.second,
+  llvm::cl::TokenizeWindowsCommandLine(opts, stringSaver, options.second,
                                        /*MarkEOLs=*/false);
 #else
-  llvm::cl::TokenizeGNUCommandLine(cmdOptions, stringSaver, options.second,
+  llvm::cl::TokenizeGNUCommandLine(opts, stringSaver, options.second,
                                    /*MarkEOLs=*/false);
 #endif // _WIN32
   return options;

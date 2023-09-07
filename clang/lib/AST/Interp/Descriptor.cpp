@@ -170,9 +170,8 @@ static void moveRecord(Block *B, const std::byte *Src, std::byte *Dst,
                        const Descriptor *D) {
   for (const auto &F : D->ElemRecord->fields()) {
     auto FieldOff = F.Offset;
-    auto FieldDesc = F.Desc;
+    auto *FieldDesc = F.Desc;
 
-    *(reinterpret_cast<Descriptor **>(Dst + FieldOff) - 1) = FieldDesc;
     if (auto Fn = FieldDesc->MoveFn)
       Fn(B, Src + FieldOff, Dst + FieldOff, FieldDesc);
   }
@@ -284,6 +283,12 @@ QualType Descriptor::getType() const {
   if (auto *T = dyn_cast<TypeDecl>(asDecl()))
     return QualType(T->getTypeForDecl(), 0);
   llvm_unreachable("Invalid descriptor type");
+}
+
+QualType Descriptor::getElemQualType() const {
+  assert(isArray());
+  const auto *AT = cast<ArrayType>(getType());
+  return AT->getElementType();
 }
 
 SourceLocation Descriptor::getLocation() const {

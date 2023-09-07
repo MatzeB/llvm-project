@@ -1742,6 +1742,8 @@ unsigned IRTranslator::getSimpleIntrinsicOpcode(Intrinsic::ID ID) {
       return TargetOpcode::G_FEXP;
     case Intrinsic::exp2:
       return TargetOpcode::G_FEXP2;
+    case Intrinsic::exp10:
+      return TargetOpcode::G_FEXP10;
     case Intrinsic::fabs:
       return TargetOpcode::G_FABS;
     case Intrinsic::copysign:
@@ -1943,6 +1945,8 @@ bool IRTranslator::translateIfEntryValueArgument(
   if (!PhysReg)
     return false;
 
+  // Append an op deref to account for the fact that this is a dbg_declare.
+  Expr = DIExpression::append(Expr, dwarf::DW_OP_deref);
   MF->setVariableDbgInfo(DebugInst.getVariable(), Expr, *PhysReg,
                          DebugInst.getDebugLoc());
   return true;

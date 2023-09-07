@@ -691,10 +691,6 @@ inline raw_ostream &operator<<(raw_ostream &OS, const VSETVLIInfo &V) {
 #endif
 
 struct BlockData {
-  // The VSETVLIInfo that represents the net changes to the VL/VTYPE registers
-  // made by this block. Calculated in Phase 1.
-  VSETVLIInfo Change;
-
   // The VSETVLIInfo that represents the VL/VTYPE settings on exit from this
   // block. Calculated in Phase 2.
   VSETVLIInfo Exit;
@@ -742,9 +738,10 @@ private:
                      MachineBasicBlock::iterator InsertPt, DebugLoc DL,
                      const VSETVLIInfo &Info, const VSETVLIInfo &PrevInfo);
 
-  void transferBefore(VSETVLIInfo &Info, const MachineInstr &MI);
-  void transferAfter(VSETVLIInfo &Info, const MachineInstr &MI);
-  bool computeVLVTYPEChanges(const MachineBasicBlock &MBB);
+  void transferBefore(VSETVLIInfo &Info, const MachineInstr &MI) const;
+  void transferAfter(VSETVLIInfo &Info, const MachineInstr &MI) const;
+  bool computeVLVTYPEChanges(const MachineBasicBlock &MBB,
+                             VSETVLIInfo &Info) const;
   void computeIncomingVLVTYPE(const MachineBasicBlock &MBB);
   void emitVSETVLIs(MachineBasicBlock &MBB);
   void doLocalPostpass(MachineBasicBlock &MBB);
@@ -1006,7 +1003,8 @@ bool RISCVInsertVSETVLI::needVSETVLI(const MachineInstr &MI,
 // Given an incoming state reaching MI, modifies that state so that it is minimally
 // compatible with MI.  The resulting state is guaranteed to be semantically legal
 // for MI, but may not be the state requested by MI.
-void RISCVInsertVSETVLI::transferBefore(VSETVLIInfo &Info, const MachineInstr &MI) {
+void RISCVInsertVSETVLI::transferBefore(VSETVLIInfo &Info,
+                                        const MachineInstr &MI) const {
   uint64_t TSFlags = MI.getDesc().TSFlags;
   if (!RISCVII::hasSEWOp(TSFlags))
     return;
@@ -1063,7 +1061,8 @@ void RISCVInsertVSETVLI::transferBefore(VSETVLIInfo &Info, const MachineInstr &M
 // Given a state with which we evaluated MI (see transferBefore above for why
 // this might be different that the state MI requested), modify the state to
 // reflect the changes MI might make.
-void RISCVInsertVSETVLI::transferAfter(VSETVLIInfo &Info, const MachineInstr &MI) {
+void RISCVInsertVSETVLI::transferAfter(VSETVLIInfo &Info,
+                                       const MachineInstr &MI) const {
   if (isVectorConfigInstr(MI)) {
     Info = getInfoForVSETVLI(MI);
     return;
@@ -1082,18 +1081,18 @@ void RISCVInsertVSETVLI::transferAfter(VSETVLIInfo &Info, const MachineInstr &MI
     Info = VSETVLIInfo::getUnknown();
 }
 
-bool RISCVInsertVSETVLI::computeVLVTYPEChanges(const MachineBasicBlock &MBB) {
+bool RISCVInsertVSETVLI::computeVLVTYPEChanges(const MachineBasicBlock &MBB,
+                                               VSETVLIInfo &Info) const {
   bool HadVectorOp = false;
 
-  BlockData &BBInfo = BlockInfo[MBB.getNumber()];
-  BBInfo.Change = BBInfo.Pred;
+  Info = BlockInfo[MBB.getNumber()].Pred;
   for (const MachineInstr &MI : MBB) {
-    transferBefore(BBInfo.Change, MI);
+    transferBefore(Info, MI);
 
     if (isVectorConfigInstr(MI) || RISCVII::hasSEWOp(MI.getDesc().TSFlags))
       HadVectorOp = true;
 
-    transferAfter(BBInfo.Change, MI);
+    transferAfter(Info, MI);
   }
 
   return HadVectorOp;
@@ -1132,8 +1131,8 @@ void RISCVInsertVSETVLI::computeIncomingVLVTYPE(const MachineBasicBlock &MBB) {
   // compatibility checks performed a blocks output state can change based on
   // the input state.  To cache, we'd have to add logic for finding
   // never-compatible state changes.
-  computeVLVTYPEChanges(MBB);
-  VSETVLIInfo TmpStatus = BBInfo.Change;
+  VSETVLIInfo TmpStatus;
+  computeVLVTYPEChanges(MBB, TmpStatus);
 
   // If the new exit value matches the old exit value, we don't need to revisit
   // any blocks.
@@ -1423,28 +1422,20 @@ static bool canMutatePriorConfig(const MachineInstr &PrevMI,
     if (Used.VLAny)
       return false;
 
-    // TODO: Requires more care in the mutation...
-    if (isVLPreservingConfig(PrevMI))
-      return false;
-
     // We don't bother to handle the equally zero case here as it's largely
     // uninteresting.
-    if (Used.VLZeroness &&
-        (!isNonZeroAVL(MI.getOperand(1)) ||
-         !isNonZeroAVL(PrevMI.getOperand(1))))
-      return false;
+    if (Used.VLZeroness) {
+      if (isVLPreservingConfig(PrevMI))
+        return false;
+      if (!isNonZeroAVL(MI.getOperand(1)) ||
+          !isNonZeroAVL(PrevMI.getOperand(1)))
+        return false;
+    }
 
     // TODO: Track whether the register is defined between
     // PrevMI and MI.
     if (MI.getOperand(1).isReg() &&
         RISCV::X0 != MI.getOperand(1).getReg())
-      return false;
-
-    // TODO: We need to change the result register to allow this rewrite
-    // without the result forming a vl preserving vsetvli which is not
-    // a correct state merge.
-    if (PrevMI.getOperand(0).getReg() == RISCV::X0 &&
-        MI.getOperand(1).isReg())
       return false;
   }
 
@@ -1483,6 +1474,8 @@ void RISCVInsertVSETVLI::doLocalPostpass(MachineBasicBlock &MBB) {
         continue;
       } else if (canMutatePriorConfig(MI, *NextMI, Used)) {
         if (!isVLPreservingConfig(*NextMI)) {
+          MI.getOperand(0).setReg(NextMI->getOperand(0).getReg());
+          MI.getOperand(0).setIsDead(false);
           if (NextMI->getOperand(1).isImm())
             MI.getOperand(1).ChangeToImmediate(NextMI->getOperand(1).getImm());
           else
@@ -1490,11 +1483,7 @@ void RISCVInsertVSETVLI::doLocalPostpass(MachineBasicBlock &MBB) {
           MI.setDesc(NextMI->getDesc());
         }
         MI.getOperand(2).setImm(NextMI->getOperand(2).getImm());
-        // Don't delete a vsetvli if its result might be used.
-        Register NextVRefDef = NextMI->getOperand(0).getReg();
-        if (NextVRefDef == RISCV::X0 ||
-            (NextVRefDef.isVirtual() && MRI->use_nodbg_empty(NextVRefDef)))
-          ToDelete.push_back(NextMI);
+        ToDelete.push_back(NextMI);
         // fallthrough
       }
     }
@@ -1538,10 +1527,11 @@ bool RISCVInsertVSETVLI::runOnMachineFunction(MachineFunction &MF) {
 
   // Phase 1 - determine how VL/VTYPE are affected by the each block.
   for (const MachineBasicBlock &MBB : MF) {
-    HaveVectorOp |= computeVLVTYPEChanges(MBB);
+    VSETVLIInfo TmpStatus;
+    HaveVectorOp |= computeVLVTYPEChanges(MBB, TmpStatus);
     // Initial exit state is whatever change we found in the block.
     BlockData &BBInfo = BlockInfo[MBB.getNumber()];
-    BBInfo.Exit = BBInfo.Change;
+    BBInfo.Exit = TmpStatus;
     LLVM_DEBUG(dbgs() << "Initial exit state of " << printMBBReference(MBB)
                       << " is " << BBInfo.Exit << "\n");
 

@@ -1562,9 +1562,8 @@ namespace llvm {
     bool lowerInterleavedStore(StoreInst *SI, ShuffleVectorInst *SVI,
                                unsigned Factor) const override;
 
-    SDValue expandIndirectJTBranch(const SDLoc& dl, SDValue Value,
-                                   SDValue Addr, SelectionDAG &DAG)
-                                   const override;
+    SDValue expandIndirectJTBranch(const SDLoc &dl, SDValue Value, SDValue Addr,
+                                   int JTI, SelectionDAG &DAG) const override;
 
     Align getPrefLoopAlignment(MachineLoop *ML) const override;
 
@@ -1637,8 +1636,8 @@ namespace llvm {
     SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
 
-    unsigned getGlobalWrapperKind(const GlobalValue *GV = nullptr,
-                                  const unsigned char OpFlags = 0) const;
+    unsigned getGlobalWrapperKind(const GlobalValue *GV,
+                                  const unsigned char OpFlags) const;
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -1754,8 +1753,6 @@ namespace llvm {
     bool lowerAtomicLoadAsLoadSDNode(const LoadInst &LI) const override;
 
     bool needsCmpXchgNb(Type *MemType) const;
-
-    template<typename T> bool isSoftFP16(T VT) const;
 
     void SetupEntryBlockForSjLj(MachineInstr &MI, MachineBasicBlock *MBB,
                                 MachineBasicBlock *DispatchBB, int FI) const;

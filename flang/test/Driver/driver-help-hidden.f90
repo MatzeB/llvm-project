@@ -43,6 +43,7 @@
 ! CHECK-NEXT: -fhonor-nans            Specify that floating-point optimizations are not allowed that assume arguments and results are not NANs.
 ! CHECK-NEXT: -fimplicit-none         No implicit typing allowed unless overridden by IMPLICIT statements
 ! CHECK-NEXT: -finput-charset=<value> Specify the default character set for source files
+! CHECK-NEXT: -fintegrated-as         Enable the integrated assembler
 ! CHECK-NEXT: -fintrinsic-modules-path <dir>
 ! CHECK-NEXT:                         Specify where to find the compiled intrinsic modules
 ! CHECK-NEXT: -flang-experimental-hlfir
@@ -74,7 +75,7 @@
 ! CHECK-NEXT: -fopenmp-targets=<value>
 ! CHECK-NEXT:                         Specify comma-separated list of triples OpenMP offloading targets to be supported
 ! CHECK-NEXT: -fopenmp-version=<value>
-! CHECK-NEXT:                         Set OpenMP version (e.g. 45 for OpenMP 4.5, 50 for OpenMP 5.0). Default value is 50 for Clang and 11 for Flang
+! CHECK-NEXT:                         Set OpenMP version (e.g. 45 for OpenMP 4.5, 51 for OpenMP 5.1). Default value is 51 for Clang
 ! CHECK-NEXT: -fopenmp                Parse OpenMP pragmas and generate parallel code.
 ! CHECK-NEXT: -foptimization-record-file=<file>
 ! CHECK-NEXT:                         Specify the output name of the file containing the optimization remarks. Implies -fsave-optimization-record. On Darwin platforms, this cannot be used with multiple -arch <arch> options.
@@ -84,6 +85,8 @@
 ! CHECK-NEXT: -fppc-native-vector-element-order
 ! CHECK-NEXT:                         Specifies PowerPC native vector element order (default)
 ! CHECK-NEXT: -freciprocal-math       Allow division operations to be reassociated
+! CHECK-NEXT: -fropi                  Generate read-only position independent code (ARM only)
+! CHECK-NEXT: -frwpi                  Generate read-write position independent code (ARM only)
 ! CHECK-NEXT: -fsave-optimization-record=<format>
 ! CHECK-NEXT:                         Generate an optimization record file in a specific format
 ! CHECK-NEXT: -fsave-optimization-record
@@ -100,6 +103,7 @@
 ! CHECK-NEXT: --help-hidden           Display help for hidden options
 ! CHECK-NEXT: -help                   Display available options
 ! CHECK-NEXT: -I <dir>                Add directory to the end of the list of include search paths
+! CHECK-NEXT: -L <dir>                Add directory to library search path
 ! CHECK-NEXT: -march=<value>          For a list of available architectures for the target use '-mcpu=help'
 ! CHECK-NEXT: -mcpu=<value>           For a list of available CPUs for the target use '-mcpu=help'
 ! CHECK-NEXT: -mllvm=<arg>            Alias for -mllvm
@@ -129,9 +133,12 @@
 ! CHECK-NEXT: --target=<value>        Generate code for the given target
 ! CHECK-NEXT: -U <macro>              Undefine macro <macro>
 ! CHECK-NEXT: --version               Print version information
+! CHECK-NEXT: -v                      Show commands to run and use verbose output
+! CHECK-NEXT: -Wl,<arg>               Pass the comma separated arguments in <arg> to the linker
 ! CHECK-NEXT: -W<warning>             Enable the specified warning
 ! CHECK-NEXT: -Xflang <arg>           Pass <arg> to the flang compiler
 ! CHECK-NEXT: -x <language>           Treat subsequent input files as having type <language>
+
 
 ! ERROR-FLANG: error: unknown argument '-help-hidden'; did you mean '--help-hidden'?
 

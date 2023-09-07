@@ -64,16 +64,17 @@ public:
 } // namespace
 
 // Register the ROCDL dialect, the ROCDL translation and the target interface.
-void mlir::registerROCDLTarget(DialectRegistry &registry) {
-  registerROCDLDialectTranslation(registry);
+void mlir::ROCDL::registerROCDLTargetInterfaceExternalModels(
+    DialectRegistry &registry) {
   registry.addExtension(+[](MLIRContext *ctx, ROCDL::ROCDLDialect *dialect) {
     ROCDLTargetAttr::attachInterface<ROCDLTargetAttrImpl>(*ctx);
   });
 }
 
-void mlir::registerROCDLTarget(MLIRContext &context) {
+void mlir::ROCDL::registerROCDLTargetInterfaceExternalModels(
+    MLIRContext &context) {
   DialectRegistry registry;
-  registerROCDLTarget(registry);
+  registerROCDLTargetInterfaceExternalModels(registry);
   context.appendDialectRegistry(registry);
 }
 
@@ -134,7 +135,7 @@ ArrayRef<std::string> SerializeGPUModuleBase::getFileList() const {
 
 LogicalResult SerializeGPUModuleBase::appendStandardLibs() {
   StringRef pathRef = getToolkitPath();
-  if (pathRef.size()) {
+  if (!pathRef.empty()) {
     SmallVector<char, 256> path;
     path.insert(path.begin(), pathRef.begin(), pathRef.end());
     llvm::sys::path::append(path, "amdgcn", "bitcode");

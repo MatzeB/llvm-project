@@ -129,8 +129,8 @@ enum {
 
 class PluginProperties : public Properties {
 public:
-  static ConstString GetSettingName() {
-    return ConstString(ProcessGDBRemote::GetPluginNameStatic());
+  static llvm::StringRef GetSettingName() {
+    return ProcessGDBRemote::GetPluginNameStatic();
   }
 
   PluginProperties() : Properties() {
@@ -2089,7 +2089,7 @@ StateType ProcessGDBRemote::SetThreadStopInfo(StringExtractor &stop_packet) {
   switch (stop_type) {
   case 'T':
   case 'S': {
-    // This is a bit of a hack, but is is required. If we did exec, we need to
+    // This is a bit of a hack, but it is required. If we did exec, we need to
     // clear our thread lists and also know to rebuild our dynamic register
     // info before we lookup and threads and populate the expedited register
     // values so we need to know this right away so we can cleanup and update
@@ -3384,10 +3384,10 @@ void ProcessGDBRemote::MonitorDebugserverProcess(
       stream.Format(DEBUGSERVER_BASENAME " died with an exit status of {0:x8}",
                     exit_status);
     else {
-      const char *signal_name =
-          process_sp->GetUnixSignals()->GetSignalAsCString(signo);
+      llvm::StringRef signal_name =
+          process_sp->GetUnixSignals()->GetSignalAsStringRef(signo);
       const char *format_str = DEBUGSERVER_BASENAME " died with signal {0}";
-      if (signal_name)
+      if (!signal_name.empty())
         stream.Format(format_str, signal_name);
       else
         stream.Format(format_str, signo);

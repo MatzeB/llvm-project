@@ -102,6 +102,38 @@ namespace compound {
     return a[1];
   }
   static_assert(ff() == 3, "");
+
+  constexpr float intPlusDouble() {
+   int a = 0;
+   a += 2.0;
+
+   return a;
+  }
+  static_assert(intPlusDouble() == 2, "");
+
+  constexpr double doublePlusInt() {
+   double a = 0.0;
+   a += 2;
+
+   return a;
+  }
+  static_assert(doublePlusInt() == 2, "");
+
+  constexpr float boolPlusDouble() {
+   bool a = 0;
+   a += 1.0;
+
+   return a;
+  }
+  static_assert(boolPlusDouble(), "");
+
+  constexpr bool doublePlusbool() {
+   double a = 0.0;
+   a += true;
+
+   return a;
+  }
+  static_assert(doublePlusbool() == 1.0, "");
 }
 
 namespace unary {
@@ -150,7 +182,7 @@ namespace LongDouble {
 
     return L;
   };
-  static_assert(f() == __LDBL_MAX__);
+  static_assert(f() == __LDBL_MAX__, "");
 
 #ifdef __FLOAT128__
   constexpr __float128 f128() {
@@ -158,7 +190,7 @@ namespace LongDouble {
 
     return L;
   };
-  static_assert(f128() == __LDBL_MAX__);
+  static_assert(f128() == __LDBL_MAX__, "");
 #endif
 }
 

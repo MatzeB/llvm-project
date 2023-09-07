@@ -2798,7 +2798,7 @@ static bool CheckedIntArithmetic(EvalInfo &Info, const Expr *E,
     if (Info.checkingForUndefinedBehavior())
       Info.Ctx.getDiagnostics().Report(E->getExprLoc(),
                                        diag::warn_integer_constant_overflow)
-          << toString(Result, 10) << E->getType();
+          << toString(Result, 10) << E->getType() << E->getSourceRange();
     return HandleOverflow(Info, E, Value, E->getType());
   }
   return true;
@@ -3463,8 +3463,7 @@ static APSInt extractStringLiteralCharacter(EvalInfo &Info, const Expr *Lit,
   assert(CAT && "string literal isn't an array");
   QualType CharType = CAT->getElementType();
   assert(CharType->isIntegerType() && "unexpected character type");
-
-  APSInt Value(S->getCharByteWidth() * Info.Ctx.getCharWidth(),
+  APSInt Value(Info.Ctx.getTypeSize(CharType),
                CharType->isUnsignedIntegerType());
   if (Index < S->getLength())
     Value = S->getCodeUnit(Index);
@@ -3487,7 +3486,7 @@ static void expandStringLiteral(EvalInfo &Info, const StringLiteral *S,
   unsigned Elts = CAT->getSize().getZExtValue();
   Result = APValue(APValue::UninitArray(),
                    std::min(S->getLength(), Elts), Elts);
-  APSInt Value(S->getCharByteWidth() * Info.Ctx.getCharWidth(),
+  APSInt Value(Info.Ctx.getTypeSize(CharType),
                CharType->isUnsignedIntegerType());
   if (Result.hasArrayFiller())
     Result.getArrayFiller() = APValue(Value);
@@ -4442,6 +4441,10 @@ struct CompoundAssignSubobjectHandler {
       return foundPointer(Subobj, SubobjType);
     case APValue::Vector:
       return foundVector(Subobj, SubobjType);
+    case APValue::Indeterminate:
+      Info.FFDiag(E, diag::note_constexpr_access_uninit)
+          << /*read of=*/0 << /*uninitialized object=*/1;
+      return false;
     default:
       // FIXME: can this happen?
       Info.FFDiag(E);
@@ -7524,6 +7527,9 @@ public:
     return Error(E);
   }
 
+  bool VisitPredefinedExpr(const PredefinedExpr *E) {
+    return StmtVisitorTy::Visit(E->getFunctionName());
+  }
   bool VisitConstantExpr(const ConstantExpr *E) {
     if (E->hasAPValueResult())
       return DerivedSuccess(E->getAPValueResult(), E);
@@ -7649,7 +7655,8 @@ public:
   }
 
   bool VisitOpaqueValueExpr(const OpaqueValueExpr *E) {
-    if (APValue *Value = Info.CurrentCall->getCurrentTemporary(E))
+    if (APValue *Value = Info.CurrentCall->getCurrentTemporary(E);
+        Value && !Value->isAbsent())
       return DerivedSuccess(*Value, E);
 
     const Expr *Source = E->getSourceExpr();
@@ -9357,7 +9364,7 @@ bool PointerExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
       APSInt N;
       if (!EvaluateInteger(E->getArg(2), N, Info))
         return false;
-      MaxLength = N.getExtValue();
+      MaxLength = N.getZExtValue();
     }
     // We cannot find the value if there are no candidates to match against.
     if (MaxLength == 0u)
@@ -12381,7 +12388,7 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
       APSInt N;
       if (!EvaluateInteger(E->getArg(2), N, Info))
         return false;
-      MaxLength = N.getExtValue();
+      MaxLength = N.getZExtValue();
     }
 
     // Empty substrings compare equal by definition.
@@ -12661,9 +12668,9 @@ namespace {
 class DataRecursiveIntBinOpEvaluator {
   struct EvalResult {
     APValue Val;
-    bool Failed;
+    bool Failed = false;
 
-    EvalResult() : Failed(false) { }
+    EvalResult() = default;
 
     void swap(EvalResult &RHS) {
       Val.swap(RHS.Val);
@@ -13310,6 +13317,10 @@ EvaluateComparisonBinaryOperator(EvalInfo &Info, const BinaryOperator *E,
     // C++11 [expr.rel]p4, [expr.eq]p3: If two operands of type std::nullptr_t
     // are compared, the result is true of the operator is <=, >= or ==, and
     // false otherwise.
+    LValue Res;
+    if (!EvaluatePointer(E->getLHS(), Res, Info) ||
+        !EvaluatePointer(E->getRHS(), Res, Info))
+      return false;
     return Success(CmpResult::Equal, E);
   }
 
@@ -13643,7 +13654,7 @@ bool IntExprEvaluator::VisitUnaryOperator(const UnaryOperator *E) {
       if (Info.checkingForUndefinedBehavior())
         Info.Ctx.getDiagnostics().Report(E->getExprLoc(),
                                          diag::warn_integer_constant_overflow)
-            << toString(Value, 10) << E->getType();
+            << toString(Value, 10) << E->getType() << E->getSourceRange();
 
       if (!HandleOverflow(Info, E, -Value.extend(Value.getBitWidth() + 1),
                           E->getType()))

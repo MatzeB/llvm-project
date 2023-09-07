@@ -415,7 +415,7 @@ class TargetArch<list<string> arches> : TargetSpec {
   let Arches = arches;
 }
 def TargetARM : TargetArch<["arm", "thumb", "armeb", "thumbeb"]>;
-def TargetAArch64 : TargetArch<["aarch64"]>;
+def TargetAArch64 : TargetArch<["aarch64", "aarch64_be", "aarch64_32"]>;
 def TargetAnyArm : TargetArch<!listconcat(TargetARM.Arches, TargetAArch64.Arches)>;
 def TargetAVR : TargetArch<["avr"]>;
 def TargetBPF : TargetArch<["bpfel", "bpfeb"]>;
@@ -4133,24 +4133,14 @@ def HLSLShader : InheritableAttr {
   let Spellings = [Microsoft<"shader">];
   let Subjects = SubjectList<[HLSLEntry]>;
   let LangOpts = [HLSL];
-  // NOTE:
-  // order for the enum should match order in llvm::Triple::EnvironmentType.
-  // ShaderType will be converted to llvm::Triple::EnvironmentType like
-  //   (llvm::Triple::EnvironmentType)((uint32_t)ShaderType +
-  //      (uint32_t)llvm::Triple::EnvironmentType::Pixel).
-  // This will avoid update code for convert when new shader type is added.
   let Args = [
     EnumArgument<"Type", "ShaderType",
-                 [
-                   "pixel", "vertex", "geometry", "hull", "domain", "compute",
-                   "library", "raygeneration", "intersection", "anyHit",
-                   "closestHit", "miss", "callable", "mesh", "amplification"
-                 ],
-                 [
-                   "Pixel", "Vertex", "Geometry", "Hull", "Domain", "Compute",
-                   "Library", "RayGeneration", "Intersection", "AnyHit",
-                   "ClosestHit", "Miss", "Callable", "Mesh", "Amplification"
-                 ]>
+                 ["pixel", "vertex", "geometry", "hull", "domain", "compute",
+                  "raygeneration", "intersection", "anyhit", "closesthit",
+                  "miss", "callable", "mesh", "amplification"],
+                 ["Pixel", "Vertex", "Geometry", "Hull", "Domain", "Compute",
+                  "RayGeneration", "Intersection", "AnyHit", "ClosestHit",
+                  "Miss", "Callable", "Mesh", "Amplification"]>
   ];
   let Documentation = [HLSLSV_ShaderTypeAttrDocs];
 }
@@ -4232,4 +4222,3 @@ def AvailableOnlyInDefaultEvalMethod : InheritableAttr {
   let Subjects = SubjectList<[TypedefName], ErrorDiag>;
   let Documentation = [Undocumented];
 }
-

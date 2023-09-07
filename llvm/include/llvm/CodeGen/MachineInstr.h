@@ -113,6 +113,7 @@ public:
                              // (e.g. branch folding) should skip
                              // this instruction.
     Unpredictable = 1 << 16, // Instruction with unpredictable condition.
+    NoConvergent = 1 << 17,  // Call does not require convergence guarantees.
   };
 
 private:
@@ -1024,6 +1025,8 @@ public:
       if (ExtraInfo & InlineAsm::Extra_IsConvergent)
         return true;
     }
+    if (getFlag(NoConvergent))
+      return false;
     return hasProperty(MCID::Convergent, Type);
   }
 
@@ -1345,6 +1348,10 @@ public:
       if (Op.isReg() && !Op.getReg().isValid())
         return true;
     return false;
+  }
+
+  bool isJumpTableDebugInfo() const {
+    return getOpcode() == TargetOpcode::JUMP_TABLE_DEBUG_INFO;
   }
 
   bool isPHI() const {

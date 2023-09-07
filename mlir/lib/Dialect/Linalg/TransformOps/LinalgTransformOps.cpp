@@ -1145,7 +1145,10 @@ transform::MatchOp::apply(transform::TransformRewriter &rewriter,
           !isa<LinalgOp>(op))
         return;
       if (iface == transform::MatchInterfaceEnum::TilingInterface &&
-          isa<TilingInterface>(op))
+          !isa<TilingInterface>(op))
+        return;
+      if (iface == transform::MatchInterfaceEnum::LoopLikeInterface &&
+          !isa<LoopLikeOpInterface>(op))
         return;
     }
 
@@ -1612,7 +1615,7 @@ DiagnosedSilenceableFailure
 transform::PadOp::apply(transform::TransformRewriter &rewriter,
                         transform::TransformResults &results,
                         transform::TransformState &state) {
-  SmallVector<Operation *> paddedOps, padOps;
+  SmallVector<Operation *> paddedOps, padOps, copyBackOps;
 
   for (Operation *target : state.getPayloadOps(getTarget())) {
     auto linalgTarget = dyn_cast<LinalgOp>(target);
@@ -1707,10 +1710,18 @@ transform::PadOp::apply(transform::TransformRewriter &rewriter,
     rewriter.replaceOp(linalgTarget, replacements);
     paddedOps.push_back(paddedOp);
     padOps.append(newPadOps.begin(), newPadOps.end());
+    if (options.copyBackOp != LinalgPaddingOptions::CopyBackOp::None) {
+      for (Value v : replacements) {
+        Operation *copyBackOp = v.getDefiningOp();
+        if (llvm::find(copyBackOps, copyBackOp) == copyBackOps.end())
+          copyBackOps.push_back(copyBackOp);
+      }
+    }
   }
 
   results.set(cast<OpResult>(getPadded()), paddedOps);
   results.set(cast<OpResult>(getPad()), padOps);
+  results.set(cast<OpResult>(getCopy()), copyBackOps);
   return DiagnosedSilenceableFailure::success();
 }
 
@@ -3223,7 +3234,9 @@ DiagnosedSilenceableFailure transform::MaskedVectorizeOp::apply(
 
     if (failed(linalg::vectorize(rewriter, target, vectorSizes,
                                  getScalableSizes(),
-                                 getVectorizeNdExtract()))) {
+                                 getVectorizeNdExtract().has_value()
+                                     ? getVectorizeNdExtract().value()
+                                     : false))) {
       return mlir::emitSilenceableFailure(target->getLoc())
              << "Attempted to vectorize, but failed";
     }

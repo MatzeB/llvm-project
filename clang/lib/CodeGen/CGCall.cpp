@@ -40,7 +40,6 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Type.h"
-#include "llvm/Support/TypeSize.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <optional>
 using namespace clang;
@@ -2002,11 +2001,8 @@ static void getTrivialDefaultFunctionAttributes(
   }
 }
 
-/// Adds attributes to \p F according to our \p CodeGenOpts and \p LangOpts, as
-/// though we had emitted it ourselves. We remove any attributes on F that
-/// conflict with the attributes we add here.
-static void mergeDefaultFunctionDefinitionAttributes(
-    llvm::Function &F, const CodeGenOptions CodeGenOpts,
+void CodeGen::mergeDefaultFunctionDefinitionAttributes(
+    llvm::Function &F, const CodeGenOptions &CodeGenOpts,
     const LangOptions &LangOpts, const TargetOptions &TargetOpts,
     bool WillInternalize) {
 
@@ -2065,15 +2061,6 @@ static void mergeDefaultFunctionDefinitionAttributes(
   F.addFnAttrs(FuncAttrs);
 }
 
-void clang::CodeGen::mergeDefaultFunctionDefinitionAttributes(
-    llvm::Function &F, const CodeGenOptions CodeGenOpts,
-    const LangOptions &LangOpts, const TargetOptions &TargetOpts,
-    bool WillInternalize) {
-
-  ::mergeDefaultFunctionDefinitionAttributes(F, CodeGenOpts, LangOpts,
-                                             TargetOpts, WillInternalize);
-}
-
 void CodeGenModule::getTrivialDefaultFunctionAttributes(
     StringRef Name, bool HasOptnone, bool AttrOnCallSite,
     llvm::AttrBuilder &FuncAttrs) {
@@ -2092,23 +2079,6 @@ void CodeGenModule::getDefaultFunctionAttributes(StringRef Name,
   // attributes.
   if (!AttrOnCallSite)
     addMergableDefaultFunctionAttributes(CodeGenOpts, FuncAttrs);
-}
-
-void CodeGenModule::addDefaultFunctionDefinitionAttributes(llvm::Function &F) {
-  llvm::AttrBuilder FuncAttrs(F.getContext());
-  getDefaultFunctionAttributes(F.getName(), F.hasOptNone(),
-                               /* AttrOnCallSite = */ false, FuncAttrs);
-  // TODO: call GetCPUAndFeaturesAttributes?
-  F.addFnAttrs(FuncAttrs);
-}
-
-/// Apply default attributes to \p F, accounting for merge semantics of
-/// attributes that should not overwrite existing attributes.
-void CodeGenModule::mergeDefaultFunctionDefinitionAttributes(
-    llvm::Function &F, bool WillInternalize) {
-  ::mergeDefaultFunctionDefinitionAttributes(F, getCodeGenOpts(), getLangOpts(),
-                                             getTarget().getTargetOpts(),
-                                             WillInternalize);
 }
 
 void CodeGenModule::addDefaultFunctionDefinitionAttributes(
@@ -2375,7 +2345,7 @@ void CodeGenModule::ConstructAttributeList(StringRef Name,
       // gcc specifies that 'pure' functions cannot have infinite loops.
       FuncAttrs.addAttribute(llvm::Attribute::WillReturn);
     } else if (TargetDecl->hasAttr<NoAliasAttr>()) {
-      FuncAttrs.addMemoryAttr(llvm::MemoryEffects::argMemOnly());
+      FuncAttrs.addMemoryAttr(llvm::MemoryEffects::inaccessibleOrArgMemOnly());
       FuncAttrs.addAttribute(llvm::Attribute::NoUnwind);
     }
     if (TargetDecl->hasAttr<RestrictAttr>())
@@ -2615,7 +2585,7 @@ void CodeGenModule::ConstructAttributeList(StringRef Name,
     llvm::AttrBuilder Attrs(getLLVMContext());
 
     QualType ThisTy =
-        FI.arg_begin()->type.castAs<PointerType>()->getPointeeType();
+        FI.arg_begin()->type.getTypePtr()->getPointeeType();
 
     if (!CodeGenOpts.NullPointerIsValid &&
         getTypes().getTargetAddressSpace(FI.arg_begin()->type) == 0) {
@@ -4645,24 +4615,7 @@ void CodeGenFunction::EmitCallArg(CallArgList &args, const Expr *E,
     return;
   }
 
-  AggValueSlot ArgSlot = AggValueSlot::ignored();
-  if (hasAggregateEvaluationKind(E->getType())) {
-    Address ArgSlotAlloca = Address::invalid();
-    ArgSlot = CreateAggTemp(E->getType(), "agg.tmp", &ArgSlotAlloca);
-
-    // Emit a lifetime start/end for this temporary. If the type has a
-    // destructor, then we need to keep it alive. FIXME: We should still be able
-    // to end the lifetime after the destructor returns.
-    if (!E->getType().isDestructedType()) {
-      llvm::TypeSize size =
-          CGM.getDataLayout().getTypeAllocSize(ConvertTypeForMem(E->getType()));
-      if (llvm::Value *lifetimeSize =
-              EmitLifetimeStart(size, ArgSlotAlloca.getPointer()))
-        args.addLifetimeCleanup({ArgSlotAlloca.getPointer(), lifetimeSize});
-    }
-  }
-
-  args.add(EmitAnyExpr(E, ArgSlot), type);
+  args.add(EmitAnyExprToTemp(E), type);
 }
 
 QualType CodeGenFunction::getVarArgType(const Expr *Arg) {
@@ -5279,30 +5232,50 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
             dyn_cast<llvm::StructType>(ArgInfo.getCoerceToType());
       if (STy && ArgInfo.isDirect() && ArgInfo.getCanBeFlattened()) {
         llvm::Type *SrcTy = Src.getElementType();
-        uint64_t SrcSize = CGM.getDataLayout().getTypeAllocSize(SrcTy);
-        uint64_t DstSize = CGM.getDataLayout().getTypeAllocSize(STy);
+        llvm::TypeSize SrcTypeSize =
+            CGM.getDataLayout().getTypeAllocSize(SrcTy);
+        llvm::TypeSize DstTypeSize = CGM.getDataLayout().getTypeAllocSize(STy);
+        if (SrcTypeSize.isScalable()) {
+          assert(STy->containsHomogeneousScalableVectorTypes() &&
+                 "ABI only supports structure with homogeneous scalable vector "
+                 "type");
+          assert(SrcTypeSize == DstTypeSize &&
+                 "Only allow non-fractional movement of structure with "
+                 "homogeneous scalable vector type");
+          assert(NumIRArgs == STy->getNumElements());
 
-        // If the source type is smaller than the destination type of the
-        // coerce-to logic, copy the source value into a temp alloca the size
-        // of the destination type to allow loading all of it. The bits past
-        // the source value are left undef.
-        if (SrcSize < DstSize) {
-          Address TempAlloca
-            = CreateTempAlloca(STy, Src.getAlignment(),
-                               Src.getName() + ".coerce");
-          Builder.CreateMemCpy(TempAlloca, Src, SrcSize);
-          Src = TempAlloca;
+          llvm::Value *StoredStructValue =
+              Builder.CreateLoad(Src, Src.getName() + ".tuple");
+          for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
+            llvm::Value *Extract = Builder.CreateExtractValue(
+                StoredStructValue, i, Src.getName() + ".extract" + Twine(i));
+            IRCallArgs[FirstIRArg + i] = Extract;
+          }
         } else {
-          Src = Src.withElementType(STy);
-        }
+          uint64_t SrcSize = SrcTypeSize.getFixedValue();
+          uint64_t DstSize = DstTypeSize.getFixedValue();
 
-        assert(NumIRArgs == STy->getNumElements());
-        for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
-          Address EltPtr = Builder.CreateStructGEP(Src, i);
-          llvm::Value *LI = Builder.CreateLoad(EltPtr);
-          if (ArgHasMaybeUndefAttr)
-            LI = Builder.CreateFreeze(LI);
-          IRCallArgs[FirstIRArg + i] = LI;
+          // If the source type is smaller than the destination type of the
+          // coerce-to logic, copy the source value into a temp alloca the size
+          // of the destination type to allow loading all of it. The bits past
+          // the source value are left undef.
+          if (SrcSize < DstSize) {
+            Address TempAlloca = CreateTempAlloca(STy, Src.getAlignment(),
+                                                  Src.getName() + ".coerce");
+            Builder.CreateMemCpy(TempAlloca, Src, SrcSize);
+            Src = TempAlloca;
+          } else {
+            Src = Src.withElementType(STy);
+          }
+
+          assert(NumIRArgs == STy->getNumElements());
+          for (unsigned i = 0, e = STy->getNumElements(); i != e; ++i) {
+            Address EltPtr = Builder.CreateStructGEP(Src, i);
+            llvm::Value *LI = Builder.CreateLoad(EltPtr);
+            if (ArgHasMaybeUndefAttr)
+              LI = Builder.CreateFreeze(LI);
+            IRCallArgs[FirstIRArg + i] = LI;
+          }
         }
       } else {
         // In the simple case, just pass the coerced loaded value.
@@ -5830,9 +5803,6 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
   // we can't use the full cleanup mechanism.
   for (CallLifetimeEnd &LifetimeEnd : CallLifetimeEndAfterCall)
     LifetimeEnd.Emit(*this, /*Flags=*/{});
-
-  for (const CallArgList::EndLifetimeInfo &LT : CallArgs.getLifetimeCleanups())
-    EmitLifetimeEnd(LT.Size, LT.Addr);
 
   if (!ReturnValue.isExternallyDestructed() &&
       RetTy.isDestructedType() == QualType::DK_nontrivial_c_struct)

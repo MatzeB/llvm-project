@@ -888,9 +888,12 @@ public:
       break;
 
     // %g style conversion switches between %f or %e style dynamically.
-    // %f always takes less space, so default to it.
+    // %g removes trailing zeros, and does not print decimal point if there are
+    // no digits that follow it. Thus %g can print a single digit.
     case analyze_format_string::ConversionSpecifier::gArg:
     case analyze_format_string::ConversionSpecifier::GArg:
+      Size += 1;
+      break;
 
     // Floating point number in the form '[+]ddd.ddd'.
     case analyze_format_string::ConversionSpecifier::fArg:
@@ -1031,6 +1034,23 @@ private:
 };
 
 } // namespace
+
+static bool ProcessFormatStringLiteral(const Expr *FormatExpr,
+                                       StringRef &FormatStrRef, size_t &StrLen,
+                                       ASTContext &Context) {
+  if (const auto *Format = dyn_cast<StringLiteral>(FormatExpr);
+      Format && (Format->isOrdinary() || Format->isUTF8())) {
+    FormatStrRef = Format->getString();
+    const ConstantArrayType *T =
+        Context.getAsConstantArrayType(Format->getType());
+    assert(T && "String literal not of constant array type!");
+    size_t TypeSize = T->getSize().getZExtValue();
+    // In case there's a null byte somewhere.
+    StrLen = std::min(std::max(TypeSize, size_t(1)) - 1, FormatStrRef.find(0));
+    return true;
+  }
+  return false;
+}
 
 void Sema::checkFortifiedBuiltinMemoryFunction(FunctionDecl *FD,
                                                CallExpr *TheCall) {
@@ -1183,11 +1203,9 @@ void Sema::checkFortifiedBuiltinMemoryFunction(FunctionDecl *FD,
     const auto *FormatExpr =
         TheCall->getArg(FormatIndex)->IgnoreParenImpCasts();
 
-    const auto *Format = dyn_cast<StringLiteral>(FormatExpr);
-    if (!Format)
-      return;
-
-    if (!Format->isOrdinary() && !Format->isUTF8())
+    StringRef FormatStrRef;
+    size_t StrLen;
+    if (!ProcessFormatStringLiteral(FormatExpr, FormatStrRef, StrLen, Context))
       return;
 
     auto Diagnose = [&](unsigned ArgIndex, unsigned DestSize,
@@ -1200,21 +1218,11 @@ void Sema::checkFortifiedBuiltinMemoryFunction(FunctionDecl *FD,
                                         << DestSize << SourceSize);
     };
 
-    StringRef FormatStrRef = Format->getString();
     auto ShiftedComputeSizeArgument = [&](unsigned Index) {
       return ComputeSizeArgument(Index + DataIndex);
     };
     ScanfDiagnosticFormatHandler H(ShiftedComputeSizeArgument, Diagnose);
     const char *FormatBytes = FormatStrRef.data();
-    const ConstantArrayType *T =
-        Context.getAsConstantArrayType(Format->getType());
-    assert(T && "String literal not of constant array type!");
-    size_t TypeSize = T->getSize().getZExtValue();
-
-    // In case there's a null byte somewhere.
-    size_t StrLen =
-        std::min(std::max(TypeSize, size_t(1)) - 1, FormatStrRef.find(0));
-
     analyze_format_string::ParseScanfString(H, FormatBytes,
                                             FormatBytes + StrLen, getLangOpts(),
                                             Context.getTargetInfo());
@@ -1230,22 +1238,11 @@ void Sema::checkFortifiedBuiltinMemoryFunction(FunctionDecl *FD,
     size_t FormatIndex = BuiltinID == Builtin::BIsprintf ? 1 : 3;
     auto *FormatExpr = TheCall->getArg(FormatIndex)->IgnoreParenImpCasts();
 
-    if (auto *Format = dyn_cast<StringLiteral>(FormatExpr)) {
-
-      if (!Format->isOrdinary() && !Format->isUTF8())
-        return;
-
-      StringRef FormatStrRef = Format->getString();
+    StringRef FormatStrRef;
+    size_t StrLen;
+    if (ProcessFormatStringLiteral(FormatExpr, FormatStrRef, StrLen, Context)) {
       EstimateSizeFormatHandler H(FormatStrRef);
       const char *FormatBytes = FormatStrRef.data();
-      const ConstantArrayType *T =
-          Context.getAsConstantArrayType(Format->getType());
-      assert(T && "String literal not of constant array type!");
-      size_t TypeSize = T->getSize().getZExtValue();
-
-      // In case there's a null byte somewhere.
-      size_t StrLen =
-          std::min(std::max(TypeSize, size_t(1)) - 1, FormatStrRef.find(0));
       if (!analyze_format_string::ParsePrintfString(
               H, FormatBytes, FormatBytes + StrLen, getLangOpts(),
               Context.getTargetInfo(), false)) {
@@ -1326,8 +1323,28 @@ void Sema::checkFortifiedBuiltinMemoryFunction(FunctionDecl *FD,
   case Builtin::BI__builtin_vsnprintf: {
     DiagID = diag::warn_fortify_source_size_mismatch;
     SourceSize = ComputeExplicitObjectSizeArgument(1);
+    const auto *FormatExpr = TheCall->getArg(2)->IgnoreParenImpCasts();
+    StringRef FormatStrRef;
+    size_t StrLen;
+    if (SourceSize &&
+        ProcessFormatStringLiteral(FormatExpr, FormatStrRef, StrLen, Context)) {
+      EstimateSizeFormatHandler H(FormatStrRef);
+      const char *FormatBytes = FormatStrRef.data();
+      if (!analyze_format_string::ParsePrintfString(
+              H, FormatBytes, FormatBytes + StrLen, getLangOpts(),
+              Context.getTargetInfo(), /*isFreeBSDKPrintf=*/false)) {
+        llvm::APSInt FormatSize =
+            llvm::APSInt::getUnsigned(H.getSizeLowerBound())
+                .extOrTrunc(SizeTypeWidth);
+        if (FormatSize > *SourceSize && *SourceSize != 0) {
+          DiagID = diag::warn_fortify_source_format_truncation;
+          DestinationSize = SourceSize;
+          SourceSize = FormatSize;
+          break;
+        }
+      }
+    }
     DestinationSize = ComputeSizeArgument(0);
-    break;
   }
   }
 
@@ -5506,8 +5523,9 @@ void Sema::checkRVVTypeSupport(QualType Ty, SourceLocation Loc, ValueDecl *D) {
       !TI.hasFeature("zve64x"))
     Diag(Loc, diag::err_riscv_type_requires_extension, D) << Ty << "zve64x";
   if (Ty->isRVVType(/* Bitwidth */ 16, /* IsFloat */ true) &&
-      !TI.hasFeature("zvfh"))
-    Diag(Loc, diag::err_riscv_type_requires_extension, D) << Ty << "zvfh";
+      !TI.hasFeature("zvfh") && !TI.hasFeature("zvfhmin"))
+    Diag(Loc, diag::err_riscv_type_requires_extension, D)
+        << Ty << "zvfh or zvfhmin";
   if (Ty->isRVVType(/* Bitwidth */ 32, /* IsFloat */ true) &&
       !TI.hasFeature("zve32f"))
     Diag(Loc, diag::err_riscv_type_requires_extension, D) << Ty << "zve32f";
@@ -8386,14 +8404,15 @@ bool Sema::SemaBuiltinUnorderedCompare(CallExpr *TheCall) {
 
 /// SemaBuiltinSemaBuiltinFPClassification - Handle functions like
 /// __builtin_isnan and friends.  This is declared to take (...), so we have
-/// to check everything. We expect the last argument to be a floating point
-/// value.
+/// to check everything.
 bool Sema::SemaBuiltinFPClassification(CallExpr *TheCall, unsigned NumArgs) {
   if (checkArgCount(*this, TheCall, NumArgs))
     return true;
 
+  bool IsFPClass = NumArgs == 2;
+
   // Find out position of floating-point argument.
-  unsigned FPArgNo = (NumArgs == 2) ? 0 : NumArgs - 1;
+  unsigned FPArgNo = IsFPClass ? 0 : NumArgs - 1;
 
   // We can count on all parameters preceding the floating-point just being int.
   // Try all of those.
@@ -8424,17 +8443,36 @@ bool Sema::SemaBuiltinFPClassification(CallExpr *TheCall, unsigned NumArgs) {
     OrigArg = DefaultFunctionArrayLvalueConversion(OrigArg).get();
   TheCall->setArg(FPArgNo, OrigArg);
 
+  QualType VectorResultTy;
+  QualType ElementTy = OrigArg->getType();
+  // TODO: When all classification function are implemented with is_fpclass,
+  // vector argument can be supported in all of them.
+  if (ElementTy->isVectorType() && IsFPClass) {
+    VectorResultTy = GetSignedVectorType(ElementTy);
+    ElementTy = ElementTy->getAs<VectorType>()->getElementType();
+  }
+
   // This operation requires a non-_Complex floating-point number.
-  if (!OrigArg->getType()->isRealFloatingType())
+  if (!ElementTy->isRealFloatingType())
     return Diag(OrigArg->getBeginLoc(),
                 diag::err_typecheck_call_invalid_unary_fp)
            << OrigArg->getType() << OrigArg->getSourceRange();
 
   // __builtin_isfpclass has integer parameter that specify test mask. It is
   // passed in (...), so it should be analyzed completely here.
-  if (NumArgs == 2)
+  if (IsFPClass)
     if (SemaBuiltinConstantArgRange(TheCall, 1, 0, llvm::fcAllFlags))
       return true;
+
+  // TODO: enable this code to all classification functions.
+  if (IsFPClass) {
+    QualType ResultTy;
+    if (!VectorResultTy.isNull())
+      ResultTy = VectorResultTy;
+    else
+      ResultTy = Context.IntTy;
+    TheCall->setType(ResultTy);
+  }
 
   return false;
 }
@@ -15896,19 +15934,19 @@ class SequenceChecker : public ConstEvaluatedExprVisitor<SequenceChecker> {
   /// Bundle together a sequencing region and the expression corresponding
   /// to a specific usage. One Usage is stored for each usage kind in UsageInfo.
   struct Usage {
-    const Expr *UsageExpr;
+    const Expr *UsageExpr = nullptr;
     SequenceTree::Seq Seq;
 
-    Usage() : UsageExpr(nullptr) {}
+    Usage() = default;
   };
 
   struct UsageInfo {
     Usage Uses[UK_Count];
 
     /// Have we issued a diagnostic for this object already?
-    bool Diagnosed;
+    bool Diagnosed = false;
 
-    UsageInfo() : Diagnosed(false) {}
+    UsageInfo() = default;
   };
   using UsageInfoMap = llvm::SmallDenseMap<Object, UsageInfo, 16>;
 
