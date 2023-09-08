@@ -251,6 +251,16 @@ cl::opt<std::string> FuncNameNegativeFilter(
     cl::sub(MergeSubcommand),
     cl::desc("Exclude functions matching the filter from the output."));
 
+// facebook begin T156867704
+cl::opt<bool> DropCallsiteDiscriminators(
+    "drop-callsite-discriminators", cl::init(false), cl::Hidden,
+    cl::sub(MergeSubcommand),
+    cl::desc("Drop the dwarf discriminator for callsites (only meaningful "
+             "for -sample). This has a very specific usecase where AutoFDO "
+             "profiles generated from pseudo-probed binaries are merged and "
+             "applied to a non-probed build."));
+// facebook end T156867704
+
 cl::opt<FailureMode>
     FailMode("failure-mode", cl::init(failIfAnyAreInvalid),
              cl::desc("Failure mode:"), cl::sub(MergeSubcommand),
@@ -1505,6 +1515,9 @@ static void mergeSampleProfile(const WeightedFileVector &Inputs,
   sampleprof::ProfileSymbolList WriterList;
   std::optional<bool> ProfileIsProbeBased;
   std::optional<bool> ProfileIsCS;
+  // facebook begin T156867704
+  FunctionSamples::DropCallsiteDiscriminators = DropCallsiteDiscriminators;
+  // facebook end T156867704
   for (const auto &Input : Inputs) {
     auto FS = vfs::getRealFileSystem();
     auto ReaderOrErr = SampleProfileReader::create(Input.Filename, Context, *FS,

@@ -1,0 +1,45 @@
+
+; facebook T156867704
+RUN: llvm-profdata merge --sample --text %S/Inputs/inline-samples.afdo -output=%t0.proftext
+RUN: FileCheck --input-file=%t0.proftext %s  -check-prefixes=DISC
+RUN: llvm-profdata merge --sample --text %S/Inputs/inline-samples.afdo -output=%t.proftext --drop-callsite-discriminators
+RUN: FileCheck --input-file=%t.proftext %s   -check-prefixes=DROPDISC
+RUN: llvm-profdata merge --sample --extbinary %S/Inputs/inline-samples.afdo -output=%t.profdata  --drop-callsite-discriminators
+RUN: llvm-profdata merge --sample --text %t.profdata -output=%t.2.proftext
+RUN: diff -b %t.2.proftext %t.proftext
+
+// DISC:      main:366846:0
+// DISC-NEXT:  0: 0
+// DISC-NEXT:  1: 0
+// DISC-NEXT:  2.1: 60401
+// DISC-NEXT:  2.3: 60401
+// DISC-NEXT:  3: 0
+// DISC-NEXT:  4: 0
+// DISC-NEXT:  2.3: _Z3fool:246044
+// DISC-NEXT:   1: 60401
+// DISC-NEXT:   1.2: 39280
+// DISC-NEXT:   1.4: 46871
+// DISC-NEXT:   1.3: _Z3bari:0
+// DISC-NEXT:    1.1: 0
+// DISC-NEXT:    1.2: 0
+// DISC-NEXT:   1.7: _Z3bari:99492
+// DISC-NEXT:    1.1: 52760
+// DISC-NEXT:    1.2: 46732
+// DISC-NEXT:   1.8: _Z3bari:0
+// DISC-NEXT:    1.1: 0
+// DISC-NEXT:    1.2: 0
+
+// DROPDISC:      main:366846:0
+// DROPDISC-NEXT:  0: 0
+// DROPDISC-NEXT:  1: 0
+// DROPDISC-NEXT:  2.1: 60401
+// DROPDISC-NEXT:  2.3: 60401
+// DROPDISC-NEXT:  3: 0
+// DROPDISC-NEXT:  4: 0
+// DROPDISC-NEXT:  2: _Z3fool:246044
+// DROPDISC-NEXT:   1: 60401
+// DROPDISC-NEXT:   1.2: 39280
+// DROPDISC-NEXT:   1.4: 46871
+// DROPDISC-NEXT:   1: _Z3bari:99492
+// DROPDISC-NEXT:    1.1: 52760
+// DROPDISC-NEXT:    1.2: 46732

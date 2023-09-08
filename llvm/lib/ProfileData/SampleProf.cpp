@@ -46,6 +46,9 @@ bool FunctionSamples::ProfileIsPreInlined = false;
 bool FunctionSamples::UseMD5 = false;
 bool FunctionSamples::HasUniqSuffix = true;
 bool FunctionSamples::ProfileIsFS = false;
+// facebook begin T156867704
+bool FunctionSamples::DropCallsiteDiscriminators = false;
+// facebook end T156867704
 } // namespace sampleprof
 } // namespace llvm
 

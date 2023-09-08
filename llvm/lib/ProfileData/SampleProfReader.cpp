@@ -391,6 +391,10 @@ std::error_code SampleProfileReaderText::readImpl() {
       }
       switch (LineTy) {
       case LineType::CallSiteProfile: {
+        // facebook begin T156867704
+        if (FunctionSamples::DropCallsiteDiscriminators)
+          Discriminator = 0;
+        // facebook end T156867704
         FunctionSamples &FSamples = InlineStack.back()->functionSamplesAt(
             LineLocation(LineOffset, Discriminator))[FunctionId(FName)];
         FSamples.setFunction(FunctionId(FName));
@@ -404,6 +408,10 @@ std::error_code SampleProfileReaderText::readImpl() {
           InlineStack.pop_back();
         }
         FunctionSamples &FProfile = *InlineStack.back();
+        // facebook begin T156867704
+        if (FunctionSamples::DropCallsiteDiscriminators && !TargetCountMap.empty())
+          Discriminator = 0;
+        // facebook end T156867704
         for (const auto &name_count : TargetCountMap) {
           mergeSampleProfErrors(Result, FProfile.addCalledTargetSamples(
                                             LineOffset, Discriminator,
@@ -605,6 +613,11 @@ SampleProfileReaderBinary::readProfile(FunctionSamples &FProfile) {
     // Here we handle FS discriminators:
     uint32_t DiscriminatorVal = (*Discriminator) & getDiscriminatorMask();
 
+    // facebook begin T156867704
+    if (FunctionSamples::DropCallsiteDiscriminators && NumCalls)
+      Discriminator = 0;
+    // facebook end T156867704
+
     for (uint32_t J = 0; J < *NumCalls; ++J) {
       auto CalledFunction(readStringFromTable());
       if (std::error_code EC = CalledFunction.getError())
@@ -641,6 +654,11 @@ SampleProfileReaderBinary::readProfile(FunctionSamples &FProfile) {
 
     // Here we handle FS discriminators:
     uint32_t DiscriminatorVal = (*Discriminator) & getDiscriminatorMask();
+
+    // facebook begin T156867704
+    if (FunctionSamples::DropCallsiteDiscriminators)
+      Discriminator = 0;
+    // facebook end T156867704
 
     FunctionSamples &CalleeProfile = FProfile.functionSamplesAt(
         LineLocation(*LineOffset, DiscriminatorVal))[*FName];

@@ -1202,6 +1202,12 @@ public:
   /// If this profile uses flow sensitive discriminators.
   static bool ProfileIsFS;
 
+  // facebook begin T156867704
+  /// Whether callsite discriminators in this profile should be dropped during
+  /// reading.
+  static bool DropCallsiteDiscriminators;
+  // facebook end T156867704
+
   /// GUIDToFuncNameMap saves the mapping from GUID to the symbol name, for
   /// all the function symbols defined or declared in current module.
   DenseMap<uint64_t, StringRef> *GUIDToFuncNameMap = nullptr;
