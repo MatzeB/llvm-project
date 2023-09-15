@@ -167,8 +167,8 @@ bool ByteCodeExprGen<Emitter>::VisitCastExpr(const CastExpr *CE) {
 
   case CK_IntegralToBoolean:
   case CK_IntegralCast: {
-      if (DiscardResult)
-        return this->discard(SubExpr);
+    if (DiscardResult)
+      return this->discard(SubExpr);
     std::optional<PrimType> FromT = classify(SubExpr->getType());
     std::optional<PrimType> ToT = classify(CE->getType());
     if (!FromT || !ToT)
@@ -222,13 +222,8 @@ bool ByteCodeExprGen<Emitter>::VisitFloatingLiteral(const FloatingLiteral *E) {
 }
 
 template <class Emitter>
-bool ByteCodeExprGen<Emitter>::VisitParenExpr(const ParenExpr *PE) {
-  const Expr *SubExpr = PE->getSubExpr();
-
-  if (DiscardResult)
-    return this->discard(SubExpr);
-
-  return this->visit(SubExpr);
+bool ByteCodeExprGen<Emitter>::VisitParenExpr(const ParenExpr *E) {
+  return this->delegate(E->getSubExpr());
 }
 
 template <class Emitter>
@@ -248,12 +243,6 @@ bool ByteCodeExprGen<Emitter>::VisitBinaryOperator(const BinaryOperator *BO) {
   std::optional<PrimType> RT = classify(RHS->getType());
   std::optional<PrimType> T = classify(BO->getType());
 
-  auto Discard = [this, T, BO](bool Result) {
-    if (!Result)
-      return false;
-    return DiscardResult ? this->emitPop(*T, BO) : true;
-  };
-
   // Deal with operations which have composite or void types.
   if (BO->isCommaOp()) {
     if (!this->discard(LHS))
@@ -261,9 +250,7 @@ bool ByteCodeExprGen<Emitter>::VisitBinaryOperator(const BinaryOperator *BO) {
     if (RHS->getType()->isVoidType())
       return this->discard(RHS);
 
-    // Otherwise, visit RHS and optionally discard its value.
-    return Discard(Initializing ? this->visitInitializer(RHS)
-                                : this->visit(RHS));
+    return this->delegate(RHS);
   }
 
   if (!LT || !RT || !T)
@@ -288,6 +275,12 @@ bool ByteCodeExprGen<Emitter>::VisitBinaryOperator(const BinaryOperator *BO) {
     if (T != PT_Bool)
       return this->emitCast(PT_Bool, *T, BO);
     return true;
+  };
+
+  auto Discard = [this, T, BO](bool Result) {
+    if (!Result)
+      return false;
+    return DiscardResult ? this->emitPop(*T, BO) : true;
   };
 
   switch (BO->getOpcode()) {
@@ -401,18 +394,19 @@ bool ByteCodeExprGen<Emitter>::VisitLogicalBinOp(const BinaryOperator *E) {
   BinaryOperatorKind Op = E->getOpcode();
   const Expr *LHS = E->getLHS();
   const Expr *RHS = E->getRHS();
+  std::optional<PrimType> T = classify(E->getType());
 
   if (Op == BO_LOr) {
     // Logical OR. Visit LHS and only evaluate RHS if LHS was FALSE.
     LabelTy LabelTrue = this->getLabel();
     LabelTy LabelEnd = this->getLabel();
 
-    if (!this->visit(LHS))
+    if (!this->visitBool(LHS))
       return false;
     if (!this->jumpTrue(LabelTrue))
       return false;
 
-    if (!this->visit(RHS))
+    if (!this->visitBool(RHS))
       return false;
     if (!this->jump(LabelEnd))
       return false;
@@ -422,35 +416,36 @@ bool ByteCodeExprGen<Emitter>::VisitLogicalBinOp(const BinaryOperator *E) {
     this->fallthrough(LabelEnd);
     this->emitLabel(LabelEnd);
 
-    if (DiscardResult)
-      return this->emitPopBool(E);
+  } else {
+    assert(Op == BO_LAnd);
+    // Logical AND.
+    // Visit LHS. Only visit RHS if LHS was TRUE.
+    LabelTy LabelFalse = this->getLabel();
+    LabelTy LabelEnd = this->getLabel();
 
-    return true;
+    if (!this->visitBool(LHS))
+      return false;
+    if (!this->jumpFalse(LabelFalse))
+      return false;
+
+    if (!this->visitBool(RHS))
+      return false;
+    if (!this->jump(LabelEnd))
+      return false;
+
+    this->emitLabel(LabelFalse);
+    this->emitConstBool(false, E);
+    this->fallthrough(LabelEnd);
+    this->emitLabel(LabelEnd);
   }
-
-  // Logical AND.
-  // Visit LHS. Only visit RHS if LHS was TRUE.
-  LabelTy LabelFalse = this->getLabel();
-  LabelTy LabelEnd = this->getLabel();
-
-  if (!this->visit(LHS))
-    return false;
-  if (!this->jumpFalse(LabelFalse))
-    return false;
-
-  if (!this->visit(RHS))
-    return false;
-  if (!this->jump(LabelEnd))
-    return false;
-
-  this->emitLabel(LabelFalse);
-  this->emitConstBool(false, E);
-  this->fallthrough(LabelEnd);
-  this->emitLabel(LabelEnd);
 
   if (DiscardResult)
     return this->emitPopBool(E);
 
+  // For C, cast back to integer type.
+  assert(T);
+  if (T != PT_Bool)
+    return this->emitCast(PT_Bool, *T, E);
   return true;
 }
 
@@ -512,6 +507,58 @@ bool ByteCodeExprGen<Emitter>::VisitArraySubscriptExpr(
 }
 
 template <class Emitter>
+bool ByteCodeExprGen<Emitter>::visitInitList(ArrayRef<const Expr *> Inits,
+                                             const Expr *E) {
+  assert(E->getType()->isRecordType());
+  const Record *R = getRecord(E->getType());
+
+  unsigned InitIndex = 0;
+  for (const Expr *Init : Inits) {
+    if (!this->emitDupPtr(E))
+      return false;
+
+    if (std::optional<PrimType> T = classify(Init)) {
+      const Record::Field *FieldToInit = R->getField(InitIndex);
+      if (!this->visit(Init))
+        return false;
+      if (!this->emitInitField(*T, FieldToInit->Offset, E))
+        return false;
+      if (!this->emitPopPtr(E))
+        return false;
+      ++InitIndex;
+    } else {
+      // Initializer for a direct base class.
+      if (const Record::Base *B = R->getBase(Init->getType())) {
+        if (!this->emitGetPtrBasePop(B->Offset, Init))
+          return false;
+
+        if (!this->visitInitializer(Init))
+          return false;
+
+        if (!this->emitPopPtr(E))
+          return false;
+        // Base initializers don't increase InitIndex, since they don't count
+        // into the Record's fields.
+      } else {
+        const Record::Field *FieldToInit = R->getField(InitIndex);
+        // Non-primitive case. Get a pointer to the field-to-initialize
+        // on the stack and recurse into visitInitializer().
+        if (!this->emitGetPtrField(FieldToInit->Offset, Init))
+          return false;
+
+        if (!this->visitInitializer(Init))
+          return false;
+
+        if (!this->emitPopPtr(E))
+          return false;
+        ++InitIndex;
+      }
+    }
+  }
+  return true;
+}
+
+template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitInitListExpr(const InitListExpr *E) {
   // Handle discarding first.
   if (DiscardResult) {
@@ -530,56 +577,8 @@ bool ByteCodeExprGen<Emitter>::VisitInitListExpr(const InitListExpr *E) {
   }
 
   QualType T = E->getType();
-  if (T->isRecordType()) {
-    const Record *R = getRecord(T);
-
-    unsigned InitIndex = 0;
-    for (const Expr *Init : E->inits()) {
-      if (!this->emitDupPtr(E))
-        return false;
-
-      if (std::optional<PrimType> T = classify(Init)) {
-        const Record::Field *FieldToInit = R->getField(InitIndex);
-        if (!this->visit(Init))
-          return false;
-
-        if (!this->emitInitField(*T, FieldToInit->Offset, E))
-          return false;
-
-        if (!this->emitPopPtr(E))
-          return false;
-        ++InitIndex;
-      } else {
-        // Initializer for a direct base class.
-        if (const Record::Base *B = R->getBase(Init->getType())) {
-          if (!this->emitGetPtrBasePop(B->Offset, Init))
-            return false;
-
-          if (!this->visitInitializer(Init))
-            return false;
-
-          if (!this->emitPopPtr(E))
-            return false;
-          // Base initializers don't increase InitIndex, since they don't count
-          // into the Record's fields.
-        } else {
-          const Record::Field *FieldToInit = R->getField(InitIndex);
-          // Non-primitive case. Get a pointer to the field-to-initialize
-          // on the stack and recurse into visitInitializer().
-          if (!this->emitGetPtrField(FieldToInit->Offset, Init))
-            return false;
-
-          if (!this->visitInitializer(Init))
-            return false;
-
-          if (!this->emitPopPtr(E))
-            return false;
-          ++InitIndex;
-        }
-      }
-    }
-    return true;
-  }
+  if (T->isRecordType())
+    return this->visitInitList(E->inits(), E);
 
   if (T->isArrayType()) {
     // FIXME: Array fillers.
@@ -613,6 +612,21 @@ bool ByteCodeExprGen<Emitter>::VisitInitListExpr(const InitListExpr *E) {
 }
 
 template <class Emitter>
+bool ByteCodeExprGen<Emitter>::VisitCXXParenListInitExpr(
+    const CXXParenListInitExpr *E) {
+  if (DiscardResult) {
+    for (const Expr *Init : E->getInitExprs()) {
+      if (!this->discard(Init))
+        return false;
+    }
+    return true;
+  }
+
+  assert(E->getType()->isRecordType());
+  return this->visitInitList(E->getInitExprs(), E);
+}
+
+template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitSubstNonTypeTemplateParmExpr(
     const SubstNonTypeTemplateParmExpr *E) {
   return this->delegate(E->getReplacement());
@@ -620,8 +634,14 @@ bool ByteCodeExprGen<Emitter>::VisitSubstNonTypeTemplateParmExpr(
 
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitConstantExpr(const ConstantExpr *E) {
-  // TODO: Check if the ConstantExpr already has a value set and if so,
-  //   use that instead of evaluating it again.
+  // Try to emit the APValue directly, without visiting the subexpr.
+  // This will only fail if we can't emit the APValue, so won't emit any
+  // diagnostics or any double values.
+  std::optional<PrimType> T = classify(E->getType());
+  if (T && E->hasAPValueResult() &&
+      this->visitAPValue(E->getAPValueResult(), *T, E))
+    return true;
+
   return this->delegate(E->getSubExpr());
 }
 
@@ -797,16 +817,8 @@ bool ByteCodeExprGen<Emitter>::VisitAbstractConditionalOperator(
   LabelTy LabelEnd = this->getLabel();   // Label after the operator.
   LabelTy LabelFalse = this->getLabel(); // Label for the false expr.
 
-  if (!this->visit(Condition))
+  if (!this->visitBool(Condition))
     return false;
-
-  // C special case: Convert to bool because our jump ops need that.
-  // TODO: We probably want this to be done in visitBool().
-  if (std::optional<PrimType> CondT = classify(Condition->getType());
-      CondT && CondT != PT_Bool) {
-    if (!this->emitCast(*CondT, PT_Bool, E))
-      return false;
-  }
 
   if (!this->jumpFalse(LabelFalse))
     return false;
@@ -1383,6 +1395,97 @@ bool ByteCodeExprGen<Emitter>::VisitCXXConstructExpr(
   return false;
 }
 
+template <class Emitter>
+bool ByteCodeExprGen<Emitter>::VisitSourceLocExpr(const SourceLocExpr *E) {
+  if (DiscardResult)
+    return true;
+
+  const APValue Val =
+      E->EvaluateInContext(Ctx.getASTContext(), SourceLocDefaultExpr);
+
+  // Things like __builtin_LINE().
+  if (E->getType()->isIntegerType()) {
+    assert(Val.isInt());
+    const APSInt &I = Val.getInt();
+    return this->emitConst(I, E);
+  }
+  // Otherwise, the APValue is an LValue, with only one element.
+  // Theoretically, we don't need the APValue at all of course.
+  assert(E->getType()->isPointerType());
+  assert(Val.isLValue());
+  const APValue::LValueBase &Base = Val.getLValueBase();
+  if (const Expr *LValueExpr = Base.dyn_cast<const Expr *>())
+    return this->visit(LValueExpr);
+
+  // Otherwise, we have a decl (which is the case for
+  // __builtin_source_location).
+  assert(Base.is<const ValueDecl *>());
+  assert(Val.getLValuePath().size() == 0);
+  const auto *BaseDecl = Base.dyn_cast<const ValueDecl *>();
+  assert(BaseDecl);
+
+  auto *UGCD = cast<UnnamedGlobalConstantDecl>(BaseDecl);
+
+  std::optional<unsigned> GlobalIndex = P.getOrCreateGlobal(UGCD);
+  if (!GlobalIndex)
+    return false;
+
+  if (!this->emitGetPtrGlobal(*GlobalIndex, E))
+    return false;
+
+  const Record *R = getRecord(E->getType());
+  const APValue &V = UGCD->getValue();
+  for (unsigned I = 0, N = R->getNumFields(); I != N; ++I) {
+    const Record::Field *F = R->getField(I);
+    const APValue &FieldValue = V.getStructField(I);
+
+    PrimType FieldT = classifyPrim(F->Decl->getType());
+
+    if (!this->visitAPValue(FieldValue, FieldT, E))
+      return false;
+    if (!this->emitInitField(FieldT, F->Offset, E))
+      return false;
+  }
+
+  // Leave the pointer to the global on the stack.
+  return true;
+}
+
+template <class Emitter>
+bool ByteCodeExprGen<Emitter>::VisitOffsetOfExpr(const OffsetOfExpr *E) {
+  unsigned N = E->getNumComponents();
+  if (N == 0)
+    return false;
+
+  for (unsigned I = 0; I != N; ++I) {
+    const OffsetOfNode &Node = E->getComponent(I);
+    if (Node.getKind() == OffsetOfNode::Array) {
+      const Expr *ArrayIndexExpr = E->getIndexExpr(Node.getArrayExprIndex());
+      PrimType IndexT = classifyPrim(ArrayIndexExpr->getType());
+
+      if (DiscardResult) {
+        if (!this->discard(ArrayIndexExpr))
+          return false;
+        continue;
+      }
+
+      if (!this->visit(ArrayIndexExpr))
+        return false;
+      // Cast to Sint64.
+      if (IndexT != PT_Sint64) {
+        if (!this->emitCast(IndexT, PT_Sint64, E))
+          return false;
+      }
+    }
+  }
+
+  if (DiscardResult)
+    return true;
+
+  PrimType T = classifyPrim(E->getType());
+  return this->emitOffsetOf(T, E, E);
+}
+
 template <class Emitter> bool ByteCodeExprGen<Emitter>::discard(const Expr *E) {
   if (E->containsErrors())
     return false;
@@ -1422,7 +1525,7 @@ template <class Emitter> bool ByteCodeExprGen<Emitter>::visit(const Expr *E) {
   }
 
   //  Otherwise,we have a primitive return value, produce the value directly
-  //  and puish it on the stack.
+  //  and push it on the stack.
   OptionScope<Emitter> Scope(this, /*NewDiscardResult=*/false,
                              /*NewInitializing=*/false);
   return this->Visit(E);
@@ -1442,9 +1545,29 @@ bool ByteCodeExprGen<Emitter>::visitInitializer(const Expr *E) {
 
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::visitBool(const Expr *E) {
-  if (std::optional<PrimType> T = classify(E->getType()))
-    return visit(E);
-  return this->bail(E);
+  std::optional<PrimType> T = classify(E->getType());
+  if (!T)
+    return false;
+
+  if (!this->visit(E))
+    return false;
+
+  if (T == PT_Bool)
+    return true;
+
+  // Convert pointers to bool.
+  if (T == PT_Ptr || T == PT_FnPtr) {
+    if (!this->emitNull(*T, E))
+      return false;
+    return this->emitNE(*T, E);
+  }
+
+  // Or Floats.
+  if (T == PT_Float)
+    return this->emitCastFloatingIntegralBool(E);
+
+  // Or anything else we can.
+  return this->emitCast(*T, PT_Bool, E);
 }
 
 template <class Emitter>
@@ -1694,8 +1817,8 @@ bool ByteCodeExprGen<Emitter>::dereferenceVar(
 
 template <class Emitter>
 template <typename T>
-bool ByteCodeExprGen<Emitter>::emitConst(T Value, const Expr *E) {
-  switch (classifyPrim(E->getType())) {
+bool ByteCodeExprGen<Emitter>::emitConst(T Value, PrimType Ty, const Expr *E) {
+  switch (Ty) {
   case PT_Sint8:
     return this->emitConstSint8(Value, E);
   case PT_Uint8:
@@ -1724,10 +1847,22 @@ bool ByteCodeExprGen<Emitter>::emitConst(T Value, const Expr *E) {
 }
 
 template <class Emitter>
-bool ByteCodeExprGen<Emitter>::emitConst(const APSInt &Value, const Expr *E) {
+template <typename T>
+bool ByteCodeExprGen<Emitter>::emitConst(T Value, const Expr *E) {
+  return this->emitConst(Value, classifyPrim(E->getType()), E);
+}
+
+template <class Emitter>
+bool ByteCodeExprGen<Emitter>::emitConst(const APSInt &Value, PrimType Ty,
+                                         const Expr *E) {
   if (Value.isSigned())
-    return this->emitConst(Value.getSExtValue(), E);
-  return this->emitConst(Value.getZExtValue(), E);
+    return this->emitConst(Value.getSExtValue(), Ty, E);
+  return this->emitConst(Value.getZExtValue(), Ty, E);
+}
+
+template <class Emitter>
+bool ByteCodeExprGen<Emitter>::emitConst(const APSInt &Value, const Expr *E) {
+  return this->emitConst(Value, classifyPrim(E->getType()), E);
 }
 
 template <class Emitter>
@@ -1924,6 +2059,22 @@ bool ByteCodeExprGen<Emitter>::visitVarDecl(const VarDecl *VD) {
 }
 
 template <class Emitter>
+bool ByteCodeExprGen<Emitter>::visitAPValue(const APValue &Val,
+                                            PrimType ValType, const Expr *E) {
+  assert(!DiscardResult);
+  if (Val.isInt())
+    return this->emitConst(Val.getInt(), ValType, E);
+
+  if (Val.isLValue()) {
+    APValue::LValueBase Base = Val.getLValueBase();
+    if (const Expr *BaseExpr = Base.dyn_cast<const Expr *>())
+      return this->visit(BaseExpr);
+  }
+
+  return false;
+}
+
+template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitBuiltinCallExpr(const CallExpr *E) {
   const Function *Func = getFunction(E->getDirectCallee());
   if (!Func)
@@ -2049,7 +2200,7 @@ bool ByteCodeExprGen<Emitter>::VisitCXXMemberCallExpr(
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitCXXDefaultInitExpr(
     const CXXDefaultInitExpr *E) {
-
+  SourceLocScope<Emitter> SLS(this, E);
   if (Initializing)
     return this->visitInitializer(E->getExpr());
 
@@ -2060,8 +2211,9 @@ bool ByteCodeExprGen<Emitter>::VisitCXXDefaultInitExpr(
 template <class Emitter>
 bool ByteCodeExprGen<Emitter>::VisitCXXDefaultArgExpr(
     const CXXDefaultArgExpr *E) {
-  const Expr *SubExpr = E->getExpr();
+  SourceLocScope<Emitter> SLS(this, E);
 
+  const Expr *SubExpr = E->getExpr();
   if (std::optional<PrimType> T = classify(E->getExpr()))
     return this->visit(SubExpr);
 
@@ -2260,9 +2412,7 @@ bool ByteCodeExprGen<Emitter>::VisitUnaryOperator(const UnaryOperator *E) {
   case UO_Real:   // __real x
   case UO_Imag:   // __imag x
   case UO_Extension:
-    if (DiscardResult)
-      return this->discard(SubExpr);
-    return this->visit(SubExpr);
+    return this->delegate(SubExpr);
   case UO_Coawait:
     assert(false && "Unhandled opcode");
   }
@@ -2323,6 +2473,17 @@ bool ByteCodeExprGen<Emitter>::VisitDeclRefExpr(const DeclRefExpr *E) {
     return this->emitGetPtrThisField(Offset, E);
   }
 
+  // Lazily visit global declarations we haven't seen yet.
+  // This happens in C.
+  if (!Ctx.getLangOpts().CPlusPlus) {
+    if (const auto *VD = dyn_cast<VarDecl>(D);
+        VD && VD->hasGlobalStorage() && VD->getAnyInitializer()) {
+      if (!this->visitVarDecl(VD))
+        return false;
+      // Retry.
+      return this->VisitDeclRefExpr(E);
+    }
+  }
   return false;
 }
 

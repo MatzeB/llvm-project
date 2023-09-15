@@ -8,7 +8,6 @@ import re
 import stat
 import pathlib
 import platform
-import shlex
 import shutil
 import tempfile
 import threading
@@ -60,7 +59,7 @@ kPdbgRegex = "%dbg\\(([^)'\"]*)\\)(.*)"
 
 def buildPdbgCommand(msg, cmd):
     res = f"%dbg({msg}) {cmd}"
-    assert re.match(
+    assert re.fullmatch(
         kPdbgRegex, res
     ), f"kPdbgRegex expected to match actual %dbg usage: {res}"
     return res
@@ -349,12 +348,12 @@ def executeBuiltinExport(cmd, shenv):
 
 
 def executeBuiltinEcho(cmd, shenv):
-    """Interpret a redirected echo or @echo command"""
+    """Interpret a redirected echo command"""
     opened_files = []
     stdin, stdout, stderr = processRedirects(cmd, subprocess.PIPE, shenv, opened_files)
     if stdin != subprocess.PIPE or stderr != subprocess.PIPE:
         raise InternalShellError(
-            cmd, f"stdin and stderr redirects not supported for {cmd.args[0]}"
+            cmd, "stdin and stderr redirects not supported for echo"
         )
 
     # Some tests have un-redirected echo commands to help debug test failures.
@@ -701,7 +700,6 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
         "cd": executeBuiltinCd,
         "export": executeBuiltinExport,
         "echo": executeBuiltinEcho,
-        "@echo": executeBuiltinEcho,
         "mkdir": executeBuiltinMkdir,
         "popd": executeBuiltinPopd,
         "pushd": executeBuiltinPushd,
@@ -929,7 +927,7 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
         if res == -signal.SIGINT:
             raise KeyboardInterrupt
         if proc_not_counts[i] % 2:
-            res = 1 if res == 0 else 0
+            res = not res
         elif proc_not_counts[i] > 1:
             res = 1 if res != 0 else 0
 
@@ -992,58 +990,19 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
     return exitCode
 
 
-def formatOutput(title, data, limit=None):
-    if not data.strip():
-        return ""
-    if not limit is None and len(data) > limit:
-        data = data[:limit] + "\n...\n"
-        msg = "data was truncated"
-    else:
-        msg = ""
-    ndashes = 30
-    out =  f"# .---{title}{'-' * (ndashes - 4 - len(title))}\n"
-    out += f"# | " + "\n# | ".join(data.splitlines()) + "\n"
-    out += f"# `---{msg}{'-' * (ndashes - 4 - len(msg))}\n"
-    return out
-
-# Normally returns out, err, exitCode, timeoutInfo.
-#
-# If debug is True (the normal lit behavior), err is empty, and out contains an
-# execution trace, including stdout and stderr shown per command executed.
-#
-# If debug is False (set by some custom lit test formats that call this
-# function), out contains only stdout from the script, err contains only stderr
-# from the script, and there is no execution trace.
-def executeScriptInternal(test, litConfig, tmpBase, commands, cwd,
-                          debug=True):
+def executeScriptInternal(test, litConfig, tmpBase, commands, cwd):
     cmds = []
     for i, ln in enumerate(commands):
-        # Within lit, we try to always add '%dbg(...)' to command lines in order
-        # to maximize debuggability.  However, custom lit test formats might not
-        # always add it, so add a generic debug message in that case.
-        match = re.match(kPdbgRegex, ln)
+        match = re.fullmatch(kPdbgRegex, ln)
         if match:
-            dbg = match.group(1)
             command = match.group(2)
-        else:
-            dbg = "command line"
-            command = ln
-        if debug:
-            ln = f"@echo '# {dbg}' "
-            if command:
-                ln += f"&& @echo {shlex.quote(command.lstrip())} && {command}"
-            else:
-                ln += "has no command after substitutions"
-        else:
-            ln = command
+            ln = commands[i] = match.expand(": '\\1'; \\2" if command else ": '\\1'")
         try:
             cmds.append(
                 ShUtil.ShParser(ln, litConfig.isWindows, test.config.pipefail).parse()
             )
         except:
-            return lit.Test.Result(
-                Test.FAIL, f"shell parser error on {dbg}: {command.lstrip()}\n"
-            )
+            return lit.Test.Result(Test.FAIL, "shell parser error on: %r" % ln)
 
     cmd = cmds[0]
     for c in cmds[1:]:
@@ -1063,42 +1022,8 @@ def executeScriptInternal(test, litConfig, tmpBase, commands, cwd,
 
     out = err = ""
     for i, result in enumerate(results):
-        if not debug:
-            out += result.stdout
-            err += result.stderr
-            continue
-
-        # The purpose of an "@echo" command is merely to add a debugging message
-        # directly to lit's output.  It is used internally by lit's internal
-        # shell and is not currently documented for use in lit tests.  However,
-        # if someone misuses it (e.g., both "echo" and "@echo" complain about
-        # stdin redirection), produce the normal execution trace to facilitate
-        # debugging.
-        if (
-            result.command.args[0] == "@echo"
-            and result.exitCode == 0
-            and not result.stderr
-            and not result.outputFiles
-            and not result.timeoutReached
-        ):
-            out += result.stdout
-            continue
-
-        # Write the command line that was run.  Properly quote it.  Leading
-        # "!" commands should not be quoted as that would indicate they are not
-        # the builtins.
-        out += "# executed command: "
-        nLeadingBangs = next(
-            (i for i, cmd in enumerate(result.command.args) if cmd != "!"),
-            len(result.command.args),
-        )
-        out += "! " * nLeadingBangs
-        out += " ".join(
-            shlex.quote(str(s))
-            for i, s in enumerate(result.command.args)
-            if i >= nLeadingBangs
-        )
-        out += "\n"
+        # Write the command line run.
+        out += "$ %s\n" % (" ".join('"%s"' % s for s in result.command.args),)
 
         # If nothing interesting happened, move on.
         if (
@@ -1113,16 +1038,22 @@ def executeScriptInternal(test, litConfig, tmpBase, commands, cwd,
 
         # Add the command output, if redirected.
         for (name, path, data) in result.outputFiles:
-            data = to_string(data.decode("utf-8", errors="replace"))
-            out += formatOutput(
-                f"redirected output from '{name}'", data, limit=1024
-            )
+            if data.strip():
+                out += "# redirected output from %r:\n" % (name,)
+                data = to_string(data.decode("utf-8", errors="replace"))
+                if len(data) > 1024:
+                    out += data[:1024] + "\n...\n"
+                    out += "note: data was truncated\n"
+                else:
+                    out += data
+                out += "\n"
+
         if result.stdout.strip():
-            out += formatOutput("command stdout", result.stdout)
+            out += "# command output:\n%s\n" % (result.stdout,)
         if result.stderr.strip():
-            out += formatOutput("command stderr", result.stderr)
+            out += "# command stderr:\n%s\n" % (result.stderr,)
         if not result.stdout.strip() and not result.stderr.strip():
-            out += "# note: command had no output on stdout or stderr\n"
+            out += "note: command had no output on stdout or stderr\n"
 
         # Show the error conditions:
         if result.exitCode != 0:
@@ -1132,9 +1063,9 @@ def executeScriptInternal(test, litConfig, tmpBase, commands, cwd,
                 codeStr = hex(int(result.exitCode & 0xFFFFFFFF)).rstrip("L")
             else:
                 codeStr = str(result.exitCode)
-            out += "# error: command failed with exit status: %s\n" % (codeStr,)
+            out += "error: command failed with exit status: %s\n" % (codeStr,)
         if litConfig.maxIndividualTestTime > 0 and result.timeoutReached:
-            out += "# error: command reached timeout: %s\n" % (
+            out += "error: command reached timeout: %s\n" % (
                 str(result.timeoutReached),
             )
 
@@ -1144,24 +1075,9 @@ def executeScriptInternal(test, litConfig, tmpBase, commands, cwd,
 def executeScript(test, litConfig, tmpBase, commands, cwd):
     bashPath = litConfig.getBashPath()
     isWin32CMDEXE = litConfig.isWindows and not bashPath
-    coverage_index = 0  # Counter for coverage file index
     script = tmpBase + ".script"
     if isWin32CMDEXE:
         script += ".bat"
-
-    # Set unique LLVM_PROFILE_FILE for each run command
-    for j, ln in enumerate(commands):
-        match = re.match(kPdbgRegex, ln)
-        if match:
-            command = match.group(2)
-            commands[j] = match.expand(": '\\1'; \\2" if command else ": '\\1'")
-            if litConfig.per_test_coverage:
-                # Extract the test case name from the test object
-                test_case_name = test.path_in_suite[-1]
-                test_case_name = test_case_name.rsplit(".", 1)[0]  # Remove the file extension
-                llvm_profile_file = f"{test_case_name}{coverage_index}.profraw"
-                commands[j] = f"export LLVM_PROFILE_FILE={llvm_profile_file} && {commands[j]}"
-                coverage_index += 1
 
     # Write script file
     mode = "w"
@@ -1173,23 +1089,27 @@ def executeScript(test, litConfig, tmpBase, commands, cwd):
     f = open(script, mode, **open_kwargs)
     if isWin32CMDEXE:
         for i, ln in enumerate(commands):
-            match = re.match(kPdbgRegex, ln)
+            match = re.fullmatch(kPdbgRegex, ln)
             if match:
                 command = match.group(2)
                 commands[i] = match.expand(
                     "echo '\\1' > nul && " if command else "echo '\\1' > nul"
                 )
-        f.write("@echo on\n")
+        if litConfig.echo_all_commands:
+            f.write("@echo on\n")
+        else:
+            f.write("@echo off\n")
         f.write("\n@if %ERRORLEVEL% NEQ 0 EXIT\n".join(commands))
     else:
         for i, ln in enumerate(commands):
-            match = re.match(kPdbgRegex, ln)
+            match = re.fullmatch(kPdbgRegex, ln)
             if match:
                 command = match.group(2)
                 commands[i] = match.expand(": '\\1'; \\2" if command else ": '\\1'")
         if test.config.pipefail:
             f.write(b"set -o pipefail;" if mode == "wb" else "set -o pipefail;")
-        f.write(b"set -x;" if mode == "wb" else "set -x;")
+        if litConfig.echo_all_commands:
+            f.write(b"set -x;" if mode == "wb" else "set -x;")
         if sys.version_info > (3, 0) and mode == "wb":
             f.write(bytes("{ " + "; } &&\n{ ".join(commands) + "; }", "utf-8"))
         else:
@@ -2115,6 +2035,27 @@ def parseIntegratedTestScript(test, additional_parsers=[], require_script=True):
 
 def _runShTest(test, litConfig, useExternalSh, script, tmpBase):
     def runOnce(execdir):
+        # Set unique LLVM_PROFILE_FILE for each run command
+        if litConfig.per_test_coverage:
+            # Extract the test case name from the test object, and remove the
+            # file extension.
+            test_case_name = test.path_in_suite[-1]
+            test_case_name = test_case_name.rsplit(".", 1)[0]
+            coverage_index = 0  # Counter for coverage file index
+            for i, ln in enumerate(script):
+                match = re.fullmatch(kPdbgRegex, ln)
+                if match:
+                    dbg = match.group(1)
+                    command = match.group(2)
+                else:
+                    command = ln
+                profile = f"{test_case_name}{coverage_index}.profraw"
+                coverage_index += 1
+                command = f"export LLVM_PROFILE_FILE={profile}; {command}"
+                if match:
+                    command = buildPdbgCommand(dbg, command)
+                script[i] = command
+
         if useExternalSh:
             res = executeScript(test, litConfig, tmpBase, script, execdir)
         else:
@@ -2138,7 +2079,14 @@ def _runShTest(test, litConfig, useExternalSh, script, tmpBase):
     # Re-run failed tests up to test.allowed_retries times.
     execdir = os.path.dirname(test.getExecPath())
     attempts = test.allowed_retries + 1
+    scriptInit = script
     for i in range(attempts):
+        # runOnce modifies script, but applying the modifications again to the
+        # result can corrupt script, so we restore the original upon a retry.
+        # A cleaner solution would be for runOnce to encapsulate operating on a
+        # copy of script, but we actually want it to modify the original script
+        # so we can print the modified version under "Script:" below.
+        script = scriptInit[:]
         res = runOnce(execdir)
         if isinstance(res, lit.Test.Result):
             return res
@@ -2153,7 +2101,7 @@ def _runShTest(test, litConfig, useExternalSh, script, tmpBase):
         status = Test.FLAKYPASS
 
     # Form the output log.
-    output = f"Exit Code: {exitCode}\n"
+    output = """Script:\n--\n%s\n--\nExit Code: %d\n""" % ("\n".join(script), exitCode)
 
     if timeoutInfo is not None:
         output += """Timeout: %s\n""" % (timeoutInfo,)
@@ -2175,8 +2123,6 @@ def executeShTest(
         return lit.Test.Result(Test.UNSUPPORTED, "Test is unsupported")
 
     script = list(preamble_commands)
-    script = [buildPdbgCommand(f"preamble command line", ln) for ln in script]
-
     parsed = parseIntegratedTestScript(test, require_script=not script)
     if isinstance(parsed, lit.Test.Result):
         return parsed
