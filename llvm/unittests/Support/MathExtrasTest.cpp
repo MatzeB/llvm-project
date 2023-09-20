@@ -426,6 +426,38 @@ TEST(MathExtras, IsShiftedInt) {
   EXPECT_FALSE((isShiftedInt<6, 10>(int64_t(1) << 15)));
 }
 
+TEST(MathExtras, RoundToBits) {
+  EXPECT_EQ(roundToBits(uint64_t{0x12345677ffffff}, 29), uint64_t{0x12345678000000});
+  EXPECT_EQ(roundToBits(uint64_t{0x12345678001234}, 29), uint64_t{0x12345678000000});
+
+  EXPECT_EQ(roundToBits(uint32_t{0xd}, 20), uint32_t{0xd});
+  EXPECT_EQ(roundToBits(uint32_t{0xd}, 7), uint32_t{0xd});
+  EXPECT_EQ(roundToBits(uint32_t{0xd}, 3), uint32_t{0xe});
+  EXPECT_EQ(roundToBits(uint32_t{0xe}, 3), uint32_t{0xe});
+  EXPECT_EQ(roundToBits(uint32_t{0xf}, 3), uint32_t{0x10});
+
+  EXPECT_EQ(roundToBits(uint64_t{0}, 5), uint64_t{0});
+  EXPECT_EQ(roundToBits(uint32_t{0}, 0), uint64_t{0});
+  EXPECT_EQ(roundToBits(uint16_t{0}, 16), uint64_t{0});
+  EXPECT_EQ(roundToBits(uint16_t{0}, 17), uint64_t{0});
+  EXPECT_EQ(roundToBits(uint8_t{0}, 3), uint64_t{0});
+
+  uint64_t AllOneButTop = 0x7fffffffffffffff;
+  EXPECT_EQ(roundToBits(AllOneButTop, 1), uint64_t{0x8000000000000000});
+  EXPECT_EQ(roundToBits(AllOneButTop, 8), uint64_t{0x8000000000000000});
+  EXPECT_EQ(roundToBits(AllOneButTop, 62), uint64_t{0x8000000000000000});
+  EXPECT_EQ(roundToBits(AllOneButTop, 63), AllOneButTop);
+  EXPECT_EQ(roundToBits(AllOneButTop, 64), AllOneButTop);
+
+  // Note that rounding "AllOne" will "overflow" and result is UINT64_MAX.
+  uint64_t AllOne = ~uint64_t{0};
+  EXPECT_EQ(roundToBits(AllOne, 0), uint64_t{0});
+  EXPECT_EQ(roundToBits(AllOne, 1), AllOne);
+  EXPECT_EQ(roundToBits(AllOne, 8), AllOne);
+  EXPECT_EQ(roundToBits(AllOne, 63), AllOne);
+  EXPECT_EQ(roundToBits(AllOne, 64), AllOne);
+}
+
 template <typename T>
 class OverflowTest : public ::testing::Test { };
 

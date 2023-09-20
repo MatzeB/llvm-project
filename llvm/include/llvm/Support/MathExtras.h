@@ -641,6 +641,27 @@ std::enable_if_t<std::is_signed_v<T>, T> MulOverflow(T X, T Y, T &Result) {
     return UX > (static_cast<U>(std::numeric_limits<T>::max())) / UY;
 }
 
+/// Round `Value` to a specified number of significant bits. Meaning less
+/// signifcant bits get zeroed (if there are any).
+/// Example: The similar n0=0x12345677ffffff and n1=0x12345678001234 numbers
+/// round to the same 29 significant bits:
+/// `roundToBits(n0, 29) == 0x12345678000000 == roundToBits(n1, 29)`.
+template <typename T>
+std::enable_if_t<std::is_unsigned_v<T>, T> roundToBits(T Value, unsigned SignificantBits) {
+  constexpr int TBits = sizeof(T) * CHAR_BIT;
+  int Shift = TBits - countl_zero(Value) - SignificantBits - 1;
+  if (Shift < 0)
+    return Value;
+  uint64_t Shifted = Value >> Shift;
+  uint64_t Rounded = Shifted + (Shifted & 1);
+  uint64_t Result = Rounded << Shift;
+  // If the rounding triggered an overflow, return maximum value instead.
+  if (Result == 0 && Shifted != 0 && SignificantBits != 0) {
+    return std::numeric_limits<T>::max();
+  }
+  return Result;
+}
+
 } // End llvm namespace
 
 #endif
