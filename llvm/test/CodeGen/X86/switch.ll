@@ -1886,7 +1886,8 @@ define void @left_leaning_weight_balanced_tree(i32 %x) {
 ; CHECK-NEXT:  # %bb.13: # %entry
 ; CHECK-NEXT:    cmpl $60, %edi
 ; CHECK-NEXT:    je .LBB19_14
-; CHECK-NEXT:    jmp .LBB19_18
+; CHECK-NEXT:  # %bb.19:
+; CHECK-NEXT:    retq
 ; CHECK-NEXT:  .LBB19_8: # %entry
 ; CHECK-NEXT:    cmpl $30, %edi
 ; CHECK-NEXT:    je .LBB19_16
@@ -2033,7 +2034,8 @@ define void @left_leaning_weight_balanced_tree2(i32 %x) {
 ; CHECK-NEXT:  .LBB20_11: # %entry
 ; CHECK-NEXT:    cmpl $60, %edi
 ; CHECK-NEXT:    je .LBB20_12
-; CHECK-NEXT:    jmp .LBB20_17
+; CHECK-NEXT:  # %bb.18:
+; CHECK-NEXT:    retq
 ; CHECK-NEXT:  .LBB20_2: # %entry
 ; CHECK-NEXT:    testl %edi, %edi
 ; CHECK-NEXT:    jne .LBB20_3
@@ -2205,7 +2207,8 @@ define void @right_leaning_weight_balanced_tree(i32 %x) {
 ; CHECK-NEXT:  # %bb.11: # %entry
 ; CHECK-NEXT:    cmpl $60, %edi
 ; CHECK-NEXT:    je .LBB21_12
-; CHECK-NEXT:    jmp .LBB21_17
+; CHECK-NEXT:  # %bb.18:
+; CHECK-NEXT:    retq
 ; CHECK-NEXT:  .LBB21_14: # %bb2
 ; CHECK-NEXT:    movl $2, %edi
 ; CHECK-NEXT:    jmp g@PLT # TAILCALL

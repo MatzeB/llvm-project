@@ -2857,6 +2857,26 @@ void MachineBlockPlacement::buildCFGChains() {
   EHPadWorkList.clear();
 }
 
+static bool isJustReturnBB(const MachineBasicBlock &MBB) {
+  return MBB.isReturnBlock() && MBB.getFirstNonDebugInstr()->isReturn();
+}
+
+static MachineBasicBlock &
+duplicateReturnBlock(MachineFunction &MF, const TargetInstrInfo &TII,
+                     const MachineBasicBlock &RetBB,
+                     MachineFunction::iterator InsertBefore) {
+  MachineBasicBlock &NewBB = *MF.CreateMachineBasicBlock();
+  NewBB.setCallFrameSize(RetBB.getCallFrameSize());
+  MF.insert(InsertBefore, &NewBB);
+  for (MachineBasicBlock::RegisterMaskPair LiveIn : RetBB.liveins()) {
+    NewBB.addLiveIn(LiveIn);
+  }
+  for (const MachineInstr &MI : RetBB) {
+    TII.duplicate(NewBB, NewBB.end(), MI);
+  }
+  return NewBB;
+}
+
 void MachineBlockPlacement::optimizeBranches() {
   BlockChain &FunctionChain = *BlockToChain[&F->front()];
   SmallVector<MachineOperand, 4> Cond; // For analyzeBranch.
@@ -2871,6 +2891,21 @@ void MachineBlockPlacement::optimizeBranches() {
     Cond.clear();
     MachineBasicBlock *TBB = nullptr, *FBB = nullptr; // For analyzeBranch.
     if (!TII->analyzeBranch(*ChainBB, TBB, FBB, Cond, /*AllowModify*/ true)) {
+      // It can make sense to duplicate the whole target block if it ends up
+      // smaller or equal to an uncondition jump (often true for "return"
+      // statements).
+      if (allowTailDupPlacement() && FBB != nullptr && isJustReturnBB(*FBB)) {
+        // TODO: Check if return instruction is actually smaller than a
+        // typical jump instruction...
+        MachineBasicBlock &NewBB = duplicateReturnBlock(
+            *F, *TII, *FBB, std::next(MachineFunction::iterator(ChainBB)));
+        DebugLoc dl; // FIXME: this is nowhere
+        TII->removeBranch(*ChainBB);
+        TII->insertBranch(*ChainBB, TBB, nullptr, Cond, dl);
+        ChainBB->ReplaceUsesOfBlockWith(FBB, &NewBB);
+        continue;
+      }
+
       // If PrevBB has a two-way branch, try to re-order the branches
       // such that we branch to the successor with higher probability first.
       if (TBB && !Cond.empty() && FBB &&

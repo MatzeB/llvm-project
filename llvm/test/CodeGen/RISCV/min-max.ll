@@ -70,18 +70,19 @@ declare i64 @llvm.smax.i64(i64 %a, i64 %b) readnone
 define i64 @smax_i64(i64 %a, i64 %b) {
 ; RV32I-LABEL: smax_i64:
 ; RV32I:       # %bb.0:
-; RV32I-NEXT:    beq a1, a3, .LBB3_2
+; RV32I-NEXT:    beq a1, a3, .LBB3_3
 ; RV32I-NEXT:  # %bb.1:
 ; RV32I-NEXT:    slt a4, a3, a1
-; RV32I-NEXT:    beqz a4, .LBB3_3
-; RV32I-NEXT:    j .LBB3_4
-; RV32I-NEXT:  .LBB3_2:
-; RV32I-NEXT:    sltu a4, a2, a0
-; RV32I-NEXT:    bnez a4, .LBB3_4
+; RV32I-NEXT:    beqz a4, .LBB3_4
+; RV32I-NEXT:  # %bb.2:
+; RV32I-NEXT:    ret
 ; RV32I-NEXT:  .LBB3_3:
+; RV32I-NEXT:    sltu a4, a2, a0
+; RV32I-NEXT:    bnez a4, .LBB3_5
+; RV32I-NEXT:  .LBB3_4:
 ; RV32I-NEXT:    mv a0, a2
 ; RV32I-NEXT:    mv a1, a3
-; RV32I-NEXT:  .LBB3_4:
+; RV32I-NEXT:  .LBB3_5:
 ; RV32I-NEXT:    ret
 ;
 ; RV64I-LABEL: smax_i64:
@@ -94,18 +95,19 @@ define i64 @smax_i64(i64 %a, i64 %b) {
 ;
 ; RV32ZBB-LABEL: smax_i64:
 ; RV32ZBB:       # %bb.0:
-; RV32ZBB-NEXT:    beq a1, a3, .LBB3_2
+; RV32ZBB-NEXT:    beq a1, a3, .LBB3_3
 ; RV32ZBB-NEXT:  # %bb.1:
 ; RV32ZBB-NEXT:    slt a4, a3, a1
-; RV32ZBB-NEXT:    beqz a4, .LBB3_3
-; RV32ZBB-NEXT:    j .LBB3_4
-; RV32ZBB-NEXT:  .LBB3_2:
-; RV32ZBB-NEXT:    sltu a4, a2, a0
-; RV32ZBB-NEXT:    bnez a4, .LBB3_4
+; RV32ZBB-NEXT:    beqz a4, .LBB3_4
+; RV32ZBB-NEXT:  # %bb.2:
+; RV32ZBB-NEXT:    ret
 ; RV32ZBB-NEXT:  .LBB3_3:
+; RV32ZBB-NEXT:    sltu a4, a2, a0
+; RV32ZBB-NEXT:    bnez a4, .LBB3_5
+; RV32ZBB-NEXT:  .LBB3_4:
 ; RV32ZBB-NEXT:    mv a0, a2
 ; RV32ZBB-NEXT:    mv a1, a3
-; RV32ZBB-NEXT:  .LBB3_4:
+; RV32ZBB-NEXT:  .LBB3_5:
 ; RV32ZBB-NEXT:    ret
 ;
 ; RV64ZBB-LABEL: smax_i64:
@@ -178,18 +180,19 @@ declare i64 @llvm.smin.i64(i64 %a, i64 %b) readnone
 define i64 @smin_i64(i64 %a, i64 %b) {
 ; RV32I-LABEL: smin_i64:
 ; RV32I:       # %bb.0:
-; RV32I-NEXT:    beq a1, a3, .LBB7_2
+; RV32I-NEXT:    beq a1, a3, .LBB7_3
 ; RV32I-NEXT:  # %bb.1:
 ; RV32I-NEXT:    slt a4, a1, a3
-; RV32I-NEXT:    beqz a4, .LBB7_3
-; RV32I-NEXT:    j .LBB7_4
-; RV32I-NEXT:  .LBB7_2:
-; RV32I-NEXT:    sltu a4, a0, a2
-; RV32I-NEXT:    bnez a4, .LBB7_4
+; RV32I-NEXT:    beqz a4, .LBB7_4
+; RV32I-NEXT:  # %bb.2:
+; RV32I-NEXT:    ret
 ; RV32I-NEXT:  .LBB7_3:
+; RV32I-NEXT:    sltu a4, a0, a2
+; RV32I-NEXT:    bnez a4, .LBB7_5
+; RV32I-NEXT:  .LBB7_4:
 ; RV32I-NEXT:    mv a0, a2
 ; RV32I-NEXT:    mv a1, a3
-; RV32I-NEXT:  .LBB7_4:
+; RV32I-NEXT:  .LBB7_5:
 ; RV32I-NEXT:    ret
 ;
 ; RV64I-LABEL: smin_i64:
@@ -202,18 +205,19 @@ define i64 @smin_i64(i64 %a, i64 %b) {
 ;
 ; RV32ZBB-LABEL: smin_i64:
 ; RV32ZBB:       # %bb.0:
-; RV32ZBB-NEXT:    beq a1, a3, .LBB7_2
+; RV32ZBB-NEXT:    beq a1, a3, .LBB7_3
 ; RV32ZBB-NEXT:  # %bb.1:
 ; RV32ZBB-NEXT:    slt a4, a1, a3
-; RV32ZBB-NEXT:    beqz a4, .LBB7_3
-; RV32ZBB-NEXT:    j .LBB7_4
-; RV32ZBB-NEXT:  .LBB7_2:
-; RV32ZBB-NEXT:    sltu a4, a0, a2
-; RV32ZBB-NEXT:    bnez a4, .LBB7_4
+; RV32ZBB-NEXT:    beqz a4, .LBB7_4
+; RV32ZBB-NEXT:  # %bb.2:
+; RV32ZBB-NEXT:    ret
 ; RV32ZBB-NEXT:  .LBB7_3:
+; RV32ZBB-NEXT:    sltu a4, a0, a2
+; RV32ZBB-NEXT:    bnez a4, .LBB7_5
+; RV32ZBB-NEXT:  .LBB7_4:
 ; RV32ZBB-NEXT:    mv a0, a2
 ; RV32ZBB-NEXT:    mv a1, a3
-; RV32ZBB-NEXT:  .LBB7_4:
+; RV32ZBB-NEXT:  .LBB7_5:
 ; RV32ZBB-NEXT:    ret
 ;
 ; RV64ZBB-LABEL: smin_i64:
@@ -286,18 +290,19 @@ declare i64 @llvm.umax.i64(i64 %a, i64 %b) readnone
 define i64 @umax_i64(i64 %a, i64 %b) {
 ; RV32I-LABEL: umax_i64:
 ; RV32I:       # %bb.0:
-; RV32I-NEXT:    beq a1, a3, .LBB11_2
+; RV32I-NEXT:    beq a1, a3, .LBB11_3
 ; RV32I-NEXT:  # %bb.1:
 ; RV32I-NEXT:    sltu a4, a3, a1
-; RV32I-NEXT:    beqz a4, .LBB11_3
-; RV32I-NEXT:    j .LBB11_4
-; RV32I-NEXT:  .LBB11_2:
-; RV32I-NEXT:    sltu a4, a2, a0
-; RV32I-NEXT:    bnez a4, .LBB11_4
+; RV32I-NEXT:    beqz a4, .LBB11_4
+; RV32I-NEXT:  # %bb.2:
+; RV32I-NEXT:    ret
 ; RV32I-NEXT:  .LBB11_3:
+; RV32I-NEXT:    sltu a4, a2, a0
+; RV32I-NEXT:    bnez a4, .LBB11_5
+; RV32I-NEXT:  .LBB11_4:
 ; RV32I-NEXT:    mv a0, a2
 ; RV32I-NEXT:    mv a1, a3
-; RV32I-NEXT:  .LBB11_4:
+; RV32I-NEXT:  .LBB11_5:
 ; RV32I-NEXT:    ret
 ;
 ; RV64I-LABEL: umax_i64:
@@ -310,18 +315,19 @@ define i64 @umax_i64(i64 %a, i64 %b) {
 ;
 ; RV32ZBB-LABEL: umax_i64:
 ; RV32ZBB:       # %bb.0:
-; RV32ZBB-NEXT:    beq a1, a3, .LBB11_2
+; RV32ZBB-NEXT:    beq a1, a3, .LBB11_3
 ; RV32ZBB-NEXT:  # %bb.1:
 ; RV32ZBB-NEXT:    sltu a4, a3, a1
-; RV32ZBB-NEXT:    beqz a4, .LBB11_3
-; RV32ZBB-NEXT:    j .LBB11_4
-; RV32ZBB-NEXT:  .LBB11_2:
-; RV32ZBB-NEXT:    sltu a4, a2, a0
-; RV32ZBB-NEXT:    bnez a4, .LBB11_4
+; RV32ZBB-NEXT:    beqz a4, .LBB11_4
+; RV32ZBB-NEXT:  # %bb.2:
+; RV32ZBB-NEXT:    ret
 ; RV32ZBB-NEXT:  .LBB11_3:
+; RV32ZBB-NEXT:    sltu a4, a2, a0
+; RV32ZBB-NEXT:    bnez a4, .LBB11_5
+; RV32ZBB-NEXT:  .LBB11_4:
 ; RV32ZBB-NEXT:    mv a0, a2
 ; RV32ZBB-NEXT:    mv a1, a3
-; RV32ZBB-NEXT:  .LBB11_4:
+; RV32ZBB-NEXT:  .LBB11_5:
 ; RV32ZBB-NEXT:    ret
 ;
 ; RV64ZBB-LABEL: umax_i64:
@@ -394,18 +400,19 @@ declare i64 @llvm.umin.i64(i64 %a, i64 %b) readnone
 define i64 @umin_i64(i64 %a, i64 %b) {
 ; RV32I-LABEL: umin_i64:
 ; RV32I:       # %bb.0:
-; RV32I-NEXT:    beq a1, a3, .LBB15_2
+; RV32I-NEXT:    beq a1, a3, .LBB15_3
 ; RV32I-NEXT:  # %bb.1:
 ; RV32I-NEXT:    sltu a4, a1, a3
-; RV32I-NEXT:    beqz a4, .LBB15_3
-; RV32I-NEXT:    j .LBB15_4
-; RV32I-NEXT:  .LBB15_2:
-; RV32I-NEXT:    sltu a4, a0, a2
-; RV32I-NEXT:    bnez a4, .LBB15_4
+; RV32I-NEXT:    beqz a4, .LBB15_4
+; RV32I-NEXT:  # %bb.2:
+; RV32I-NEXT:    ret
 ; RV32I-NEXT:  .LBB15_3:
+; RV32I-NEXT:    sltu a4, a0, a2
+; RV32I-NEXT:    bnez a4, .LBB15_5
+; RV32I-NEXT:  .LBB15_4:
 ; RV32I-NEXT:    mv a0, a2
 ; RV32I-NEXT:    mv a1, a3
-; RV32I-NEXT:  .LBB15_4:
+; RV32I-NEXT:  .LBB15_5:
 ; RV32I-NEXT:    ret
 ;
 ; RV64I-LABEL: umin_i64:
@@ -418,18 +425,19 @@ define i64 @umin_i64(i64 %a, i64 %b) {
 ;
 ; RV32ZBB-LABEL: umin_i64:
 ; RV32ZBB:       # %bb.0:
-; RV32ZBB-NEXT:    beq a1, a3, .LBB15_2
+; RV32ZBB-NEXT:    beq a1, a3, .LBB15_3
 ; RV32ZBB-NEXT:  # %bb.1:
 ; RV32ZBB-NEXT:    sltu a4, a1, a3
-; RV32ZBB-NEXT:    beqz a4, .LBB15_3
-; RV32ZBB-NEXT:    j .LBB15_4
-; RV32ZBB-NEXT:  .LBB15_2:
-; RV32ZBB-NEXT:    sltu a4, a0, a2
-; RV32ZBB-NEXT:    bnez a4, .LBB15_4
+; RV32ZBB-NEXT:    beqz a4, .LBB15_4
+; RV32ZBB-NEXT:  # %bb.2:
+; RV32ZBB-NEXT:    ret
 ; RV32ZBB-NEXT:  .LBB15_3:
+; RV32ZBB-NEXT:    sltu a4, a0, a2
+; RV32ZBB-NEXT:    bnez a4, .LBB15_5
+; RV32ZBB-NEXT:  .LBB15_4:
 ; RV32ZBB-NEXT:    mv a0, a2
 ; RV32ZBB-NEXT:    mv a1, a3
-; RV32ZBB-NEXT:  .LBB15_4:
+; RV32ZBB-NEXT:  .LBB15_5:
 ; RV32ZBB-NEXT:    ret
 ;
 ; RV64ZBB-LABEL: umin_i64:

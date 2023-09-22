@@ -33,7 +33,8 @@ define void @repeated_tail_dup(i1 %a1, i1 %a2, ptr %a4, ptr %a5, ptr %a6, i32 %a
 ; CHECK-NEXT:    movb $1, (%r8)
 ; CHECK-NEXT:    testl %r9d, %r9d
 ; CHECK-NEXT:    je .LBB0_1
-; CHECK-NEXT:    jmp .LBB0_8
+; CHECK-NEXT:  # %bb.9:
+; CHECK-NEXT:    retq
 ; CHECK-NEXT:    .p2align 4, 0x90
 ; CHECK-NEXT:  .LBB0_5: # %if.end70
 ; CHECK-NEXT:    # in Loop: Header=BB0_1 Depth=1

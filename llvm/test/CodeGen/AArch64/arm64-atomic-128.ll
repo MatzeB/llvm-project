@@ -714,8 +714,8 @@ define i128 @atomic_load_seq_cst(ptr %p) {
 ;
 ; LSE-LABEL: atomic_load_seq_cst:
 ; LSE:       // %bb.0:
-; LSE-NEXT:    mov x2, #0
-; LSE-NEXT:    mov x3, #0
+; LSE-NEXT:    mov x2, #0 // =0x0
+; LSE-NEXT:    mov x3, #0 // =0x0
 ; LSE-NEXT:    caspal x2, x3, x2, x3, [x0]
 ; LSE-NEXT:    mov x0, x2
 ; LSE-NEXT:    mov x1, x3
@@ -747,8 +747,8 @@ define i128 @atomic_load_relaxed(i64, i64, ptr %p) {
 ;
 ; LSE-LABEL: atomic_load_relaxed:
 ; LSE:       // %bb.0:
-; LSE-NEXT:    mov x0, #0
-; LSE-NEXT:    mov x1, #0
+; LSE-NEXT:    mov x0, #0 // =0x0
+; LSE-NEXT:    mov x1, #0 // =0x0
 ; LSE-NEXT:    casp x0, x1, x0, x1, [x2]
 ; LSE-NEXT:    ret
     %r = load atomic i128, ptr %p monotonic, align 16
@@ -893,15 +893,16 @@ define void @cmpxchg_dead(ptr %ptr, i128 %desired, i128 %new) {
 ; NOOUTLINE-NEXT:    cset w10, ne
 ; NOOUTLINE-NEXT:    cmp x9, x3
 ; NOOUTLINE-NEXT:    cinc w10, w10, ne
-; NOOUTLINE-NEXT:    cbz w10, .LBB17_3
+; NOOUTLINE-NEXT:    cbz w10, .LBB17_4
 ; NOOUTLINE-NEXT:  // %bb.2: // in Loop: Header=BB17_1 Depth=1
 ; NOOUTLINE-NEXT:    stxp w10, x8, x9, [x0]
 ; NOOUTLINE-NEXT:    cbnz w10, .LBB17_1
-; NOOUTLINE-NEXT:    b .LBB17_4
-; NOOUTLINE-NEXT:  .LBB17_3: // in Loop: Header=BB17_1 Depth=1
+; NOOUTLINE-NEXT:  // %bb.3:
+; NOOUTLINE-NEXT:    ret
+; NOOUTLINE-NEXT:  .LBB17_4: // in Loop: Header=BB17_1 Depth=1
 ; NOOUTLINE-NEXT:    stxp w10, x4, x5, [x0]
 ; NOOUTLINE-NEXT:    cbnz w10, .LBB17_1
-; NOOUTLINE-NEXT:  .LBB17_4:
+; NOOUTLINE-NEXT:  // %bb.5:
 ; NOOUTLINE-NEXT:    ret
 ;
 ; OUTLINE-LABEL: cmpxchg_dead:

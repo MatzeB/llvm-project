@@ -3022,19 +3022,20 @@ define i64 @usubo.select.i64(i64 %v1, i64 %v2) {
 ; RV32-NEXT:    sltu a4, a0, a2
 ; RV32-NEXT:    sub a5, a1, a3
 ; RV32-NEXT:    sub a4, a5, a4
-; RV32-NEXT:    beq a4, a1, .LBB42_2
+; RV32-NEXT:    beq a4, a1, .LBB42_3
 ; RV32-NEXT:  # %bb.1: # %entry
 ; RV32-NEXT:    sltu a4, a1, a4
-; RV32-NEXT:    beqz a4, .LBB42_3
-; RV32-NEXT:    j .LBB42_4
-; RV32-NEXT:  .LBB42_2:
+; RV32-NEXT:    beqz a4, .LBB42_4
+; RV32-NEXT:  # %bb.2:
+; RV32-NEXT:    ret
+; RV32-NEXT:  .LBB42_3:
 ; RV32-NEXT:    sub a4, a0, a2
 ; RV32-NEXT:    sltu a4, a0, a4
-; RV32-NEXT:    bnez a4, .LBB42_4
-; RV32-NEXT:  .LBB42_3: # %entry
+; RV32-NEXT:    bnez a4, .LBB42_5
+; RV32-NEXT:  .LBB42_4: # %entry
 ; RV32-NEXT:    mv a0, a2
 ; RV32-NEXT:    mv a1, a3
-; RV32-NEXT:  .LBB42_4: # %entry
+; RV32-NEXT:  .LBB42_5: # %entry
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: usubo.select.i64:
@@ -3051,19 +3052,20 @@ define i64 @usubo.select.i64(i64 %v1, i64 %v2) {
 ; RV32ZBA-NEXT:    sltu a4, a0, a2
 ; RV32ZBA-NEXT:    sub a5, a1, a3
 ; RV32ZBA-NEXT:    sub a4, a5, a4
-; RV32ZBA-NEXT:    beq a4, a1, .LBB42_2
+; RV32ZBA-NEXT:    beq a4, a1, .LBB42_3
 ; RV32ZBA-NEXT:  # %bb.1: # %entry
 ; RV32ZBA-NEXT:    sltu a4, a1, a4
-; RV32ZBA-NEXT:    beqz a4, .LBB42_3
-; RV32ZBA-NEXT:    j .LBB42_4
-; RV32ZBA-NEXT:  .LBB42_2:
+; RV32ZBA-NEXT:    beqz a4, .LBB42_4
+; RV32ZBA-NEXT:  # %bb.2:
+; RV32ZBA-NEXT:    ret
+; RV32ZBA-NEXT:  .LBB42_3:
 ; RV32ZBA-NEXT:    sub a4, a0, a2
 ; RV32ZBA-NEXT:    sltu a4, a0, a4
-; RV32ZBA-NEXT:    bnez a4, .LBB42_4
-; RV32ZBA-NEXT:  .LBB42_3: # %entry
+; RV32ZBA-NEXT:    bnez a4, .LBB42_5
+; RV32ZBA-NEXT:  .LBB42_4: # %entry
 ; RV32ZBA-NEXT:    mv a0, a2
 ; RV32ZBA-NEXT:    mv a1, a3
-; RV32ZBA-NEXT:  .LBB42_4: # %entry
+; RV32ZBA-NEXT:  .LBB42_5: # %entry
 ; RV32ZBA-NEXT:    ret
 ;
 ; RV64ZBA-LABEL: usubo.select.i64:

@@ -7,20 +7,21 @@
 define void @foo(i1 %cond, ptr %ptr) {
 ; CHECK-LABEL: foo:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    tbz w0, #0, .LBB0_2
+; CHECK-NEXT:    tbz w0, #0, .LBB0_3
 ; CHECK-NEXT:  // %bb.1: // %if.then
 ; CHECK-NEXT:    ldp x9, x8, [x1, #8]
 ; CHECK-NEXT:    str xzr, [x1, #16]
 ; CHECK-NEXT:    cmp x8, x9
-; CHECK-NEXT:    b.lt .LBB0_3
-; CHECK-NEXT:    b .LBB0_4
-; CHECK-NEXT:  .LBB0_2: // %if.else
+; CHECK-NEXT:    b.lt .LBB0_4
+; CHECK-NEXT:  // %bb.2:
+; CHECK-NEXT:    ret
+; CHECK-NEXT:  .LBB0_3: // %if.else
 ; CHECK-NEXT:    ldp x8, x9, [x1]
 ; CHECK-NEXT:    cmp x8, x9
-; CHECK-NEXT:    b.ge .LBB0_4
-; CHECK-NEXT:  .LBB0_3: // %exit1
+; CHECK-NEXT:    b.ge .LBB0_5
+; CHECK-NEXT:  .LBB0_4: // %exit1
 ; CHECK-NEXT:    str xzr, [x1, #8]
-; CHECK-NEXT:  .LBB0_4: // %common.ret
+; CHECK-NEXT:  .LBB0_5: // %common.ret
 ; CHECK-NEXT:    ret
 entry:
   br i1 %cond, label %if.then, label %if.else

@@ -168,7 +168,8 @@ define void @notailpred(ptr nocapture readonly %pSrcA, ptr nocapture readonly %p
 ; CHECK-NEXT:  @ %bb.9: @ %middle.block
 ; CHECK-NEXT:    cmp r6, r3
 ; CHECK-NEXT:    bne .LBB1_4
-; CHECK-NEXT:    b .LBB1_6
+; CHECK-NEXT:  @ %bb.10:
+; CHECK-NEXT:    pop {r4, r5, r6, r7, pc}
 entry:
   %cmp.not6 = icmp eq i32 %blockSize, 0
   br i1 %cmp.not6, label %while.end, label %while.body.preheader

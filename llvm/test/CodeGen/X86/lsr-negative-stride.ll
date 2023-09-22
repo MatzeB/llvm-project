@@ -39,7 +39,8 @@ define i32 @t(i32 %a, i32 %b) nounwind {
 ; CHECK-NEXT:    cmpl %eax, %ecx
 ; CHECK-NEXT:    movl %eax, %edx
 ; CHECK-NEXT:    jne .LBB0_3
-; CHECK-NEXT:    jmp .LBB0_6
+; CHECK-NEXT:  # %bb.7:
+; CHECK-NEXT:    retl
 ; CHECK-NEXT:    .p2align 4, 0x90
 ; CHECK-NEXT:  .LBB0_5: # %cond_false
 ; CHECK-NEXT:    # in Loop: Header=BB0_2 Depth=1
@@ -47,7 +48,7 @@ define i32 @t(i32 %a, i32 %b) nounwind {
 ; CHECK-NEXT:    cmpl %edx, %ecx
 ; CHECK-NEXT:    movl %edx, %eax
 ; CHECK-NEXT:    jne .LBB0_2
-; CHECK-NEXT:  .LBB0_6: # %bb17
+; CHECK-NEXT:  # %bb.6: # %bb17
 ; CHECK-NEXT:    retl
 entry:
 	%tmp1434 = icmp eq i32 %a, %b		; <i1> [#uses=1]

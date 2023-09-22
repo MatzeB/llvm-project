@@ -1143,18 +1143,19 @@ define i32 @min_i32(i32 %a, i32 %b) nounwind {
 define i64 @min_i64(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: min_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    beq a1, a3, .LBB29_2
+; CHECK-NEXT:    beq a1, a3, .LBB29_3
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    slt a4, a1, a3
-; CHECK-NEXT:    beqz a4, .LBB29_3
-; CHECK-NEXT:    j .LBB29_4
-; CHECK-NEXT:  .LBB29_2:
-; CHECK-NEXT:    sltu a4, a0, a2
-; CHECK-NEXT:    bnez a4, .LBB29_4
+; CHECK-NEXT:    beqz a4, .LBB29_4
+; CHECK-NEXT:  # %bb.2:
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB29_3:
+; CHECK-NEXT:    sltu a4, a0, a2
+; CHECK-NEXT:    bnez a4, .LBB29_5
+; CHECK-NEXT:  .LBB29_4:
 ; CHECK-NEXT:    mv a0, a2
 ; CHECK-NEXT:    mv a1, a3
-; CHECK-NEXT:  .LBB29_4:
+; CHECK-NEXT:  .LBB29_5:
 ; CHECK-NEXT:    ret
   %cmp = icmp slt i64 %a, %b
   %cond = select i1 %cmp, i64 %a, i64 %b
@@ -1187,18 +1188,19 @@ define i32 @max_i32(i32 %a, i32 %b) nounwind {
 define i64 @max_i64(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: max_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    beq a1, a3, .LBB31_2
+; CHECK-NEXT:    beq a1, a3, .LBB31_3
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    slt a4, a3, a1
-; CHECK-NEXT:    beqz a4, .LBB31_3
-; CHECK-NEXT:    j .LBB31_4
-; CHECK-NEXT:  .LBB31_2:
-; CHECK-NEXT:    sltu a4, a2, a0
-; CHECK-NEXT:    bnez a4, .LBB31_4
+; CHECK-NEXT:    beqz a4, .LBB31_4
+; CHECK-NEXT:  # %bb.2:
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB31_3:
+; CHECK-NEXT:    sltu a4, a2, a0
+; CHECK-NEXT:    bnez a4, .LBB31_5
+; CHECK-NEXT:  .LBB31_4:
 ; CHECK-NEXT:    mv a0, a2
 ; CHECK-NEXT:    mv a1, a3
-; CHECK-NEXT:  .LBB31_4:
+; CHECK-NEXT:  .LBB31_5:
 ; CHECK-NEXT:    ret
   %cmp = icmp sgt i64 %a, %b
   %cond = select i1 %cmp, i64 %a, i64 %b
@@ -1231,18 +1233,19 @@ define i32 @minu_i32(i32 %a, i32 %b) nounwind {
 define i64 @minu_i64(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: minu_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    beq a1, a3, .LBB33_2
+; CHECK-NEXT:    beq a1, a3, .LBB33_3
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    sltu a4, a1, a3
-; CHECK-NEXT:    beqz a4, .LBB33_3
-; CHECK-NEXT:    j .LBB33_4
-; CHECK-NEXT:  .LBB33_2:
-; CHECK-NEXT:    sltu a4, a0, a2
-; CHECK-NEXT:    bnez a4, .LBB33_4
+; CHECK-NEXT:    beqz a4, .LBB33_4
+; CHECK-NEXT:  # %bb.2:
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB33_3:
+; CHECK-NEXT:    sltu a4, a0, a2
+; CHECK-NEXT:    bnez a4, .LBB33_5
+; CHECK-NEXT:  .LBB33_4:
 ; CHECK-NEXT:    mv a0, a2
 ; CHECK-NEXT:    mv a1, a3
-; CHECK-NEXT:  .LBB33_4:
+; CHECK-NEXT:  .LBB33_5:
 ; CHECK-NEXT:    ret
   %cmp = icmp ult i64 %a, %b
   %cond = select i1 %cmp, i64 %a, i64 %b
@@ -1275,18 +1278,19 @@ define i32 @maxu_i32(i32 %a, i32 %b) nounwind {
 define i64 @maxu_i64(i64 %a, i64 %b) nounwind {
 ; CHECK-LABEL: maxu_i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    beq a1, a3, .LBB35_2
+; CHECK-NEXT:    beq a1, a3, .LBB35_3
 ; CHECK-NEXT:  # %bb.1:
 ; CHECK-NEXT:    sltu a4, a3, a1
-; CHECK-NEXT:    beqz a4, .LBB35_3
-; CHECK-NEXT:    j .LBB35_4
-; CHECK-NEXT:  .LBB35_2:
-; CHECK-NEXT:    sltu a4, a2, a0
-; CHECK-NEXT:    bnez a4, .LBB35_4
+; CHECK-NEXT:    beqz a4, .LBB35_4
+; CHECK-NEXT:  # %bb.2:
+; CHECK-NEXT:    ret
 ; CHECK-NEXT:  .LBB35_3:
+; CHECK-NEXT:    sltu a4, a2, a0
+; CHECK-NEXT:    bnez a4, .LBB35_5
+; CHECK-NEXT:  .LBB35_4:
 ; CHECK-NEXT:    mv a0, a2
 ; CHECK-NEXT:    mv a1, a3
-; CHECK-NEXT:  .LBB35_4:
+; CHECK-NEXT:  .LBB35_5:
 ; CHECK-NEXT:    ret
   %cmp = icmp ugt i64 %a, %b
   %cond = select i1 %cmp, i64 %a, i64 %b
