@@ -7108,6 +7108,29 @@ TEST_F(FormatTest, ExpressionIndentationBreakingBeforeOperators) {
                "(someOtherLongishConditionPart1 || "
                "someOtherEvenLongerNestedConditionPart2);",
                Style);
+
+  Style = getLLVMStyleWithColumns(20);
+  Style.AlignAfterOpenBracket = FormatStyle::BAS_AlwaysBreak;
+  Style.BinPackParameters = false;
+  Style.BreakBeforeBinaryOperators = FormatStyle::BOS_NonAssignment;
+  Style.ContinuationIndentWidth = 2;
+  verifyFormat("struct Foo {\n"
+               "  Foo(\n"
+               "    int arg1,\n"
+               "    int arg2)\n"
+               "      : Base(\n"
+               "          arg1,\n"
+               "          arg2) {}\n"
+               "};",
+               Style);
+  verifyFormat("return abc\n"
+               "         ? foo(\n"
+               "             a,\n"
+               "             b,\n"
+               "             bar(\n"
+               "               abc))\n"
+               "         : g(abc);",
+               Style);
 }
 
 TEST_F(FormatTest, ExpressionIndentationStrictAlign) {
@@ -22514,10 +22537,12 @@ TEST_F(FormatTest, FormatsLambdas) {
                "  }\n"
                "}",
                Style);
-  verifyFormat("std::sort(v.begin(), v.end(),\n"
-               "          [](const auto &foo, const auto &bar) {\n"
-               "  return foo.baz < bar.baz;\n"
-               "});",
+  verifyFormat("void test() {\n"
+               "  std::sort(v.begin(), v.end(),\n"
+               "            [](const auto &foo, const auto &bar) {\n"
+               "    return foo.baz < bar.baz;\n"
+               "  });\n"
+               "};",
                Style);
   verifyFormat("void test() {\n"
                "  (\n"
@@ -22543,6 +22568,12 @@ TEST_F(FormatTest, FormatsLambdas) {
                "        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx);            \\\n"
                "  }",
                Style);
+  verifyFormat("#define SORT(v)                                            \\\n"
+               "  std::sort(v.begin(), v.end(),                            \\\n"
+               "            [](const auto &foo, const auto &bar) {         \\\n"
+               "    return foo.baz < bar.baz;                              \\\n"
+               "  });",
+               Style);
   verifyFormat("void foo() {\n"
                "  aFunction(1, b(c(foo, bar, baz, [](d) {\n"
                "    auto f = e(d);\n"
@@ -22566,9 +22597,40 @@ TEST_F(FormatTest, FormatsLambdas) {
   verifyFormat("Namespace::Foo::Foo(LongClassName bar,\n"
                "                    AnotherLongClassName baz)\n"
                "    : baz{baz}, func{[&] {\n"
-               "  auto qux = bar;\n"
-               "  return aFunkyFunctionCall(qux);\n"
-               "}} {}",
+               "        auto qux = bar;\n"
+               "        return aFunkyFunctionCall(qux);\n"
+               "      }} {}",
+               Style);
+  verifyFormat("void foo() {\n"
+               "  class Foo {\n"
+               "  public:\n"
+               "    Foo()\n"
+               "        : qux{[](int quux) {\n"
+               "            auto tmp = quux;\n"
+               "            return tmp;\n"
+               "          }} {}\n"
+               "\n"
+               "  private:\n"
+               "    std::function<void(int quux)> qux;\n"
+               "  };\n"
+               "}",
+               Style);
+  Style.BreakConstructorInitializers = FormatStyle::BCIS_AfterColon;
+  verifyFormat("Namespace::Foo::Foo(LongClassName bar,\n"
+               "                    AnotherLongClassName baz) :\n"
+               "    baz{baz}, func{[&] {\n"
+               "      auto qux = bar;\n"
+               "      return aFunkyFunctionCall(qux);\n"
+               "    }} {}",
+               Style);
+  Style.PackConstructorInitializers = FormatStyle::PCIS_Never;
+  verifyFormat("Namespace::Foo::Foo(LongClassName bar,\n"
+               "                    AnotherLongClassName baz) :\n"
+               "    baz{baz},\n"
+               "    func{[&] {\n"
+               "      auto qux = bar;\n"
+               "      return aFunkyFunctionCall(qux);\n"
+               "    }} {}",
                Style);
   Style.AlignAfterOpenBracket = FormatStyle::BAS_AlwaysBreak;
   // FIXME: The following test should pass, but fails at the time of writing.

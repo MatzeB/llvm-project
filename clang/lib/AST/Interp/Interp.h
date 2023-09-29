@@ -112,6 +112,11 @@ bool CheckCtorCall(InterpState &S, CodePtr OpPC, const Pointer &This);
 bool CheckPotentialReinterpretCast(InterpState &S, CodePtr OpPC,
                                    const Pointer &Ptr);
 
+/// Sets the given integral value to the pointer, which is of
+/// a std::{weak,partial,strong}_ordering type.
+bool SetThreeWayComparisonField(InterpState &S, CodePtr OpPC,
+                                const Pointer &Ptr, const APSInt &IntValue);
+
 /// Checks if the shift operation is legal.
 template <typename LT, typename RT>
 bool CheckShift(InterpState &S, CodePtr OpPC, const LT &LHS, const RT &RHS,
@@ -174,6 +179,9 @@ bool CheckDivRem(InterpState &S, CodePtr OpPC, const T &LHS, const T &RHS) {
 /// in the current context.
 bool CheckFloatResult(InterpState &S, CodePtr OpPC, const Floating &Result,
                       APFloat::opStatus Status);
+
+/// Checks why the given DeclRefExpr is invalid.
+bool CheckDeclRef(InterpState &S, CodePtr OpPC, const DeclRefExpr *DR);
 
 /// Interpreter entry point.
 bool Interpret(InterpState &S, APValue &Result);
@@ -776,6 +784,30 @@ bool EQ(InterpState &S, CodePtr OpPC) {
   return CmpHelperEQ<T>(S, OpPC, [](ComparisonCategoryResult R) {
     return R == ComparisonCategoryResult::Equal;
   });
+}
+
+template <PrimType Name, class T = typename PrimConv<Name>::T>
+bool CMP3(InterpState &S, CodePtr OpPC, const ComparisonCategoryInfo *CmpInfo) {
+  const T &RHS = S.Stk.pop<T>();
+  const T &LHS = S.Stk.pop<T>();
+  const Pointer &P = S.Stk.peek<Pointer>();
+
+  ComparisonCategoryResult CmpResult = LHS.compare(RHS);
+  if (CmpResult == ComparisonCategoryResult::Unordered) {
+    // This should only happen with pointers.
+    const SourceInfo &Loc = S.Current->getSource(OpPC);
+    S.FFDiag(Loc, diag::note_constexpr_pointer_comparison_unspecified)
+        << LHS.toDiagnosticString(S.getCtx())
+        << RHS.toDiagnosticString(S.getCtx());
+    return false;
+  }
+
+  assert(CmpInfo);
+  const auto *CmpValueInfo = CmpInfo->getValueInfo(CmpResult);
+  assert(CmpValueInfo);
+  assert(CmpValueInfo->hasValidIntValue());
+  APSInt IntValue = CmpValueInfo->getIntValue();
+  return SetThreeWayComparisonField(S, OpPC, P, IntValue);
 }
 
 template <PrimType Name, class T = typename PrimConv<Name>::T>
@@ -1441,9 +1473,9 @@ bool SubOffset(InterpState &S, CodePtr OpPC) {
 }
 
 template <ArithOp Op>
-static inline bool IncDecPtrHelper(InterpState &S, CodePtr OpPC) {
+static inline bool IncDecPtrHelper(InterpState &S, CodePtr OpPC,
+                                   const Pointer &Ptr) {
   using OneT = Integral<8, false>;
-  const Pointer &Ptr = S.Stk.pop<Pointer>();
 
   // Get the current value on the stack.
   S.Stk.push<Pointer>(Ptr.deref<Pointer>());
@@ -1460,11 +1492,21 @@ static inline bool IncDecPtrHelper(InterpState &S, CodePtr OpPC) {
 }
 
 static inline bool IncPtr(InterpState &S, CodePtr OpPC) {
-  return IncDecPtrHelper<ArithOp::Add>(S, OpPC);
+  const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Increment))
+    return false;
+
+  return IncDecPtrHelper<ArithOp::Add>(S, OpPC, Ptr);
 }
 
 static inline bool DecPtr(InterpState &S, CodePtr OpPC) {
-  return IncDecPtrHelper<ArithOp::Sub>(S, OpPC);
+  const Pointer &Ptr = S.Stk.pop<Pointer>();
+
+  if (!CheckInitialized(S, OpPC, Ptr, AK_Decrement))
+    return false;
+
+  return IncDecPtrHelper<ArithOp::Sub>(S, OpPC, Ptr);
 }
 
 /// 1) Pops a Pointer from the stack.
@@ -1842,6 +1884,12 @@ inline bool InvalidCast(InterpState &S, CodePtr OpPC, CastKind Kind) {
   S.FFDiag(Loc, diag::note_constexpr_invalid_cast)
       << static_cast<unsigned>(Kind) << S.Current->getRange(OpPC);
   return false;
+}
+
+inline bool InvalidDeclRef(InterpState &S, CodePtr OpPC,
+                           const DeclRefExpr *DR) {
+  assert(DR);
+  return CheckDeclRef(S, OpPC, DR);
 }
 
 template <PrimType Name, class T = typename PrimConv<Name>::T>

@@ -663,10 +663,10 @@ template <> struct MappingTraits<const InterfaceFile *> {
         }
         for (auto &Symbol : Section.WeakDefSymbols)
           File->addSymbol(SymbolKind::GlobalSymbol, Symbol, Targets,
-                          SymbolFlags::WeakDefined);
+                          SymbolFlags::WeakDefined | Flags);
         for (auto &Symbol : Section.TLVSymbols)
           File->addSymbol(SymbolKind::GlobalSymbol, Symbol, Targets,
-                          SymbolFlags::ThreadLocalValue);
+                          SymbolFlags::ThreadLocalValue | Flags);
       }
 
       for (const auto &Section : Undefineds) {
@@ -1174,7 +1174,7 @@ Error TextAPIWriter::writeToStream(raw_ostream &OS, const InterfaceFile &File,
   std::vector<const InterfaceFile *> Files;
   Files.emplace_back(&File);
 
-  for (auto Document : File.documents())
+  for (const auto &Document : File.documents())
     Files.emplace_back(Document.get());
 
   // Stream out yaml.
