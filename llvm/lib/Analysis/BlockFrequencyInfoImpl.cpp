@@ -60,6 +60,11 @@ cl::opt<double> IterativeBFIPrecision(
     "iterative-bfi-precision", cl::init(1e-12), cl::Hidden,
     cl::desc("Iterative inference: delta convergence precision; smaller values "
              "typically lead to better results at the cost of worsen runtime"));
+
+cl::opt<unsigned> BFIRounding(
+    "bfi-rounding", cl::init(20), cl::Hidden,
+    cl::desc("Round BlockFrequency numbers to top N significant bits"));
+
 } // namespace llvm
 
 ScaledNumber<uint64_t> BlockMass::toScaled() const {
@@ -507,10 +512,15 @@ static void convertFloatingToInteger(BlockFrequencyInfoImplBase &BFI,
                     << ", factor = " << ScalingFactor << "\n");
   for (size_t Index = 0; Index < BFI.Freqs.size(); ++Index) {
     Scaled64 Scaled = BFI.Freqs[Index].Scaled * ScalingFactor;
-    BFI.Freqs[Index].Integer = std::max(UINT64_C(1), Scaled.toInt<uint64_t>());
+    uint64_t Integer = Scaled.toInt<uint64_t>();
+    Integer = roundToBits(Integer, BFIRounding);
+    if (Integer == 0)
+      Integer = 1;
+
+    BFI.Freqs[Index].Integer = Integer;
     LLVM_DEBUG(dbgs() << " - " << BFI.getBlockName(Index) << ": float = "
                       << BFI.Freqs[Index].Scaled << ", scaled = " << Scaled
-                      << ", int = " << BFI.Freqs[Index].Integer << "\n");
+                      << ", int = " << Integer << "\n");
   }
 }
 

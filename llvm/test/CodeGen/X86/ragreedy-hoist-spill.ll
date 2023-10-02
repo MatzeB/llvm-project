@@ -190,13 +190,13 @@ define ptr @SyFgets(ptr %line, i64 %length, i64 %fid) {
 ; CHECK-NEXT:    movl $0, {{[-0-9]+}}(%r{{[sb]}}p) ## 4-byte Folded Spill
 ; CHECK-NEXT:    movl $268, %ebp ## imm = 0x10C
 ; CHECK-NEXT:    jmp LBB0_20
-; CHECK-NEXT:  LBB0_39: ## %sw.bb566
-; CHECK-NEXT:    ## in Loop: Header=BB0_13 Depth=1
-; CHECK-NEXT:    movl $20, %ebp
-; CHECK-NEXT:    jmp LBB0_20
 ; CHECK-NEXT:  LBB0_19: ## %sw.bb243
 ; CHECK-NEXT:    ## in Loop: Header=BB0_13 Depth=1
 ; CHECK-NEXT:    movl $2, %ebp
+; CHECK-NEXT:    jmp LBB0_20
+; CHECK-NEXT:  LBB0_39: ## %sw.bb566
+; CHECK-NEXT:    ## in Loop: Header=BB0_13 Depth=1
+; CHECK-NEXT:    movl $20, %ebp
 ; CHECK-NEXT:    jmp LBB0_20
 ; CHECK-NEXT:  LBB0_32: ## %if.end517.loopexitsplit
 ; CHECK-NEXT:    ## in Loop: Header=BB0_13 Depth=1
@@ -240,13 +240,13 @@ define ptr @SyFgets(ptr %line, i64 %length, i64 %fid) {
 ; CHECK-NEXT:    ## =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    jmp LBB0_41
 ; CHECK-NEXT:    .p2align 4, 0x90
-; CHECK-NEXT:  LBB0_42: ## %while.cond962
-; CHECK-NEXT:    ## =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    jmp LBB0_42
-; CHECK-NEXT:    .p2align 4, 0x90
 ; CHECK-NEXT:  LBB0_24: ## %for.cond357
 ; CHECK-NEXT:    ## =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    jmp LBB0_24
+; CHECK-NEXT:    .p2align 4, 0x90
+; CHECK-NEXT:  LBB0_42: ## %while.cond962
+; CHECK-NEXT:    ## =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    jmp LBB0_42
 ; CHECK-NEXT:  LBB0_11:
 ; CHECK-NEXT:    movl $0, {{[-0-9]+}}(%r{{[sb]}}p) ## 4-byte Folded Spill
 ; CHECK-NEXT:  LBB0_21: ## %while.end1465

@@ -43,15 +43,9 @@ define void @widget(i32 %arg, i32 %arg1, ptr %arg2, ptr %arg3, ptr %arg4, i32 %a
 ; CHECK-NEXT:    ; implicit-def: $w8
 ; CHECK-NEXT:    str x8, [sp, #40] ; 8-byte Folded Spill
 ; CHECK-NEXT:    b LBB0_2
-; CHECK-NEXT:  LBB0_1: ; %bb10
+; CHECK-NEXT:  LBB0_1: ; %bb9
 ; CHECK-NEXT:    ; in Loop: Header=BB0_2 Depth=1
-; CHECK-NEXT:    mov w0, w20
-; CHECK-NEXT:    mov x1, x22
-; CHECK-NEXT:    str wzr, [x21]
-; CHECK-NEXT:    bl _putc
-; CHECK-NEXT:    mov w0, w25
-; CHECK-NEXT:    mov x1, xzr
-; CHECK-NEXT:    bl _putc
+; CHECK-NEXT:    str w28, [x23]
 ; CHECK-NEXT:  LBB0_2: ; %bb8
 ; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    cmp w24, #39
@@ -62,9 +56,15 @@ define void @widget(i32 %arg, i32 %arg1, ptr %arg2, ptr %arg3, ptr %arg4, i32 %a
 ; CHECK-NEXT:    ldrb w9, [x27, x26]
 ; CHECK-NEXT:    add x8, x8, x9, lsl #2
 ; CHECK-NEXT:    br x8
-; CHECK-NEXT:  LBB0_4: ; %bb9
+; CHECK-NEXT:  LBB0_4: ; %bb10
 ; CHECK-NEXT:    ; in Loop: Header=BB0_2 Depth=1
-; CHECK-NEXT:    str w28, [x23]
+; CHECK-NEXT:    mov w0, w20
+; CHECK-NEXT:    mov x1, x22
+; CHECK-NEXT:    str wzr, [x21]
+; CHECK-NEXT:    bl _putc
+; CHECK-NEXT:    mov w0, w25
+; CHECK-NEXT:    mov x1, xzr
+; CHECK-NEXT:    bl _putc
 ; CHECK-NEXT:    b LBB0_2
 ; CHECK-NEXT:  LBB0_5: ; %bb8
 ; CHECK-NEXT:    ; in Loop: Header=BB0_2 Depth=1
@@ -110,36 +110,36 @@ define void @widget(i32 %arg, i32 %arg1, ptr %arg2, ptr %arg3, ptr %arg4, i32 %a
 ; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
 ; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
 ; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_1-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
 ; CHECK-NEXT:    .byte (LBB0_4-LBB0_1)>>2
 ; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
 ; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
 ; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
 ; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_1-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_2-LBB0_1)>>2
-; CHECK-NEXT:    .byte (LBB0_1-LBB0_1)>>2
+; CHECK-NEXT:    .byte (LBB0_4-LBB0_1)>>2
 bb:
   br label %bb7
 
