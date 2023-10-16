@@ -219,22 +219,21 @@ public:
   bool fmulByZeroIsZero(Value *MulVal, FastMathFlags FMF,
                         const Instruction *CtxI) const;
 
-  Constant *getLosslessUnsignedTrunc(Constant *C, Type *TruncTy) {
+  Constant *getLosslessTrunc(Constant *C, Type *TruncTy, unsigned ExtOp) {
     Constant *TruncC = ConstantExpr::getTrunc(C, TruncTy);
     Constant *ExtTruncC =
-        ConstantFoldCastOperand(Instruction::ZExt, TruncC, C->getType(), DL);
+        ConstantFoldCastOperand(ExtOp, TruncC, C->getType(), DL);
     if (ExtTruncC && ExtTruncC == C)
       return TruncC;
     return nullptr;
   }
 
+  Constant *getLosslessUnsignedTrunc(Constant *C, Type *TruncTy) {
+    return getLosslessTrunc(C, TruncTy, Instruction::ZExt);
+  }
+
   Constant *getLosslessSignedTrunc(Constant *C, Type *TruncTy) {
-    Constant *TruncC = ConstantExpr::getTrunc(C, TruncTy);
-    Constant *ExtTruncC =
-        ConstantFoldCastOperand(Instruction::SExt, TruncC, C->getType(), DL);
-    if (ExtTruncC && ExtTruncC == C)
-      return TruncC;
-    return nullptr;
+    return getLosslessTrunc(C, TruncTy, Instruction::SExt);
   }
 
 private:
@@ -735,16 +734,13 @@ class Negator final {
   using BuilderTy = IRBuilder<TargetFolder, IRBuilderCallbackInserter>;
   BuilderTy Builder;
 
-  const DataLayout &DL;
-  AssumptionCache &AC;
-  const DominatorTree &DT;
+  const SimplifyQuery &SQ;
 
   const bool IsTrulyNegation;
 
   SmallDenseMap<Value *, Value *> NegationsCache;
 
-  Negator(LLVMContext &C, const DataLayout &DL, AssumptionCache &AC,
-          const DominatorTree &DT, bool IsTrulyNegation);
+  Negator(LLVMContext &C, const SimplifyQuery &SQ, bool IsTrulyNegation);
 
 #if LLVM_ENABLE_STATS
   unsigned NumValuesVisitedInThisNegator = 0;
