@@ -12,7 +12,6 @@
 #include "ScriptedInterface.h"
 #include "lldb/Core/StructuredDataImpl.h"
 #include "lldb/Target/MemoryRegionInfo.h"
-#include "lldb/Utility/UnimplementedError.h"
 
 #include "lldb/lldb-private.h"
 
@@ -25,9 +24,7 @@ public:
   virtual llvm::Expected<StructuredData::GenericSP>
   CreatePluginObject(llvm::StringRef class_name, ExecutionContext &exe_ctx,
                      StructuredData::DictionarySP args_sp,
-                     StructuredData::Generic *script_obj = nullptr) {
-    return {llvm::make_error<UnimplementedError>()};
-  }
+                     StructuredData::Generic *script_obj = nullptr) = 0;
 
   virtual StructuredData::DictionarySP GetCapabilities() { return {}; }
 
