@@ -59,6 +59,7 @@
 #include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/ProfDataUtils.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/TypeFinder.h"
 #include "llvm/IR/TypedPointerType.h"
@@ -67,6 +68,7 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/AtomicOrdering.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -88,6 +90,10 @@
 #include <vector>
 
 using namespace llvm;
+
+static cl::opt<bool> PrintProfileMetadata(
+    "print-profile-metadata", cl::Hidden, cl::init(true),
+    cl::desc("When printing IR add comment expanding !prof metadata at uses"));
 
 // Make virtual table appear in this compilation unit.
 AssemblyAnnotationWriter::~AssemblyAnnotationWriter() = default;
@@ -2662,6 +2668,8 @@ private:
   // printGCRelocateComment - print comment after call to the gc.relocate
   // intrinsic indicating base and derived pointer names.
   void printGCRelocateComment(const GCRelocateInst &Relocate);
+
+  void printBranchWeightsComment(const MDNode &BranchWeights);
 };
 
 } // end anonymous namespace
@@ -3805,6 +3813,12 @@ void AssemblyWriter::printFunction(const Function *F) {
     if (!AttrStr.empty())
       Out << "; Function Attrs: " << AttrStr << '\n';
   }
+  if (PrintProfileMetadata) {
+    if (std::optional<Function::ProfileCount> Count = F->getEntryCount(true)) {
+      Out << "; " << (Count->isSynthetic() ? "Synthetic " : "")
+          << "Entry Count: " << Count->getCount() << '\n';
+    }
+  }
 
   Machine.incorporateFunction(F);
 
@@ -4015,6 +4029,31 @@ void AssemblyWriter::printGCRelocateComment(const GCRelocateInst &Relocate) {
   Out << ", ";
   writeOperand(Relocate.getDerivedPtr(), false);
   Out << ")";
+}
+
+void AssemblyWriter::printBranchWeightsComment(const MDNode &BranchWeights) {
+  Out << "  ; branch_weights: ";
+  SmallVector<uint32_t, 2> Weights;
+  extractFromBranchWeightMD(&BranchWeights, Weights);
+  uint64_t Sum = 0;
+  bool First = true;
+  for (uint32_t Weight : Weights) {
+    if (!First)
+      Out << ", ";
+    First = false;
+    Out << Weight;
+    Sum += Weight;
+  }
+  if (Sum > 0) {
+    Out << " ; ";
+    First = true;
+    for (uint32_t Weight : Weights) {
+      if (!First)
+        Out << ", ";
+      First = false;
+      Out << ((Weight * 100) / Sum) << '%';
+    }
+  }
 }
 
 /// printInfoComment - Print a little comment after the instruction indicating
@@ -4486,6 +4525,12 @@ void AssemblyWriter::printInstruction(const Instruction &I) {
   SmallVector<std::pair<unsigned, MDNode *>, 4> InstMD;
   I.getAllMetadata(InstMD);
   printMetadataAttachments(InstMD, ", ");
+
+  if (PrintProfileMetadata) {
+    if (MDNode *BranchWeights = getBranchWeightMDNode(I)) {
+      printBranchWeightsComment(*BranchWeights);
+    }
+  }
 
   // Print a nice comment.
   printInfoComment(I);

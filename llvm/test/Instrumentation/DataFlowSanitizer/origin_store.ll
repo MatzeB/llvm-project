@@ -54,7 +54,7 @@ define void @store_nonzero_to_escaped_alloca(i16 %a) {
   ; CHECK-NEXT:   %[[#ORIGIN_ADDR:]] = and i64 %[[#ORIGIN_OFFSET]], -4
   ; CHECK-NEXT:   %[[#ORIGIN_PTR:]] = inttoptr i64 %[[#ORIGIN_ADDR]] to ptr
   ; CHECK:        %_dfscmp = icmp ne i8 %[[#AS]], 0
-  ; CHECK-NEXT:   br i1 %_dfscmp, label %[[L1:.*]], label %[[L2:.*]],
+  ; CHECK-NEXT:   br i1 %_dfscmp, label %[[L1:[^ ]+]], label %[[L2:[^ ]+]],
   ; CHECK:       [[L1]]:
   ; CHECK-NEXT:   %[[#NO:]] = call i32 @__dfsan_chain_origin(i32 %[[#AO]])
   ; CHECK-NEXT:   store i32 %[[#NO]], ptr %[[#ORIGIN_PTR]], align 4
@@ -82,7 +82,7 @@ define void @store64_align8(ptr %p, i64 %a) {
   ; COMBINE_STORE_PTR-NEXT: %[[#AO:]] = select i1 %[[#NE]], i32 %[[#PO]], i32 %[[#AO]]
 
   ; CHECK:       %_dfscmp = icmp ne i8 %[[#AS]], 0
-  ; CHECK-NEXT:  br i1 %_dfscmp, label %[[L1:.*]], label %[[L2:.*]],
+  ; CHECK-NEXT:  br i1 %_dfscmp, label %[[L1:[^ ]+]], label %[[L2:[^ ]+]],
   ; CHECK:      [[L1]]:
   ; CHECK-NEXT:  %[[#NO:]] = call i32 @__dfsan_chain_origin(i32 %[[#AO]])
   ; CHECK-NEXT:  %[[#NO_ZEXT:]] = zext i32 %[[#NO]] to i64
@@ -111,7 +111,7 @@ define void @store64_align2(ptr %p, i64 %a) {
   ; COMBINE_STORE_PTR-NEXT: %[[#AO:]] = select i1 %[[#NE]], i32 %[[#PO]], i32 %[[#AO]]
 
   ; CHECK:      %_dfscmp = icmp ne i8 %[[#AS]], 0
-  ; CHECK-NEXT: br i1 %_dfscmp, label %[[L1:.*]], label %[[L2:.*]],
+  ; CHECK-NEXT: br i1 %_dfscmp, label %[[L1:[^ ]+]], label %[[L2:[^ ]+]],
   ; CHECK:     [[L1]]:
   ; CHECK-NEXT: %[[#NO:]] = call i32 @__dfsan_chain_origin(i32 %[[#AO]])
   ; CHECK-NEXT: store i32 %[[#NO]], ptr %[[#O_PTR0:]], align 4
@@ -138,7 +138,7 @@ define void @store96_align8(ptr %p, i96 %a) {
   ; COMBINE_STORE_PTR-NEXT: %[[#AO:]] = select i1 %[[#NE]], i32 %[[#PO]], i32 %[[#AO]]
 
   ; CHECK:      %_dfscmp = icmp ne i8 %[[#AS]], 0
-  ; CHECK-NEXT: br i1 %_dfscmp, label %[[L1:.*]], label %[[L2:.*]],
+  ; CHECK-NEXT: br i1 %_dfscmp, label %[[L1:[^ ]+]], label %[[L2:[^ ]+]],
   ; CHECK:     [[L1]]:
   ; CHECK-NEXT: %[[#NO:]] = call i32 @__dfsan_chain_origin(i32 %[[#AO]])
   ; CHECK-NEXT: %[[#NO_ZEXT:]] = zext i32 %[[#NO]] to i64

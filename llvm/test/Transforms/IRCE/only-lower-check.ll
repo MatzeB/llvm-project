@@ -1,10 +1,10 @@
-; RUN: opt -irce-print-range-checks -irce-print-changed-loops -verify-loop-info -passes=irce < %s 2>&1 | FileCheck %s
-; RUN: opt -irce-print-range-checks -irce-print-changed-loops -verify-loop-info -passes='require<branch-prob>,irce' < %s 2>&1 | FileCheck %s
+; RUN: opt -S -irce-print-range-checks -irce-print-changed-loops -verify-loop-info -passes=irce < %s 2>&1 | FileCheck %s
+; RUN: opt -S -irce-print-range-checks -irce-print-changed-loops -verify-loop-info -passes='require<branch-prob>,irce' < %s 2>&1 | FileCheck %s
 
 ; CHECK: irce: loop has 1 inductive range checks:
 ; CHECK-NEXT: InductiveRangeCheck:
 ; CHECK-NEXT:   Begin: (-1 + %n)  Step: -1  End: 2147483647
-; CHECK-NEXT:   CheckUse:   br i1 %abc, label %in.bounds, label %out.of.bounds, !prof !1 Operand: 0
+; CHECK-NEXT:   CheckUse:   br i1 %abc, label %in.bounds, label %out.of.bounds, !prof !1 ; branch_weights: 64, 4 ; 94%, 5% Operand: 0
 ; CHECK-NEXT: irce: in function only_lower_check: constrained Loop at depth 1 containing: %loop<header><exiting>,%in.bounds<latch><exiting>
 
 define void @only_lower_check(ptr %arr, ptr %a_len_ptr, i32 %n) {

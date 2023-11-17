@@ -12,13 +12,13 @@ target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 define dso_local void @_Z3foov() local_unnamed_addr #0 {
 ; CHECK-LABEL: @_Z3foov(
 ; CHECK:  [[VECTOR_BODY:vector\.body]]:
-; CHECK:    br i1 [[TMP:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP1_255:\!.*]],
+; CHECK:    br i1 [[TMP:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP1_255:![0-9]+]],
 ; CHECK:  [[FOR_BODY:for\.body]]:
-; CHECK:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP0_0:\!.*]],
+; CHECK:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP0_0:![0-9]+]],
 ; CHECK-MASKED:  [[VECTOR_BODY:vector\.body]]:
-; CHECK-MASKED:    br i1 [[TMP:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP1_63:\!.*]],
+; CHECK-MASKED:    br i1 [[TMP:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP1_63:![0-9]+]],
 ; CHECK-MASKED:  [[FOR_BODY:for\.body]]:
-; CHECK-MASKED:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP0_0:\!.*]],
+; CHECK-MASKED:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP0_0:![0-9]+]],
 ;
 entry:
   br label %for.body
@@ -46,13 +46,13 @@ for.body:                                         ; preds = %for.body, %entry
 define dso_local void @_Z3foo2v() local_unnamed_addr #0 {
 ; CHECK-LABEL: @_Z3foo2v(
 ; CHECK:  [[VECTOR_BODY:vector\.body]]:
-; CHECK:    br i1 [[TMP:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP1_255:\!.*]],
+; CHECK:    br i1 [[TMP:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP1_255:![0-9]+]],
 ; CHECK:  [[FOR_BODY:for\.body]]:
-; CHECK:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP1_2:\!.*]],
+; CHECK:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP1_2:![0-9]+]],
 ; CHECK-MASKED:  [[VECTOR_BODY:vector\.body]]:
-; CHECK-MASKED:    br i1 [[TMP:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP1_63:\!.*]],
+; CHECK-MASKED:    br i1 [[TMP:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP1_63:![0-9]+]],
 ; CHECK-MASKED:  [[FOR_BODY:for\.body]]:
-; CHECK-MASKED:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP1_2:\!.*]],
+; CHECK-MASKED:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP1_2:![0-9]+]],
 ;
 entry:
   br label %for.body

@@ -62,9 +62,9 @@ define i32 @foo_low_trip_count3(i1 %cond, i32 %bound) !prof !0 {
 
 ; CHECK-LABEL: @foo_low_trip_count3(
 ; CHECK:  [[VECTOR_BODY:vector\.body]]:
-; CHECK:    br i1 [[TMP9:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP3:\!.*]],
+; CHECK:    br i1 [[TMP9:%.*]], label [[MIDDLE_BLOCK:%.*]], label %[[VECTOR_BODY]], !prof [[LP3:![0-9]+]],
 ; CHECK:  [[FOR_BODY:for\.body]]:
-; CHECK:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP6:\!.*]],
+; CHECK:    br i1 [[EXITCOND:%.*]], label [[FOR_END_LOOPEXIT:%.*]], label %[[FOR_BODY]], !prof [[LP6:![0-9]+]],
 entry:
   br i1 %cond, label %for.preheader, label %for.end, !prof !2
 

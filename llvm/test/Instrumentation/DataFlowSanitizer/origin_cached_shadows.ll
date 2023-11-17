@@ -19,7 +19,7 @@ define void @cached_shadows(double %arg) {
   ; CHECK:  [[S_L1:%.*]] = phi i8 [ 0, %[[L0:.*]] ], [ [[S_L7:%.*]], %[[L7:.*]] ]
   ; CHECK:  [[O_L1:%.*]] = phi i32 [ 0, %[[L0]] ], [ [[O_L7:%.*]], %[[L7]] ]
   ; CHECK:  [[V_L1:%.*]] = phi double [ 4.000000e+00, %[[L0]] ], [ [[V_L7:%.*]], %[[L7]] ]
-  ; CHECK:  br i1 {{%.+}}, label %[[L2:.*]], label %[[L4:.*]]
+  ; CHECK:  br i1 {{%.+}}, label %[[L2:.*]], label %[[L4:[^ ]+]]
   ; CHECK: [[L2]]:
   ; CHECK:  br i1 {{%.+}}, label %[[L3:.+]], label %[[L7]]
   ; CHECK: [[L3]]:
@@ -29,7 +29,7 @@ define void @cached_shadows(double %arg) {
   ; CHECK:  [[V_L3:%.*]] = fsub double [[V_L1]], %{{.+}}
   ; CHECK:  br label %[[L7]]
   ; CHECK: [[L4]]:
-  ; CHECK:  br i1 %_dfscmp, label %[[L5:.+]], label %[[L6:.+]],
+  ; CHECK:  br i1 %_dfscmp, label %[[L5:.+]], label %[[L6:[^ ]+]],
   ; CHECK: [[L5]]:
   ; CHECK:  br label %[[L6]]
   ; CHECK: [[L6]]:
@@ -42,7 +42,7 @@ define void @cached_shadows(double %arg) {
   ; CHECK:  [[S_L7]] = phi i8 [ [[S_L3]], %[[L3]] ], [ [[S_L1]], %[[L2]] ], [ [[S_L6]], %[[L6]] ]
   ; CHECK:  [[O_L7]] = phi i32 [ [[O_L3]], %[[L3]] ], [ [[O_L1]], %[[L2]] ], [ [[O_L6]], %[[L6]] ]
   ; CHECK:  [[V_L7]] = phi double [ [[V_L3]], %[[L3]] ], [ [[V_L1]], %[[L2]] ], [ [[V_L6]], %[[L6]] ]
-  ; CHECK:  br i1 %{{.+}}, label %[[L1]], label %[[L8:.+]]
+  ; CHECK:  br i1 %{{.+}}, label %[[L1]], label %[[L8:[^ ]+]]
   ; CHECK: [[L8]]:
 bb:
   %i = alloca double, align 8
