@@ -97,7 +97,7 @@ struct DistributedLoadStoreHelper {
     SmallVector<Value> indices(rank, zero);
     if (val == distributedVal) {
       for (auto dimExpr : distributionMap.getResults()) {
-        int64_t index = dimExpr.cast<AffineDimExpr>().getPosition();
+        int64_t index = cast<AffineDimExpr>(dimExpr).getPosition();
         indices[index] = buildDistributedOffset(b, loc, index);
       }
     }
@@ -142,7 +142,7 @@ struct DistributedLoadStoreHelper {
     SmallVector<Value> indices(sequentialVectorType.getRank(), zero);
     if (type == distributedVectorType) {
       for (auto dimExpr : distributionMap.getResults()) {
-        int64_t index = dimExpr.cast<AffineDimExpr>().getPosition();
+        int64_t index = cast<AffineDimExpr>(dimExpr).getPosition();
         indices[index] = buildDistributedOffset(b, loc, index);
       }
     }
@@ -530,11 +530,11 @@ struct WarpOpTransferWrite : public OpRewritePattern<WarpExecuteOnLane0Op> {
     for (auto it : llvm::zip(indexMap.getResults(), map.getResults())) {
       AffineExpr d0, d1;
       bindDims(newWarpOp.getContext(), d0, d1);
-      auto indexExpr = std::get<0>(it).dyn_cast<AffineDimExpr>();
+      auto indexExpr = dyn_cast<AffineDimExpr>(std::get<0>(it));
       if (!indexExpr)
         continue;
       unsigned indexPos = indexExpr.getPosition();
-      unsigned vectorPos = std::get<1>(it).cast<AffineDimExpr>().getPosition();
+      unsigned vectorPos = cast<AffineDimExpr>(std::get<1>(it)).getPosition();
       auto scale =
           rewriter.getAffineConstantExpr(targetType.getDimSize(vectorPos));
       indices[indexPos] = affine::makeComposedAffineApply(
@@ -645,6 +645,7 @@ struct WarpOpElementwise : public OpRewritePattern<WarpExecuteOnLane0Op> {
     });
     if (!yieldOperand)
       return failure();
+
     Operation *elementWise = yieldOperand->get().getDefiningOp();
     unsigned operandIndex = yieldOperand->getOperandNumber();
     Value distributedVal = warpOp.getResult(operandIndex);
@@ -713,6 +714,9 @@ struct WarpOpConstant : public OpRewritePattern<WarpExecuteOnLane0Op> {
     auto dense = dyn_cast<SplatElementsAttr>(constantOp.getValue());
     if (!dense)
       return failure();
+    // Notify the rewriter that the warp op is changing (see the comment on
+    // the WarpOpTransferRead pattern).
+    rewriter.startRootUpdate(warpOp);
     unsigned operandIndex = yieldOperand->getOperandNumber();
     Attribute scalarAttr = dense.getSplatValue<Attribute>();
     auto newAttr = DenseElementsAttr::get(
@@ -721,6 +725,7 @@ struct WarpOpConstant : public OpRewritePattern<WarpExecuteOnLane0Op> {
     rewriter.setInsertionPointAfter(warpOp);
     Value distConstant = rewriter.create<arith::ConstantOp>(loc, newAttr);
     rewriter.replaceAllUsesWith(warpOp.getResult(operandIndex), distConstant);
+    rewriter.finalizeRootUpdate(warpOp);
     return success();
   }
 };
@@ -823,14 +828,16 @@ struct WarpOpTransferRead : public OpRewritePattern<WarpExecuteOnLane0Op> {
     OpBuilder::InsertionGuard g(rewriter);
     WarpExecuteOnLane0Op newWarpOp = warpOp;
     Value newMask = read.getMask();
+    bool hasMask = false;
     if (read.getMask()) {
+      hasMask = true;
       // TODO: Distribution of masked reads with non-trivial permutation maps
       // requires the distribution of the mask to elementwise match the
       // distribution of the permuted written vector. Currently the details
       // of which lane is responsible for which element is captured strictly
       // by shape information on the warp op, and thus requires materializing
       // the permutation in IR.
-      if (!read.getPermutationMap().isMinorIdentity())
+      if (!mlir::compressUnusedDims(read.getPermutationMap()).isIdentity())
         return failure();
       VectorType maskType =
           getDistributedType(read.getMaskType(), map, warpOp.getWarpSize());
@@ -840,6 +847,16 @@ struct WarpOpTransferRead : public OpRewritePattern<WarpExecuteOnLane0Op> {
           newRetIndices);
       newMask = newWarpOp.getResult(newRetIndices[0]);
       distributedVal = newWarpOp.getResult(operandIndex);
+    } else {
+      // This pattern does not actually change the warp op directly. Instead it
+      // just rewrites a new transfer read (when not masked) outside of the warp
+      // op and replaces the correponding result. There are then follow up
+      // patterns to erase now dead results of the warp op. This erasure allows
+      // propagation to continue, but this pattern on its own never actually
+      // tells the pattern rewriter that the warp op "changed." Notify the
+      // rewriter here that the warp op is changing. Similar situations are
+      // noted in following patterns.
+      rewriter.startRootUpdate(warpOp);
     }
 
     rewriter.setInsertionPointAfter(newWarpOp);
@@ -849,19 +866,22 @@ struct WarpOpTransferRead : public OpRewritePattern<WarpExecuteOnLane0Op> {
     SmallVector<Value> delinearizedIds;
     if (!delinearizeLaneId(rewriter, read.getLoc(), sequentialType.getShape(),
                            distributedType.getShape(), newWarpOp.getWarpSize(),
-                           newWarpOp.getLaneid(), delinearizedIds))
+                           newWarpOp.getLaneid(), delinearizedIds)) {
+      if (!hasMask)
+        rewriter.cancelRootUpdate(warpOp);
       return rewriter.notifyMatchFailure(
           read, "cannot delinearize lane ID for distribution");
+    }
     assert(!delinearizedIds.empty() || map.getNumResults() == 0);
 
     for (auto it : llvm::zip_equal(indexMap.getResults(), map.getResults())) {
       AffineExpr d0, d1;
       bindDims(read.getContext(), d0, d1);
-      auto indexExpr = std::get<0>(it).dyn_cast<AffineDimExpr>();
+      auto indexExpr = dyn_cast<AffineDimExpr>(std::get<0>(it));
       if (!indexExpr)
         continue;
       unsigned indexPos = indexExpr.getPosition();
-      unsigned vectorPos = std::get<1>(it).cast<AffineDimExpr>().getPosition();
+      unsigned vectorPos = cast<AffineDimExpr>(std::get<1>(it)).getPosition();
       int64_t scale = distributedType.getDimSize(vectorPos);
       indices[indexPos] = affine::makeComposedAffineApply(
           rewriter, read.getLoc(), d0 + scale * d1,
@@ -890,10 +910,15 @@ struct WarpOpTransferRead : public OpRewritePattern<WarpExecuteOnLane0Op> {
     if (!llvm::all_of(newRead->getOperands(), [&](Value value) {
           return (newRead.getMask() && value == newRead.getMask()) ||
                  newWarpOp.isDefinedOutsideOfRegion(value);
-        }))
+        })) {
+      if (!hasMask)
+        rewriter.cancelRootUpdate(warpOp);
       return failure();
+    }
 
     rewriter.replaceAllUsesWith(distributedVal, newRead);
+    if (!hasMask)
+      rewriter.finalizeRootUpdate(warpOp);
     return success();
   }
 };
@@ -996,7 +1021,11 @@ struct WarpOpForwardOperand : public OpRewritePattern<WarpExecuteOnLane0Op> {
     }
     if (!valForwarded)
       return failure();
+    // Notify the rewriter that the warp op is changing (see the comment on
+    // the WarpOpTransferRead pattern).
+    rewriter.startRootUpdate(warpOp);
     rewriter.replaceAllUsesWith(warpOp.getResult(resultIndex), valForwarded);
+    rewriter.finalizeRootUpdate(warpOp);
     return success();
   }
 };
@@ -1046,6 +1075,7 @@ struct WarpOpShapeCast : public OpRewritePattern<WarpExecuteOnLane0Op> {
         warpOp, [](Operation *op) { return isa<vector::ShapeCastOp>(op); });
     if (!operand)
       return failure();
+
     auto oldCastOp = operand->get().getDefiningOp<vector::ShapeCastOp>();
 
     unsigned int operandNumber = operand->getOperandNumber();
@@ -1133,6 +1163,10 @@ struct WarpOpCreateMask : public OpRewritePattern<WarpExecuteOnLane0Op> {
           mask, "cannot delinearize lane ID for distribution");
     assert(!delinearizedIds.empty());
 
+    // Notify the rewriter that the warp op is changing (see the comment on
+    // the WarpOpTransferRead pattern).
+    rewriter.startRootUpdate(warpOp);
+
     AffineExpr s0, s1;
     bindSymbols(rewriter.getContext(), s0, s1);
     SmallVector<Value> newOperands;
@@ -1151,6 +1185,7 @@ struct WarpOpCreateMask : public OpRewritePattern<WarpExecuteOnLane0Op> {
     auto newMask =
         rewriter.create<vector::CreateMaskOp>(loc, distType, newOperands);
     rewriter.replaceAllUsesWith(warpOp.getResult(operandIndex), newMask);
+    rewriter.finalizeRootUpdate(warpOp);
     return success();
   }
 };
