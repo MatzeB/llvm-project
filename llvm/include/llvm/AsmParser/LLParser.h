@@ -290,6 +290,7 @@ namespace llvm {
     bool parseOptionalCallingConv(unsigned &CC);
     bool parseOptionalAlignment(MaybeAlign &Alignment,
                                 bool AllowParens = false);
+    bool parseOptionalCodeModel(CodeModel::Model &model);
     bool parseOptionalDerefAttrBytes(lltok::Kind AttrKind, uint64_t &Bytes);
     bool parseOptionalUWTableKind(UWTableKind &Kind);
     bool parseAllocKind(AllocFnKind &Kind);
@@ -406,9 +407,10 @@ namespace llvm {
         std::map<std::vector<uint64_t>, WholeProgramDevirtResolution::ByArg>
             &ResByArg);
     bool parseArgs(std::vector<uint64_t> &Args);
-    void addGlobalValueToIndex(std::string Name, GlobalValue::GUID,
+    bool addGlobalValueToIndex(std::string Name, GlobalValue::GUID,
                                GlobalValue::LinkageTypes Linkage, unsigned ID,
-                               std::unique_ptr<GlobalValueSummary> Summary);
+                               std::unique_ptr<GlobalValueSummary> Summary,
+                               LocTy Loc);
     bool parseOptionalAllocs(std::vector<AllocInfo> &Allocs);
     bool parseMemProfs(std::vector<MIBInfo> &MIBs);
     bool parseAllocType(uint8_t &AllocType);
