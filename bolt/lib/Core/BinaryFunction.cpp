@@ -40,6 +40,7 @@
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/xxhash.h"
 #include <functional>
 #include <limits>
 #include <numeric>
@@ -3632,7 +3633,7 @@ BinaryFunction::BasicBlockListType BinaryFunction::dfs() const {
   return DFS;
 }
 
-size_t BinaryFunction::computeHash(bool UseDFS,
+size_t BinaryFunction::computeHash(bool UseDFS, HashFunction HashFunction,
                                    OperandHashFuncTy OperandHashFunc) const {
   if (size() == 0)
     return 0;
@@ -3651,7 +3652,13 @@ size_t BinaryFunction::computeHash(bool UseDFS,
   for (const BinaryBasicBlock *BB : Order)
     HashString.append(hashBlock(BC, *BB, OperandHashFunc));
 
-  return Hash = std::hash<std::string>{}(HashString);
+  switch (HashFunction) {
+  case HashFunction::StdHash:
+    return Hash = std::hash<std::string>{}(HashString);
+  case HashFunction::XXH3:
+    return Hash = llvm::xxh3_64bits(HashString);
+  }
+  llvm_unreachable("Unhandled HashFunction");
 }
 
 void BinaryFunction::insertBasicBlocks(

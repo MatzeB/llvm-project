@@ -1058,12 +1058,11 @@ public:
     SLPStore,
     ActiveLaneMask,
     CalculateTripCountMinusVF,
-    CanonicalIVIncrement,
-    // The next op is similar to the above, but instead increment the
-    // canonical IV separately for each unrolled part.
+    // Increment the canonical IV separately for each unrolled part.
     CanonicalIVIncrementForPart,
     BranchOnCount,
-    BranchOnCond
+    BranchOnCond,
+    ComputeReductionResult,
   };
 
 private:
@@ -1168,8 +1167,22 @@ public:
       return false;
     case VPInstruction::ActiveLaneMask:
     case VPInstruction::CalculateTripCountMinusVF:
-    case VPInstruction::CanonicalIVIncrement:
     case VPInstruction::CanonicalIVIncrementForPart:
+    case VPInstruction::BranchOnCount:
+      return true;
+    };
+    llvm_unreachable("switch should return");
+  }
+
+  /// Returns true if the recipe only uses the first part of operand \p Op.
+  bool onlyFirstPartUsed(const VPValue *Op) const override {
+    assert(is_contained(operands(), Op) &&
+           "Op must be an operand of the recipe");
+    if (getOperand(0) != Op)
+      return false;
+    switch (getOpcode()) {
+    default:
+      return false;
     case VPInstruction::BranchOnCount:
       return true;
     };
@@ -1337,6 +1350,36 @@ public:
 
   /// Generate the gep nodes.
   void execute(VPTransformState &State) override;
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+  /// Print the recipe.
+  void print(raw_ostream &O, const Twine &Indent,
+             VPSlotTracker &SlotTracker) const override;
+#endif
+};
+
+/// A recipe to compute the pointers for widened memory accesses of IndexTy for
+/// all parts. If IsReverse is true, compute pointers for accessing the input in
+/// reverse order per part.
+class VPVectorPointerRecipe : public VPRecipeBase, public VPValue {
+  Type *IndexedTy;
+  bool IsReverse;
+
+public:
+  VPVectorPointerRecipe(VPValue *Ptr, Type *IndexedTy, bool IsReverse,
+                        DebugLoc DL)
+      : VPRecipeBase(VPDef::VPVectorPointerSC, {Ptr}, DL), VPValue(this),
+        IndexedTy(IndexedTy), IsReverse(IsReverse) {}
+
+  VP_CLASSOF_IMPL(VPDef::VPVectorPointerSC)
+
+  void execute(VPTransformState &State) override;
+
+  bool onlyFirstLaneUsed(const VPValue *Op) const override {
+    assert(is_contained(operands(), Op) &&
+           "Op must be an operand of the recipe");
+    return true;
+  }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
   /// Print the recipe.
@@ -2126,6 +2169,13 @@ public:
     return true;
   }
 
+  /// Returns true if the recipe only uses the first part of operand \p Op.
+  bool onlyFirstPartUsed(const VPValue *Op) const override {
+    assert(is_contained(operands(), Op) &&
+           "Op must be an operand of the recipe");
+    return true;
+  }
+
   /// Check if the induction described by \p Kind, /p Start and \p Step is
   /// canonical, i.e.  has the same start, step (of 1), and type as the
   /// canonical IV.
@@ -2545,6 +2595,9 @@ class VPlan {
   /// Represents the vector trip count.
   VPValue VectorTripCount;
 
+  /// Represents the loop-invariant VF * UF of the vector loop region.
+  VPValue VFxUF;
+
   /// Holds a mapping between Values and their corresponding VPValue inside
   /// VPlan.
   Value2VPValueTy Value2VPValue;
@@ -2623,6 +2676,9 @@ public:
 
   /// The vector trip count.
   VPValue &getVectorTripCount() { return VectorTripCount; }
+
+  /// Returns VF * UF of the vector loop region.
+  VPValue &getVFxUF() { return VFxUF; }
 
   /// Mark the plan to indicate that using Value2VPValue is not safe any
   /// longer, because it may be stale.
@@ -3054,6 +3110,9 @@ namespace vputils {
 /// Returns true if only the first lane of \p Def is used.
 bool onlyFirstLaneUsed(VPValue *Def);
 
+/// Returns true if only the first part of \p Def is used.
+bool onlyFirstPartUsed(VPValue *Def);
+
 /// Get or create a VPValue that corresponds to the expansion of \p Expr. If \p
 /// Expr is a SCEVConstant or SCEVUnknown, return a VPValue wrapping the live-in
 /// value. Otherwise return a VPExpandSCEVRecipe to expand \p Expr. If \p Plan's
@@ -3074,6 +3133,8 @@ inline bool isUniformAfterVectorization(VPValue *VPV) {
     return Rep->isUniform();
   if (auto *GEP = dyn_cast<VPWidenGEPRecipe>(Def))
     return all_of(GEP->operands(), isUniformAfterVectorization);
+  if (auto *VPI = dyn_cast<VPInstruction>(Def))
+    return VPI->getOpcode() == VPInstruction::ComputeReductionResult;
   return false;
 }
 } // end namespace vputils
