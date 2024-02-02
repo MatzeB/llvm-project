@@ -33,7 +33,7 @@
 
 static llvm::cl::opt<unsigned> DefaultAMDHSACodeObjectVersion(
     "amdhsa-code-object-version", llvm::cl::Hidden,
-    llvm::cl::init(llvm::AMDGPU::AMDHSA_COV4),
+    llvm::cl::init(llvm::AMDGPU::AMDHSA_COV5),
     llvm::cl::desc("Set default AMDHSA Code Object Version (module flag "
                    "or asm directive still take priority if present)"));
 
@@ -173,6 +173,17 @@ unsigned getAMDHSACodeObjectVersion(const Module &M) {
 
 unsigned getDefaultAMDHSACodeObjectVersion() {
   return DefaultAMDHSACodeObjectVersion;
+}
+
+unsigned getAMDHSACodeObjectVersion(unsigned ABIVersion) {
+  switch (ABIVersion) {
+  case ELF::ELFABIVERSION_AMDGPU_HSA_V4:
+    return 4;
+  case ELF::ELFABIVERSION_AMDGPU_HSA_V5:
+    return 5;
+  default:
+    return getDefaultAMDHSACodeObjectVersion();
+  }
 }
 
 uint8_t getELFABIVersion(const Triple &T, unsigned CodeObjectVersion) {
@@ -527,6 +538,17 @@ bool isPermlane16(unsigned Opc) {
          Opc == AMDGPU::V_PERMLANEX16_B32_e64_gfx12 ||
          Opc == AMDGPU::V_PERMLANE16_VAR_B32_e64_gfx12 ||
          Opc == AMDGPU::V_PERMLANEX16_VAR_B32_e64_gfx12;
+}
+
+bool isCvt_F32_Fp8_Bf8_e64(unsigned Opc) {
+  return Opc == AMDGPU::V_CVT_F32_BF8_e64_gfx12 ||
+         Opc == AMDGPU::V_CVT_F32_FP8_e64_gfx12 ||
+         Opc == AMDGPU::V_CVT_F32_BF8_e64_dpp_gfx12 ||
+         Opc == AMDGPU::V_CVT_F32_FP8_e64_dpp_gfx12 ||
+         Opc == AMDGPU::V_CVT_F32_BF8_e64_dpp8_gfx12 ||
+         Opc == AMDGPU::V_CVT_F32_FP8_e64_dpp8_gfx12 ||
+         Opc == AMDGPU::V_CVT_PK_F32_BF8_e64_gfx12 ||
+         Opc == AMDGPU::V_CVT_PK_F32_FP8_e64_gfx12;
 }
 
 bool isGenericAtomic(unsigned Opc) {
