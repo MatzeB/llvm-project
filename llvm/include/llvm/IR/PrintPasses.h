@@ -29,16 +29,6 @@ enum class ChangePrinter {
 
 extern cl::opt<ChangePrinter> PrintChanged;
 
-// Returns true if printing before/after some pass is enabled, whether all
-// passes or a specific pass.
-bool shouldPrintBeforeSomePass();
-bool shouldPrintAfterSomePass();
-
-// Returns true if we should print before/after a specific pass. The argument
-// should be the pass ID, e.g. "instcombine".
-bool shouldPrintBeforePass(StringRef PassID);
-bool shouldPrintAfterPass(StringRef PassID);
-
 // Returns true if we should print before/after all passes.
 bool shouldPrintBeforeAll();
 bool shouldPrintAfterAll();

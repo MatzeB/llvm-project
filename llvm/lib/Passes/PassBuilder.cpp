@@ -317,9 +317,10 @@ namespace {
 /// This is for optimization purposes so we don't populate it if we never use
 /// it. This should be updated if new pass instrumentation wants to use the map.
 /// We currently only use this for --print-before/after.
-bool shouldPopulateClassToPassNames() {
-  return PrintPipelinePasses || !printBeforePasses().empty() ||
-         !printAfterPasses().empty() || !isFilterPassesEmpty() ||
+bool shouldPopulateClassToPassNames(const PassInstrumentationCallbacks *PIC) {
+  if (!PIC)
+    return false;
+  return PrintPipelinePasses || PIC->getShouldPopulateClassToPassName() ||
          TargetPassConfig::hasLimitedCodeGenPipeline();
 }
 
@@ -366,7 +367,7 @@ PassBuilder::PassBuilder(TargetMachine *TM, PipelineTuningOptions PTO,
                          std::optional<PGOOptions> PGOOpt,
                          PassInstrumentationCallbacks *PIC)
     : TM(TM), PTO(PTO), PGOOpt(PGOOpt), PIC(PIC) {
-  bool ShouldPopulateClassToPassNames = PIC && shouldPopulateClassToPassNames();
+  bool ShouldPopulateClassToPassNames = shouldPopulateClassToPassNames(PIC);
   if (TM)
     TM->registerPassBuilderCallbacks(*this, ShouldPopulateClassToPassNames);
   if (ShouldPopulateClassToPassNames) {

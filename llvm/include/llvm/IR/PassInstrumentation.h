@@ -153,6 +153,13 @@ public:
   /// Get the pass name for a given pass class name.
   StringRef getPassNameForClassName(StringRef ClassName);
 
+  void setShouldPopulateClassToPassName(bool Value) {
+    ShouldPopulateClassToPassName = Value;
+  }
+  bool getShouldPopulateClassToPassName() const {
+    return ShouldPopulateClassToPassName;
+  }
+
 private:
   friend class PassInstrumentation;
 
@@ -184,6 +191,7 @@ private:
   SmallVector<llvm::unique_function<AnalysesClearedFunc>, 4>
       AnalysesClearedCallbacks;
 
+  bool ShouldPopulateClassToPassName = false;
   StringMap<std::string> ClassToPassName;
 };
 

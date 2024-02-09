@@ -45,32 +45,30 @@ public:
 
   void registerCallbacks(PassInstrumentationCallbacks &PIC);
 
+  struct PassMatcher {
+    bool All = false;
+    std::vector<StringRef> Names;
+    std::vector<unsigned> Numbers;
+  };
+
 private:
   struct PassRunDescriptor {
     const Module *M;
-    const std::string DumpIRFilename;
     const std::string IRName;
     const StringRef PassID;
+    const unsigned PassNumber;
 
-    PassRunDescriptor(const Module *M, std::string DumpIRFilename,
-                      std::string IRName, const StringRef PassID)
-        : M{M}, DumpIRFilename{DumpIRFilename}, IRName{IRName}, PassID(PassID) {
-    }
+    PassRunDescriptor(const Module *M, StringRef IRName, StringRef PassID,
+                      unsigned PassNumber)
+        : M{M}, IRName{IRName}, PassID(PassID), PassNumber(PassNumber) {}
   };
 
   void printBeforePass(StringRef PassID, Any IR);
   void printAfterPass(StringRef PassID, Any IR);
   void printAfterPassInvalidated(StringRef PassID);
 
-  bool shouldPrintBeforePass(StringRef PassID);
-  bool shouldPrintAfterPass(StringRef PassID);
-  bool shouldPrintPassNumbers();
-  bool shouldPrintBeforePassNumber();
-
-  void pushPassRunDescriptor(StringRef PassID, Any IR,
-                             std::string &DumpIRFilename);
+  void pushPassRunDescriptor(StringRef PassID, Any IR, unsigned PassNumber);
   PassRunDescriptor popPassRunDescriptor(StringRef PassID);
-  std::string fetchDumpFilename(StringRef PassId, Any IR);
 
   PassInstrumentationCallbacks *PIC;
   /// Stack of Pass Run descriptions, enough to print the IR unit after a given
@@ -79,6 +77,11 @@ private:
 
   /// Used for print-at-pass-number
   unsigned CurrentPassNumber = 0;
+
+  PassMatcher PrintBefore;
+  PassMatcher PrintAfter;
+  PassMatcher SaveBefore;
+  PassMatcher SaveAfter;
 };
 
 class OptNoneInstrumentation {

@@ -106,30 +106,9 @@ static cl::list<std::string>
 /// This is a helper to determine whether to print IR before or
 /// after a pass.
 
-bool llvm::shouldPrintBeforeSomePass() {
-  return PrintBeforeAll || !PrintBefore.empty();
-}
-
-bool llvm::shouldPrintAfterSomePass() {
-  return PrintAfterAll || !PrintAfter.empty();
-}
-
-static bool shouldPrintBeforeOrAfterPass(StringRef PassID,
-                                         ArrayRef<std::string> PassesToPrint) {
-  return llvm::is_contained(PassesToPrint, PassID);
-}
-
 bool llvm::shouldPrintBeforeAll() { return PrintBeforeAll; }
 
 bool llvm::shouldPrintAfterAll() { return PrintAfterAll; }
-
-bool llvm::shouldPrintBeforePass(StringRef PassID) {
-  return PrintBeforeAll || shouldPrintBeforeOrAfterPass(PassID, PrintBefore);
-}
-
-bool llvm::shouldPrintAfterPass(StringRef PassID) {
-  return PrintAfterAll || shouldPrintBeforeOrAfterPass(PassID, PrintAfter);
-}
 
 std::vector<std::string> llvm::printBeforePasses() {
   return std::vector<std::string>(PrintBefore);

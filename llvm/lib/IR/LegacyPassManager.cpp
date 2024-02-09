@@ -57,6 +57,16 @@ static cl::opt<enum PassDebugLevel> PassDebugging(
                clEnumVal(Executions, "print pass name before it is executed"),
                clEnumVal(Details, "print pass details when it is executed")));
 
+static bool shouldPrintBeforePass(StringRef PassID) {
+  return shouldPrintBeforeAll() ||
+         llvm::is_contained(printBeforePasses(), PassID);
+}
+
+static bool shouldPrintAfterPass(StringRef PassID) {
+  return shouldPrintAfterAll() ||
+         llvm::is_contained(printAfterPasses(), PassID);
+}
+
 /// isPassDebuggingExecutionsOrMore - Return true if -debug-pass=Executions
 /// or higher is specified.
 bool PMDataManager::isPassDebuggingExecutionsOrMore() const {
