@@ -131,6 +131,12 @@ static cl::list<std::string>
     SaveAfter("save-after", cl::desc("Save IR after specified passes"),
               cl::CommaSeparated, cl::Hidden);
 
+static cl::opt<bool> SaveSkipSame("save-skip-same", cl::init(false),
+                                  cl::desc("Only save when IR changed"));
+
+static cl::opt<bool> PrintSkipSame("print-skip-same", cl::init(true),
+                                   cl::desc("Only print when IR changed"));
+
 static cl::opt<std::string> IRDumpDirectory(
     "ir-dump-directory",
     cl::desc("If specified, IR printed using the "
@@ -842,10 +848,19 @@ void PrintIRInstrumentation::printBeforePass(StringRef PassID, Any IR) {
       pushPassRunDescriptor(PassID, IR, CurrentPassNumber);
     }
 
-    if (applyPassMatcher(PrintBefore, PassName, CurrentPassNumber))
-      printIR(PassID, PassName, CurrentPassNumber, IR, "Before ", "");
-    if (applyPassMatcher(SaveBefore, PassName, CurrentPassNumber))
+    if (applyPassMatcher(PrintBefore, PassName, CurrentPassNumber)) {
+      if (!PrintSkipSame || ChangedSincePrint) {
+        printIR(PassID, PassName, CurrentPassNumber, IR, "Before ", "");
+        ChangedSincePrint = false;
+      } else {
+        dbgs() << "; skipped: no change since last dump\n";
+      }
+    }
+    if (applyPassMatcher(SaveBefore, PassName, CurrentPassNumber) &&
+        (!SaveSkipSame || ChangedSinceSave)) {
       writeToFile(PassName, CurrentPassNumber, IR, "-before.ll");
+      ChangedSinceSave = false;
+    }
   }
   if (PrintPassNumbers) {
     dbgs() << "; Running pass " << CurrentPassNumber << " " << PassID << " ("
@@ -853,7 +868,12 @@ void PrintIRInstrumentation::printBeforePass(StringRef PassID, Any IR) {
   }
 }
 
-void PrintIRInstrumentation::printAfterPass(StringRef PassID, Any IR) {
+void PrintIRInstrumentation::printAfterPass(StringRef PassID, Any IR,
+                                            const PreservedAnalyses &PA) {
+  bool Changed = !PA.areAllPreserved();
+  ChangedSincePrint |= Changed;
+  ChangedSinceSave |= Changed;
+
   if (isIgnored(PassID))
     return;
   if (!shouldPrintIR(IR))
@@ -870,13 +890,26 @@ void PrintIRInstrumentation::printAfterPass(StringRef PassID, Any IR) {
   assert(StoredPassID == PassID && "mismatched PassID");
   assert(StoredPassNumber == CurrentPassNumber && "mismatched PassNumber");
 
-  if (doPrintAfter)
-    printIR(PassID, PassName, CurrentPassNumber, IR, "After ", "");
-  if (doSaveAfter)
+  if (doPrintAfter) {
+    if (!PrintSkipSame || ChangedSincePrint) {
+      printIR(PassID, PassName, CurrentPassNumber, IR, "After ", "");
+      ChangedSincePrint = false;
+    } else {
+      dbgs() << "; skipped: no change since last dump\n";
+    }
+  }
+  if (doSaveAfter && (!SaveSkipSame || ChangedSinceSave)) {
     writeToFile(PassName, CurrentPassNumber, IR, "-after.ll");
+    ChangedSinceSave = false;
+  }
 }
 
-void PrintIRInstrumentation::printAfterPassInvalidated(StringRef PassID) {
+void PrintIRInstrumentation::printAfterPassInvalidated(
+    StringRef PassID, const PreservedAnalyses &PA) {
+  bool Changed = !PA.areAllPreserved();
+  ChangedSincePrint |= Changed;
+  ChangedSinceSave |= Changed;
+
   if (isIgnored(PassID))
     return;
   StringRef PassName = PIC->getPassNameForClassName(PassID);
@@ -891,17 +924,27 @@ void PrintIRInstrumentation::printAfterPassInvalidated(StringRef PassID) {
   assert(StoredPassID == PassID && "mismatched PassID");
   assert(StoredPassNumber == CurrentPassNumber && "mismatched PassNumber");
 
-  if (doPrintAfter)
-    printIR(PassID, PassName, CurrentPassNumber, Any(M), "After ",
-            " (invalidate)");
-  if (doSaveAfter)
+  if (doPrintAfter) {
+    if (!PrintSkipSame || ChangedSincePrint) {
+      printIR(PassID, PassName, CurrentPassNumber, Any(M), "After ",
+              " (invalidate)");
+      ChangedSincePrint = false;
+    } else {
+      dbgs() << "; skipped: no change since last dump\n";
+    }
+  }
+  if (doSaveAfter && (!SaveSkipSame || ChangedSinceSave)) {
     writeToFile(PassName, CurrentPassNumber, Any(M), "-invalidated-after.ll");
+    ChangedSinceSave = false;
+  }
 }
 
 void PrintIRInstrumentation::registerCallbacks(
     PassInstrumentationCallbacks &PIC) {
   this->PIC = &PIC;
   CurrentPassNumber = 0;
+  ChangedSincePrint = true;
+  ChangedSinceSave = true;
 
   PrintBefore.All |= shouldPrintBeforeAll();
   for (const std::string &Argument : printBeforePasses()) {
@@ -935,12 +978,12 @@ void PrintIRInstrumentation::registerCallbacks(
   if (needAfterCallbacks) {
     PIC.setShouldPopulateClassToPassName(true);
     PIC.registerAfterPassCallback(
-        [this](StringRef P, Any IR, const PreservedAnalyses &) {
-          this->printAfterPass(P, IR);
+        [this](StringRef P, Any IR, const PreservedAnalyses &PA) {
+          this->printAfterPass(P, IR, PA);
         });
     PIC.registerAfterPassInvalidatedCallback(
-        [this](StringRef P, const PreservedAnalyses &) {
-          this->printAfterPassInvalidated(P);
+        [this](StringRef P, const PreservedAnalyses &PA) {
+          this->printAfterPassInvalidated(P, PA);
         });
   }
 }

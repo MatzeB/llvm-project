@@ -64,8 +64,8 @@ private:
   };
 
   void printBeforePass(StringRef PassID, Any IR);
-  void printAfterPass(StringRef PassID, Any IR);
-  void printAfterPassInvalidated(StringRef PassID);
+  void printAfterPass(StringRef PassID, Any IR, const PreservedAnalyses &PA);
+  void printAfterPassInvalidated(StringRef PassID, const PreservedAnalyses &PA);
 
   void pushPassRunDescriptor(StringRef PassID, Any IR, unsigned PassNumber);
   PassRunDescriptor popPassRunDescriptor(StringRef PassID);
@@ -77,6 +77,8 @@ private:
 
   /// Used for print-at-pass-number
   unsigned CurrentPassNumber = 0;
+  bool ChangedSincePrint = true;
+  bool ChangedSinceSave = true;
 
   PassMatcher PrintBefore;
   PassMatcher PrintAfter;
