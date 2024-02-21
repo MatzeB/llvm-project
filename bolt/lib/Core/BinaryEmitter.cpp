@@ -568,7 +568,8 @@ void BinaryEmitter::emitConstantIslands(BinaryFunction &BF, bool EmitColdPart,
       BF.getAddress() - BF.getOriginSection()->getAddress(), BF.getMaxSize());
 
   if (opts::Verbosity && !OnBehalfOf)
-    outs() << "BOLT-INFO: emitting constant island for function " << BF << "\n";
+    BC.outs() << "BOLT-INFO: emitting constant island for function " << BF
+              << "\n";
 
   // We split the island into smaller blocks and output labels between them.
   auto IS = Islands.Offsets.begin();
@@ -767,7 +768,7 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
     return;
 
   if (opts::PrintJumpTables)
-    outs() << "BOLT-INFO: jump tables for function " << BF << ":\n";
+    BC.outs() << "BOLT-INFO: jump tables for function " << BF << ":\n";
 
   for (auto &JTI : BF.jumpTables()) {
     JumpTable &JT = *JTI.second;
@@ -775,7 +776,7 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
     if (JT.Parents.size() > 1 && JT.Parents[0] != &BF)
       continue;
     if (opts::PrintJumpTables)
-      JT.print(outs());
+      JT.print(BC.outs());
     if (opts::JumpTables == JTS_BASIC && BC.HasRelocations) {
       JT.updateOriginal();
     } else {

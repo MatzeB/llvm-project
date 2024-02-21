@@ -909,7 +909,7 @@ public:
   virtual void emitFileDirective(StringRef Filename);
 
   /// Emit ".file assembler diretive with additioal info.
-  virtual void emitFileDirective(StringRef Filename, StringRef CompilerVerion,
+  virtual void emitFileDirective(StringRef Filename, StringRef CompilerVersion,
                                  StringRef TimeStamp, StringRef Description);
 
   /// Emit the "identifiers" directive.  This implements the
