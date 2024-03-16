@@ -882,14 +882,15 @@ void AArch64ABIInfo::appendAttributeMangling(StringRef AttrStr,
   for (auto &Feat : Features)
     Feat = Feat.trim();
 
-  const TargetInfo &TI = CGT.getTarget();
-  llvm::sort(Features, [&TI](const StringRef LHS, const StringRef RHS) {
+  llvm::sort(Features, [](const StringRef LHS, const StringRef RHS) {
     return LHS.compare(RHS) < 0;
   });
 
+  llvm::SmallDenseSet<StringRef, 8> UniqueFeats;
   for (auto &Feat : Features)
     if (auto Ext = llvm::AArch64::parseArchExtension(Feat))
-      Out << 'M' << Ext->Name;
+      if (UniqueFeats.insert(Ext->Name).second)
+        Out << 'M' << Ext->Name;
 }
 
 std::unique_ptr<TargetCodeGenInfo>
