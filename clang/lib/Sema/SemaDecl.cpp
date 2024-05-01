@@ -832,7 +832,7 @@ static bool isTagTypeWithMissingTag(Sema &SemaRef, LookupResult &Result,
                                     IdentifierInfo *&Name,
                                     SourceLocation NameLoc) {
   LookupResult R(SemaRef, Name, NameLoc, Sema::LookupTagName);
-  SemaRef.LookupParsedName(R, S, &SS);
+  SemaRef.LookupParsedName(R, S, &SS, /*ObjectType=*/QualType());
   if (TagDecl *Tag = R.getAsSingle<TagDecl>()) {
     StringRef FixItTagName;
     switch (Tag->getTagKind()) {
@@ -869,7 +869,7 @@ static bool isTagTypeWithMissingTag(Sema &SemaRef, LookupResult &Result,
 
     // Replace lookup results with just the tag decl.
     Result.clear(Sema::LookupTagName);
-    SemaRef.LookupParsedName(Result, S, &SS);
+    SemaRef.LookupParsedName(Result, S, &SS, /*ObjectType=*/QualType());
     return true;
   }
 
@@ -896,7 +896,8 @@ Sema::NameClassification Sema::ClassifyName(Scope *S, CXXScopeSpec &SS,
   }
 
   LookupResult Result(*this, Name, NameLoc, LookupOrdinaryName);
-  LookupParsedName(Result, S, &SS, !CurMethod);
+  LookupParsedName(Result, S, &SS, /*ObjectType=*/QualType(),
+                   /*AllowBuiltinCreation=*/!CurMethod);
 
   if (SS.isInvalid())
     return NameClassification::Error();
@@ -1240,8 +1241,8 @@ Corrected:
   Result.suppressDiagnostics();
   return NameClassification::OverloadSet(UnresolvedLookupExpr::Create(
       Context, Result.getNamingClass(), SS.getWithLocInContext(Context),
-      Result.getLookupNameInfo(), ADL, Result.isOverloadedResult(),
-      Result.begin(), Result.end()));
+      Result.getLookupNameInfo(), ADL, Result.begin(), Result.end(),
+      /*KnownDependent=*/false));
 }
 
 ExprResult
@@ -1974,7 +1975,7 @@ static bool ShouldDiagnoseUnusedDecl(const LangOptions &LangOpts,
     // it is, by the bindings' expressions).
     bool IsAllPlaceholders = true;
     for (const auto *BD : DD->bindings()) {
-      if (BD->isReferenced())
+      if (BD->isReferenced() || BD->hasAttr<UnusedAttr>())
         return false;
       IsAllPlaceholders = IsAllPlaceholders && BD->isPlaceholderVar(LangOpts);
     }
@@ -5374,7 +5375,7 @@ static bool CheckAnonMemberRedeclaration(Sema &SemaRef, Scope *S,
   LookupResult R(SemaRef, Name, NameLoc,
                  Owner->isRecord() ? Sema::LookupMemberName
                                    : Sema::LookupOrdinaryName,
-                 Sema::ForVisibleRedeclaration);
+                 RedeclarationKind::ForVisibleRedeclaration);
   if (!SemaRef.LookupName(R, S)) return false;
 
   // Pick a representative declaration.
@@ -6470,7 +6471,8 @@ NamedDecl *Sema::HandleDeclarator(Scope *S, Declarator &D,
 
     if (IsLinkageLookup) {
       Previous.clear(LookupRedeclarationWithLinkage);
-      Previous.setRedeclarationKind(ForExternalRedeclaration);
+      Previous.setRedeclarationKind(
+          RedeclarationKind::ForExternalRedeclaration);
     }
 
     LookupName(Previous, S, CreateBuiltins);
@@ -8521,7 +8523,8 @@ void Sema::CheckShadow(Scope *S, VarDecl *D) {
     return;
 
   LookupResult R(*this, D->getDeclName(), D->getLocation(),
-                 Sema::LookupOrdinaryName, Sema::ForVisibleRedeclaration);
+                 Sema::LookupOrdinaryName,
+                 RedeclarationKind::ForVisibleRedeclaration);
   LookupName(R, S);
   if (NamedDecl *ShadowedDecl = getShadowedDeclaration(D, R))
     CheckShadow(D, ShadowedDecl, R);
@@ -9161,7 +9164,7 @@ static NamedDecl *DiagnoseInvalidRedeclaration(
   LookupResult Prev(SemaRef, Name, NewFD->getLocation(),
                     IsLocalFriend ? Sema::LookupLocalFriendName
                                   : Sema::LookupOrdinaryName,
-                    Sema::ForVisibleRedeclaration);
+                    RedeclarationKind::ForVisibleRedeclaration);
 
   NewFD->setInvalidDecl();
   if (IsLocalFriend)
@@ -12415,12 +12418,16 @@ bool Sema::CheckFunctionDeclaration(Scope *S, FunctionDecl *NewFD,
     bool UsesZT0 = Attr && Attr->isNewZT0();
 
     if (NewFD->hasAttr<ArmLocallyStreamingAttr>()) {
-      if (NewFD->getReturnType()->isSizelessVectorType() ||
-          llvm::any_of(NewFD->parameters(), [](ParmVarDecl *P) {
+      if (NewFD->getReturnType()->isSizelessVectorType())
+        Diag(NewFD->getLocation(),
+             diag::warn_sme_locally_streaming_has_vl_args_returns)
+            << /*IsArg=*/false;
+      if (llvm::any_of(NewFD->parameters(), [](ParmVarDecl *P) {
             return P->getOriginalType()->isSizelessVectorType();
           }))
         Diag(NewFD->getLocation(),
-             diag::warn_sme_locally_streaming_has_vl_args_returns);
+             diag::warn_sme_locally_streaming_has_vl_args_returns)
+            << /*IsArg=*/true;
     }
     if (const auto *FPT = NewFD->getType()->getAs<FunctionProtoType>()) {
       FunctionProtoType::ExtProtoInfo EPI = FPT->getExtProtoInfo();
@@ -13496,16 +13503,18 @@ void Sema::checkNonTrivialCUnion(QualType QT, SourceLocation Loc,
 void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit) {
   // If there is no declaration, there was an error parsing it.  Just ignore
   // the initializer.
-  if (!RealDecl || RealDecl->isInvalidDecl()) {
+  if (!RealDecl) {
     CorrectDelayedTyposInExpr(Init, dyn_cast_or_null<VarDecl>(RealDecl));
     return;
   }
 
-  if (CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(RealDecl)) {
-    // Pure-specifiers are handled in ActOnPureSpecifier.
-    Diag(Method->getLocation(), diag::err_member_function_initialization)
-      << Method->getDeclName() << Init->getSourceRange();
-    Method->setInvalidDecl();
+  if (auto *Method = dyn_cast<CXXMethodDecl>(RealDecl)) {
+    if (!Method->isInvalidDecl()) {
+      // Pure-specifiers are handled in ActOnPureSpecifier.
+      Diag(Method->getLocation(), diag::err_member_function_initialization)
+          << Method->getDeclName() << Init->getSourceRange();
+      Method->setInvalidDecl();
+    }
     return;
   }
 
@@ -13514,6 +13523,15 @@ void Sema::AddInitializerToDecl(Decl *RealDecl, Expr *Init, bool DirectInit) {
     assert(!isa<FieldDecl>(RealDecl) && "field init shouldn't get here");
     Diag(RealDecl->getLocation(), diag::err_illegal_initializer);
     RealDecl->setInvalidDecl();
+    return;
+  }
+
+  if (VDecl->isInvalidDecl()) {
+    CorrectDelayedTyposInExpr(Init, VDecl);
+    ExprResult Recovery =
+        CreateRecoveryExpr(Init->getBeginLoc(), Init->getEndLoc(), {Init});
+    if (Expr *E = Recovery.get())
+      VDecl->setInit(E);
     return;
   }
 
@@ -15196,7 +15214,7 @@ Decl *Sema::ActOnParamDeclarator(Scope *S, Declarator &D,
   const IdentifierInfo *II = D.getIdentifier();
   if (II) {
     LookupResult R(*this, II, D.getIdentifierLoc(), LookupOrdinaryName,
-                   ForVisibleRedeclaration);
+                   RedeclarationKind::ForVisibleRedeclaration);
     LookupName(R, S);
     if (!R.empty()) {
       NamedDecl *PrevDecl = *R.begin();
@@ -15897,6 +15915,11 @@ Decl *Sema::ActOnStartOfFunctionDef(Scope *FnBodyScope, Decl *D,
     FD->setInvalidDecl();
     return D;
   }
+
+  // Some function attributes (like OptimizeNoneAttr) need actions before
+  // parsing body started.
+  applyFunctionAttributesBeforeParsingBody(D);
+
   // We want to attach documentation to original Decl (which might be
   // a function template).
   ActOnDocumentableDecl(D);
@@ -15906,6 +15929,20 @@ Decl *Sema::ActOnStartOfFunctionDef(Scope *FnBodyScope, Decl *D,
     Diag(FD->getLocation(), diag::warn_function_def_in_objc_container);
 
   return D;
+}
+
+void Sema::applyFunctionAttributesBeforeParsingBody(Decl *FD) {
+  if (!FD || FD->isInvalidDecl())
+    return;
+  if (auto *TD = dyn_cast<FunctionTemplateDecl>(FD))
+    FD = TD->getTemplatedDecl();
+  if (FD && FD->hasAttr<OptimizeNoneAttr>()) {
+    FPOptionsOverride FPO;
+    FPO.setDisallowOptimizations();
+    CurFPFeatures.applyChanges(FPO);
+    FpPragmaStack.CurrentValue =
+        CurFPFeatures.getChangesFrom(FPOptions(LangOpts));
+  }
 }
 
 /// Given the set of return statements within a function body,
@@ -17428,7 +17465,7 @@ Sema::ActOnTag(Scope *S, unsigned TagSpec, TagUseKind TUK, SourceLocation KWLoc,
 
   RedeclarationKind Redecl = forRedeclarationInCurContext();
   if (TUK == TUK_Friend || TUK == TUK_Reference)
-    Redecl = NotForRedeclaration;
+    Redecl = RedeclarationKind::NotForRedeclaration;
 
   /// Create a new tag decl in C/ObjC. Since the ODR-like semantics for ObjC/C
   /// implemented asks for structural equivalence checking, the returned decl
@@ -18589,7 +18626,7 @@ FieldDecl *Sema::HandleField(Scope *S, RecordDecl *Record,
   // Check to see if this name was declared as a member previously
   NamedDecl *PrevDecl = nullptr;
   LookupResult Previous(*this, II, Loc, LookupMemberName,
-                        ForVisibleRedeclaration);
+                        RedeclarationKind::ForVisibleRedeclaration);
   LookupName(Previous, S);
   switch (Previous.getResultKind()) {
     case LookupResult::Found:
@@ -18993,8 +19030,9 @@ Decl *Sema::ActOnIvar(Scope *S, SourceLocation DeclStart, Declarator &D,
     NewID->setInvalidDecl();
 
   if (II) {
-    NamedDecl *PrevDecl = LookupSingleName(S, II, Loc, LookupMemberName,
-                                           ForVisibleRedeclaration);
+    NamedDecl *PrevDecl =
+        LookupSingleName(S, II, Loc, LookupMemberName,
+                         RedeclarationKind::ForVisibleRedeclaration);
     if (PrevDecl && isDeclInScope(PrevDecl, EnclosingContext, S)
         && !isa<TagDecl>(PrevDecl)) {
       Diag(Loc, diag::err_duplicate_member) << II;
@@ -19536,6 +19574,13 @@ void Sema::ActOnFields(Scope *S, SourceLocation RecLoc, Decl *EnclosingDecl,
   // Okay, we successfully defined 'Record'.
   if (Record) {
     bool Completed = false;
+    if (S) {
+      Scope *Parent = S->getParent();
+      if (Parent && Parent->isTypeAliasScope() &&
+          Parent->isTemplateParamScope())
+        Record->setInvalidDecl();
+    }
+
     if (CXXRecord) {
       if (!CXXRecord->isInvalidDecl()) {
         // Set access bits correctly on the directly-declared conversions.
@@ -19683,7 +19728,7 @@ void Sema::ActOnFields(Scope *S, SourceLocation RecLoc, Decl *EnclosingDecl,
                                       E = Record->field_end();
            (NonBitFields == 0 || ZeroSize) && I != E; ++I) {
         IsEmpty = false;
-        if (I->isUnnamedBitfield()) {
+        if (I->isUnnamedBitField()) {
           if (!I->isZeroLengthBitField(Context))
             ZeroSize = false;
         } else {
@@ -20039,7 +20084,8 @@ Decl *Sema::ActOnEnumConstant(Scope *S, Decl *theEnumDecl, Decl *lastEnumConst,
 
   // Verify that there isn't already something declared with this name in this
   // scope.
-  LookupResult R(*this, Id, IdLoc, LookupOrdinaryName, ForVisibleRedeclaration);
+  LookupResult R(*this, Id, IdLoc, LookupOrdinaryName,
+                 RedeclarationKind::ForVisibleRedeclaration);
   LookupName(R, S);
   NamedDecl *PrevDecl = R.getAsSingle<NamedDecl>();
 

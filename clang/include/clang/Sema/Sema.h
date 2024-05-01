@@ -52,6 +52,7 @@
 #include "clang/Sema/IdentifierResolver.h"
 #include "clang/Sema/ObjCMethodList.h"
 #include "clang/Sema/Ownership.h"
+#include "clang/Sema/Redeclaration.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaBase.h"
 #include "clang/Sema/SemaConcept.h"
@@ -3083,6 +3084,7 @@ public:
   Decl *ActOnStartOfFunctionDef(Scope *S, Decl *D,
                                 SkipBodyInfo *SkipBody = nullptr,
                                 FnBodyKind BodyKind = FnBodyKind::Other);
+  void applyFunctionAttributesBeforeParsingBody(Decl *FD);
 
   /// Determine whether we can delay parsing the body of a function or
   /// function template until it is used, assuming we don't care about emitting
@@ -4095,12 +4097,12 @@ public:
                                    SmallVectorImpl<QualType> &Exceptions,
                                    FunctionProtoType::ExceptionSpecInfo &ESI);
 
-  /// Add an exception-specification to the given member function
-  /// (or member function template). The exception-specification was parsed
-  /// after the method itself was declared.
+  /// Add an exception-specification to the given member or friend function
+  /// (or function template). The exception-specification was parsed
+  /// after the function itself was declared.
   void actOnDelayedExceptionSpecification(
-      Decl *Method, ExceptionSpecificationType EST,
-      SourceRange SpecificationRange, ArrayRef<ParsedType> DynamicExceptions,
+      Decl *D, ExceptionSpecificationType EST, SourceRange SpecificationRange,
+      ArrayRef<ParsedType> DynamicExceptions,
       ArrayRef<SourceRange> DynamicExceptionRanges, Expr *NoexceptExpr);
 
   class InheritedConstructorInfo;
@@ -5444,7 +5446,7 @@ public:
   ExprResult ActOnPredefinedExpr(SourceLocation Loc, tok::TokenKind Kind);
   ExprResult ActOnIntegerConstant(SourceLocation Loc, uint64_t Val);
 
-  bool CheckLoopHintExpr(Expr *E, SourceLocation Loc);
+  bool CheckLoopHintExpr(Expr *E, SourceLocation Loc, bool AllowZero);
 
   ExprResult ActOnNumericConstant(const Token &Tok, Scope *UDLScope = nullptr);
   ExprResult ActOnCharacterConstant(const Token &Tok,
@@ -6526,7 +6528,10 @@ public:
                             SourceLocation RParenLoc);
 
   //// ActOnCXXThis -  Parse 'this' pointer.
-  ExprResult ActOnCXXThis(SourceLocation loc);
+  ExprResult ActOnCXXThis(SourceLocation Loc);
+
+  /// Check whether the type of 'this' is valid in the current context.
+  bool CheckCXXThisType(SourceLocation Loc, QualType Type);
 
   /// Build a CXXThisExpr and mark it referenced in the current context.
   Expr *BuildCXXThisExpr(SourceLocation Loc, QualType Type, bool IsImplicit);
@@ -6948,10 +6953,14 @@ private:
   ///@{
 
 public:
+  /// Check whether an expression might be an implicit class member access.
+  bool isPotentialImplicitMemberAccess(const CXXScopeSpec &SS, LookupResult &R,
+                                       bool IsAddressOfOperand);
+
   ExprResult BuildPossibleImplicitMemberExpr(
       const CXXScopeSpec &SS, SourceLocation TemplateKWLoc, LookupResult &R,
-      const TemplateArgumentListInfo *TemplateArgs, const Scope *S,
-      UnresolvedLookupExpr *AsULE = nullptr);
+      const TemplateArgumentListInfo *TemplateArgs, const Scope *S);
+
   ExprResult
   BuildImplicitMemberExpr(const CXXScopeSpec &SS, SourceLocation TemplateKWLoc,
                           LookupResult &R,
@@ -6969,12 +6978,6 @@ public:
                                    SourceLocation TemplateKWLoc,
                                    UnqualifiedId &Member, Decl *ObjCImpDecl);
 
-  MemberExpr *BuildMemberExpr(
-      Expr *Base, bool IsArrow, SourceLocation OpLoc, const CXXScopeSpec *SS,
-      SourceLocation TemplateKWLoc, ValueDecl *Member, DeclAccessPair FoundDecl,
-      bool HadMultipleCandidates, const DeclarationNameInfo &MemberNameInfo,
-      QualType Ty, ExprValueKind VK, ExprObjectKind OK,
-      const TemplateArgumentListInfo *TemplateArgs = nullptr);
   MemberExpr *
   BuildMemberExpr(Expr *Base, bool IsArrow, SourceLocation OpLoc,
                   NestedNameSpecifierLoc NNS, SourceLocation TemplateKWLoc,
@@ -7443,40 +7446,17 @@ public:
   typedef std::function<ExprResult(Sema &, TypoExpr *, TypoCorrection)>
       TypoRecoveryCallback;
 
-  /// Specifies whether (or how) name lookup is being performed for a
-  /// redeclaration (vs. a reference).
-  enum RedeclarationKind {
-    /// The lookup is a reference to this name that is not for the
-    /// purpose of redeclaring the name.
-    NotForRedeclaration = 0,
-    /// The lookup results will be used for redeclaration of a name,
-    /// if an entity by that name already exists and is visible.
-    ForVisibleRedeclaration,
-    /// The lookup results will be used for redeclaration of a name
-    /// with external linkage; non-visible lookup results with external linkage
-    /// may also be found.
-    ForExternalRedeclaration
-  };
-
-  RedeclarationKind forRedeclarationInCurContext() const {
-    // A declaration with an owning module for linkage can never link against
-    // anything that is not visible. We don't need to check linkage here; if
-    // the context has internal linkage, redeclaration lookup won't find things
-    // from other TUs, and we can't safely compute linkage yet in general.
-    if (cast<Decl>(CurContext)
-            ->getOwningModuleForLinkage(/*IgnoreLinkage*/ true))
-      return ForVisibleRedeclaration;
-    return ForExternalRedeclaration;
-  }
+  RedeclarationKind forRedeclarationInCurContext() const;
 
   /// Look up a name, looking for a single declaration.  Return
   /// null if the results were absent, ambiguous, or overloaded.
   ///
   /// It is preferable to use the elaborated form and explicitly handle
   /// ambiguity and overloaded.
-  NamedDecl *LookupSingleName(Scope *S, DeclarationName Name,
-                              SourceLocation Loc, LookupNameKind NameKind,
-                              RedeclarationKind Redecl = NotForRedeclaration);
+  NamedDecl *LookupSingleName(
+      Scope *S, DeclarationName Name, SourceLocation Loc,
+      LookupNameKind NameKind,
+      RedeclarationKind Redecl = RedeclarationKind::NotForRedeclaration);
   bool LookupBuiltin(LookupResult &R);
   void LookupNecessaryTypesForBuiltin(Scope *S, unsigned ID);
   bool LookupName(LookupResult &R, Scope *S, bool AllowBuiltinCreation = false,
@@ -7486,11 +7466,11 @@ public:
   bool LookupQualifiedName(LookupResult &R, DeclContext *LookupCtx,
                            CXXScopeSpec &SS);
   bool LookupParsedName(LookupResult &R, Scope *S, CXXScopeSpec *SS,
-                        bool AllowBuiltinCreation = false,
+                        QualType ObjectType, bool AllowBuiltinCreation = false,
                         bool EnteringContext = false);
-  ObjCProtocolDecl *
-  LookupProtocol(IdentifierInfo *II, SourceLocation IdLoc,
-                 RedeclarationKind Redecl = NotForRedeclaration);
+  ObjCProtocolDecl *LookupProtocol(
+      IdentifierInfo *II, SourceLocation IdLoc,
+      RedeclarationKind Redecl = RedeclarationKind::NotForRedeclaration);
   bool LookupInSuper(LookupResult &R, CXXRecordDecl *Class);
 
   void LookupOverloadedOperatorName(OverloadedOperatorKind Op, Scope *S,
@@ -8895,11 +8875,13 @@ public:
     /// functions (but no function templates).
     FoundFunctions,
   };
-  bool LookupTemplateName(
-      LookupResult &R, Scope *S, CXXScopeSpec &SS, QualType ObjectType,
-      bool EnteringContext, bool &MemberOfUnknownSpecialization,
-      RequiredTemplateKind RequiredTemplate = SourceLocation(),
-      AssumedTemplateKind *ATK = nullptr, bool AllowTypoCorrection = true);
+
+  bool
+  LookupTemplateName(LookupResult &R, Scope *S, CXXScopeSpec &SS,
+                     QualType ObjectType, bool EnteringContext,
+                     RequiredTemplateKind RequiredTemplate = SourceLocation(),
+                     AssumedTemplateKind *ATK = nullptr,
+                     bool AllowTypoCorrection = true);
 
   TemplateNameKind isTemplateName(Scope *S, CXXScopeSpec &SS,
                                   bool hasTemplateKeyword,
@@ -9263,7 +9245,8 @@ public:
   void NoteTemplateParameterLocation(const NamedDecl &Decl);
 
   ExprResult BuildExpressionFromDeclTemplateArgument(
-      const TemplateArgument &Arg, QualType ParamType, SourceLocation Loc);
+      const TemplateArgument &Arg, QualType ParamType, SourceLocation Loc,
+      NamedDecl *TemplateParam = nullptr);
   ExprResult
   BuildExpressionFromNonTypeTemplateArgument(const TemplateArgument &Arg,
                                              SourceLocation Loc);
@@ -9586,9 +9569,10 @@ public:
 
   bool isSameOrCompatibleFunctionType(QualType Param, QualType Arg);
 
-  TemplateArgumentLoc getTrivialTemplateArgumentLoc(const TemplateArgument &Arg,
-                                                    QualType NTTPType,
-                                                    SourceLocation Loc);
+  TemplateArgumentLoc
+  getTrivialTemplateArgumentLoc(const TemplateArgument &Arg, QualType NTTPType,
+                                SourceLocation Loc,
+                                NamedDecl *TemplateParam = nullptr);
 
   /// Get a template argument mapping the given template parameter to itself,
   /// e.g. for X in \c template<int X>, this would return an expression template
