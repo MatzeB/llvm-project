@@ -40,7 +40,8 @@ bool ValidateMemRefs::checkAndFixJTReference(BinaryFunction &BF, MCInst &Inst,
   // Accessing a jump table in another function. This is not a
   // legitimate jump table access, we need to replace the reference to
   // the jump table label with a regular rodata reference. Get a
-  // non-JT reference by fetching the symbol 1 byte before the JT label.
+  // non-JT reference by fetching the symbol 1 byte before the JT
+  // label.
   MCSymbol *NewSym = BC.getOrCreateGlobalSymbol(BD->getAddress() - 1, "DATAat");
   BC.MIB->setOperandToSymbolRef(Inst, OperandNum, NewSym, Offset + 1, &*BC.Ctx,
                                 0);
