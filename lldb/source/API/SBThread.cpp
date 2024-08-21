@@ -192,6 +192,9 @@ size_t SBThread::GetStopReasonDataCount() {
         case eStopReasonSignal:
           return 1;
 
+        case eStopReasonInterrupt:
+          return 1;
+
         case eStopReasonException:
           return 1;
 
@@ -259,6 +262,9 @@ uint64_t SBThread::GetStopReasonDataAtIndex(uint32_t idx) {
           return stop_info_sp->GetValue();
 
         case eStopReasonSignal:
+          return stop_info_sp->GetValue();
+
+        case eStopReasonInterrupt:
           return stop_info_sp->GetValue();
 
         case eStopReasonException:
@@ -1202,7 +1208,8 @@ bool SBThread::GetStatus(SBStream &status) const {
   ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
 
   if (exe_ctx.HasThreadScope()) {
-    exe_ctx.GetThreadPtr()->GetStatus(strm, 0, 1, 1, true);
+    exe_ctx.GetThreadPtr()->GetStatus(strm, 0, 1, 1, true,
+                                      /*show_hidden=*/true);
   } else
     strm.PutCString("No status");
 

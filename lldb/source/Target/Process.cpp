@@ -473,7 +473,8 @@ Process::Process(lldb::TargetSP target_sp, ListenerSP listener_sp,
       m_memory_cache(*this), m_allocated_memory_cache(*this),
       m_should_detach(false), m_next_event_action_up(), m_public_run_lock(),
       m_private_run_lock(), m_currently_handling_do_on_removals(false),
-      m_resume_requested(false), m_finalizing(false), m_destructing(false),
+      m_resume_requested(false), m_interrupt_tid(LLDB_INVALID_THREAD_ID),
+      m_finalizing(false), m_destructing(false),
       m_clear_thread_plans_on_stop(false), m_force_next_event_delivery(false),
       m_last_broadcast_state(eStateInvalid), m_destroy_in_process(false),
       m_can_interpret_function_calls(false), m_run_thread_plan_lock(),
@@ -895,6 +896,7 @@ bool Process::HandleProcessStateChangedEvent(
             case eStopReasonThreadExiting:
             case eStopReasonInstrumentation:
             case eStopReasonProcessorTrace:
+            case eStopReasonInterrupt:
               if (!other_thread)
                 other_thread = thread;
               break;
@@ -3873,7 +3875,11 @@ void Process::ControlPrivateStateThread(uint32_t signal) {
   }
 }
 
-void Process::SendAsyncInterrupt() {
+void Process::SendAsyncInterrupt(Thread *thread) {
+  if (thread != nullptr)
+    m_interrupt_tid = thread->GetProtocolID();
+  else
+    m_interrupt_tid = LLDB_INVALID_THREAD_ID;
   if (PrivateStateThreadIsValid())
     m_private_state_broadcaster.BroadcastEvent(Process::eBroadcastBitInterrupt,
                                                nullptr);
@@ -4099,9 +4105,14 @@ thread_result_t Process::RunPrivateStateThread(bool is_secondary_thread) {
 
       if (interrupt_requested) {
         if (StateIsStoppedState(internal_state, true)) {
-          // We requested the interrupt, so mark this as such in the stop event
-          // so clients can tell an interrupted process from a natural stop
-          ProcessEventData::SetInterruptedInEvent(event_sp.get(), true);
+          // Only mark interrupt event if it is not thread specific async
+          // interrupt.
+          if (m_interrupt_tid == LLDB_INVALID_THREAD_ID) {
+            // We requested the interrupt, so mark this as such in the stop
+            // event so clients can tell an interrupted process from a natural
+            // stop
+            ProcessEventData::SetInterruptedInEvent(event_sp.get(), true);
+          }
           interrupt_requested = false;
         } else if (log) {
           LLDB_LOGF(log,
@@ -5534,7 +5545,8 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
       // Print a backtrace into the log so we can figure out where we are:
       StreamString s;
       s.PutCString("Thread state after unsuccessful completion: \n");
-      thread->GetStackFrameStatus(s, 0, UINT32_MAX, true, UINT32_MAX);
+      thread->GetStackFrameStatus(s, 0, UINT32_MAX, true, UINT32_MAX,
+                                  /*show_hidden*/ true);
       log->PutString(s.GetString());
     }
     // Restore the thread state if we are going to discard the plan execution.
@@ -5808,8 +5820,8 @@ size_t Process::GetThreadStatus(Stream &strm,
           continue;
       }
       thread_sp->GetStatus(strm, start_frame, num_frames,
-                           num_frames_with_source,
-                           stop_format);
+                           num_frames_with_source, stop_format,
+                           /*show_hidden*/ num_frames <= 1);
       ++num_thread_infos_dumped;
     } else {
       Log *log = GetLog(LLDBLog::Process);
