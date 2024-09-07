@@ -16,6 +16,7 @@
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Support/ScaledNumber.h"
+#include <vector>
 
 namespace llvm {
 
