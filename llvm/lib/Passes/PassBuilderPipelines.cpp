@@ -1015,7 +1015,8 @@ PassBuilder::buildInlinerPipeline(OptimizationLevel Level,
 
   if (Phase != ThinOrFullLTOPhase::ThinLTOPreLink) {
     MainCGPipeline.addPass(CoroSplitPass(Level != OptimizationLevel::O0));
-    MainCGPipeline.addPass(CoroAnnotationElidePass());
+    MainCGPipeline.addPass(
+        createCGSCCToFunctionPassAdaptor(CoroAnnotationElidePass()));
   }
 
   // Make sure we don't affect potential future NoRerun CGSCC adaptors.
@@ -1061,8 +1062,7 @@ PassBuilder::buildModuleInlinerPipeline(OptimizationLevel Level,
   if (Phase != ThinOrFullLTOPhase::ThinLTOPreLink) {
     MPM.addPass(createModuleToPostOrderCGSCCPassAdaptor(
         CoroSplitPass(Level != OptimizationLevel::O0)));
-    MPM.addPass(
-        createModuleToPostOrderCGSCCPassAdaptor(CoroAnnotationElidePass()));
+    MPM.addPass(createModuleToFunctionPassAdaptor(CoroAnnotationElidePass()));
   }
 
   return MPM;
