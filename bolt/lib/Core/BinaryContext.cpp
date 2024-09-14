@@ -1612,7 +1612,10 @@ std::vector<BinaryFunction *> BinaryContext::getSortedFunctions() {
                       if (A->hasValidIndex() && B->hasValidIndex()) {
                         return A->getIndex() < B->getIndex();
                       }
-                      return A->hasValidIndex();
+                      if (opts::HotFunctionsAtEnd)
+                        return B->hasValidIndex();
+                      else
+                        return A->hasValidIndex();
                     });
   return SortedFunctions;
 }
