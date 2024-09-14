@@ -45,13 +45,17 @@ Error PatchEntries::runOnFunctions(BinaryContext &BC) {
       if (BF.needsPatch())
         return true;
 
-      return !BC.shouldEmit(BF) && !BF.hasExternalRefRelocations();
+      return !BF.isPseudo() && !BC.shouldEmit(BF) &&
+             !BF.hasExternalRefRelocations();
     };
 
     if (!llvm::any_of(llvm::make_second_range(BC.getBinaryFunctions()),
                       needsPatching))
       return Error::success();
   }
+
+  assert(!opts::UseOldText &&
+         "Cannot patch entries while overwriting original .text");
 
   if (opts::Verbosity >= 1)
     BC.outs() << "BOLT-INFO: patching entries in original code\n";
