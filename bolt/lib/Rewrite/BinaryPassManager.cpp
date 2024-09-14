@@ -502,6 +502,9 @@ Error BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
   if (BC.HasRelocations)
     Manager.registerPass(std::make_unique<PatchEntries>());
 
+  // Assign each function an output section.
+  Manager.registerPass(std::make_unique<AssignSections>());
+
   if (BC.isAArch64()) {
     Manager.registerPass(
         std::make_unique<ADRRelaxationPass>(PrintAdrRelaxation));
@@ -525,9 +528,6 @@ Error BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
 
   Manager.registerPass(
       std::make_unique<RetpolineInsertion>(PrintRetpolineInsertion));
-
-  // Assign each function an output section.
-  Manager.registerPass(std::make_unique<AssignSections>());
 
   // This pass turns tail calls into jumps which makes them invisible to
   // function reordering. It's unsafe to use any CFG or instruction analysis
