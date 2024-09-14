@@ -1411,6 +1411,10 @@ public:
   uint64_t
   computeInstructionSize(const MCInst &Inst,
                          const MCCodeEmitter *Emitter = nullptr) const {
+    // FIXME: hack for faster size computation on aarch64.
+    if (isAArch64())
+      return MIB->isPseudo(Inst) ? 0 : 4;
+
     if (std::optional<uint32_t> Size = MIB->getSize(Inst))
       return *Size;
 
