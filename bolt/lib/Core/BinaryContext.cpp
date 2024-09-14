@@ -1692,7 +1692,16 @@ std::vector<BinaryFunction *> BinaryContext::getSortedFunctions() {
                   SortedFunctions.begin(),
                   [](BinaryFunction &BF) { return &BF; });
 
-  llvm::stable_sort(SortedFunctions, compareBinaryFunctionByIndex);
+  llvm::stable_sort(SortedFunctions,
+                    [](const BinaryFunction *A, const BinaryFunction *B) {
+                      if (A->hasValidIndex() && B->hasValidIndex()) {
+                        return A->getIndex() < B->getIndex();
+                      }
+                      if (opts::HotFunctionsAtEnd)
+                        return B->hasValidIndex();
+                      else
+                        return A->hasValidIndex();
+                    });
   return SortedFunctions;
 }
 
