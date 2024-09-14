@@ -2364,6 +2364,15 @@ BinaryContext::createInjectedBinaryFunction(const std::string &Name,
   return BF;
 }
 
+BinaryFunction *
+BinaryContext::createThunkBinaryFunction(const std::string &Name) {
+  ThunkBinaryFunctions.push_back(new BinaryFunction(Name, *this, true));
+  BinaryFunction *BF = ThunkBinaryFunctions.back();
+  setSymbolToFunctionMap(BF->getSymbol(), BF);
+  BF->CurrentState = BinaryFunction::State::CFG;
+  return BF;
+}
+
 std::pair<size_t, size_t>
 BinaryContext::calculateEmittedSize(BinaryFunction &BF, bool FixBranches) {
   // Adjust branch instruction to match the current layout.
