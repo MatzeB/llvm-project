@@ -4555,6 +4555,9 @@ void BinaryFunction::printLoopInfo(raw_ostream &OS) const {
 }
 
 bool BinaryFunction::isAArch64Veneer() const {
+  if (hasNameRegex("__AArch64.*Thunk.*"))
+    return true;
+
   if (empty() || hasIslandsInfo())
     return false;
 
