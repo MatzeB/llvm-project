@@ -1609,6 +1609,11 @@ std::vector<BinaryFunction *> BinaryContext::getSortedFunctions() {
 
   llvm::stable_sort(SortedFunctions,
                     [](const BinaryFunction *A, const BinaryFunction *B) {
+                      // Place hot text movers at the start.
+                      if (A->isHotTextMover() && !B->isHotTextMover())
+                        return true;
+                      if (!A->isHotTextMover() && B->isHotTextMover())
+                        return false;
                       if (A->hasValidIndex() && B->hasValidIndex()) {
                         return A->getIndex() < B->getIndex();
                       }
