@@ -637,7 +637,10 @@ Attribute Changes in Clang
   that a function requires an additional x86-64 thunk, which may be patched at runtime.
 
 - Introduced a new attribute ``[[clang::coro_await_elidable]]`` on coroutine return types
-  to express elideability at call sites where the coroutine is co_awaited as a prvalue.
+  to express elideability at call sites where the coroutine is invoked under a safe elide context.
+
+- Introduced a new attribute ``[[clang::coro_await_elidable_argument]]`` on function parameters
+  to propagate safe elide context to arguments if such function is also under a safe elide context.
 
 Improvements to Clang's diagnostics
 -----------------------------------
