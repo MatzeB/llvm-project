@@ -2499,7 +2499,7 @@ private:
 
 inline bool shouldSkipCheckingODR(const Decl *D) {
   return D->getASTContext().getLangOpts().SkipODRCheckInGMF &&
-         D->isFromExplicitGlobalModule();
+         (D->isFromExplicitGlobalModule() || D->isFromHeaderUnit());
 }
 
 } // namespace clang
