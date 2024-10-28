@@ -951,22 +951,26 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, const FunctionFragment &FF) {
   // zero-offset landing pad we have to place landing pads in the same section
   // as the corresponding invokes for shared objects.
   std::function<void(const MCSymbol *)> emitLandingPad;
-  if (BC.HasFixedLoadAddress) {
+  if (0) {//BC.HasFixedLoadAddress) {
     Streamer.emitIntValue(dwarf::DW_EH_PE_udata4, 1); // LPStart format
     Streamer.emitIntValue(0, 4);                      // LPStart
     emitLandingPad = [&](const MCSymbol *LPSymbol) {
       if (!LPSymbol)
-        Streamer.emitIntValue(0, 4);
+        //Streamer.emitIntValue(0, 4);
+        Streamer.emitULEB128IntValue(0);
       else
-        Streamer.emitSymbolValue(LPSymbol, 4);
+        //Streamer.emitSymbolValue(LPSymbol, 4);
+        Streamer.emitULEB128Value(MCSymbolRefExpr::create(LPSymbol, *BC.Ctx));
     };
   } else {
     Streamer.emitIntValue(dwarf::DW_EH_PE_omit, 1); // LPStart format
     emitLandingPad = [&](const MCSymbol *LPSymbol) {
       if (!LPSymbol)
-        Streamer.emitIntValue(0, 4);
+        //Streamer.emitIntValue(0, 4);
+        Streamer.emitULEB128IntValue(0);
       else
-        Streamer.emitAbsoluteSymbolDiff(LPSymbol, StartSymbol, 4);
+        //Streamer.emitAbsoluteSymbolDiff(LPSymbol, StartSymbol, 4);
+        Streamer.emitAbsoluteSymbolDiffAsULEB128(LPSymbol, StartSymbol);
     };
   }
 
@@ -983,7 +987,8 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, const FunctionFragment &FF) {
   // Emit the landing pad call site table. We use signed data4 since we can emit
   // a landing pad in a different part of the split function that could appear
   // earlier in the address space than LPStart.
-  Streamer.emitIntValue(dwarf::DW_EH_PE_sdata4, 1);
+  //Streamer.emitIntValue(dwarf::DW_EH_PE_sdata4, 1);
+  Streamer.emitIntValue(dwarf::DW_EH_PE_uleb128, 1);
 
   MCSymbol *CSTStartLabel = BC.Ctx->createTempSymbol("CSTStart");
   MCSymbol *CSTEndLabel = BC.Ctx->createTempSymbol("CSTEnd");
@@ -1000,8 +1005,10 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, const FunctionFragment &FF) {
 
     // Start of the range is emitted relative to the start of current
     // function split part.
-    Streamer.emitAbsoluteSymbolDiff(BeginLabel, StartSymbol, 4);
-    Streamer.emitAbsoluteSymbolDiff(EndLabel, BeginLabel, 4);
+    //Streamer.emitAbsoluteSymbolDiff(BeginLabel, StartSymbol, 4);
+    Streamer.emitAbsoluteSymbolDiffAsULEB128(BeginLabel, StartSymbol);
+    //treamer.emitAbsoluteSymbolDiff(EndLabel, BeginLabel, 4);
+    Streamer.emitAbsoluteSymbolDiffAsULEB128(EndLabel, BeginLabel);
     emitLandingPad(CallSite.LP);
     Streamer.emitULEB128IntValue(CallSite.Action);
   }

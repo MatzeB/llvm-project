@@ -901,7 +901,7 @@ void SplitFunctions::splitFunction(BinaryFunction &BF, SplitStrategy &S) {
   // have to be placed in the same fragment. When we split them, create
   // trampoline landing pads that will redirect the execution to real LPs.
   TrampolineSetType Trampolines;
-  if (!BC.HasFixedLoadAddress && BF.hasEHRanges() && BF.isSplit())
+  if (/*!BC.HasFixedLoadAddress &&*/ BF.hasEHRanges() && BF.isSplit())
     Trampolines = createEHTrampolines(BF);
 
   // Check the new size to see if it's worth splitting the function.
