@@ -26035,6 +26035,14 @@ static SDValue simplifyShuffleOfShuffle(ShuffleVectorSDNode *Shuf) {
   return Shuf->getOperand(0);
 }
 
+static int getFirstNonUndef(ArrayRef<int> Mask) {
+  for (int M : Mask) {
+    if (M >= 0)
+      return M;
+  }
+  return -1;
+}
+
 SDValue DAGCombiner::visitVECTOR_SHUFFLE(SDNode *N) {
   EVT VT = N->getValueType(0);
   unsigned NumElts = VT.getVectorNumElements();
@@ -26051,20 +26059,65 @@ SDValue DAGCombiner::visitVECTOR_SHUFFLE(SDNode *N) {
   ShuffleVectorSDNode *SVN = cast<ShuffleVectorSDNode>(N);
 
   // Canonicalize shuffle v, v -> v, undef
+  ArrayRef<int> Mask = SVN->getMask();
   if (N0 == N1)
     return DAG.getVectorShuffle(VT, SDLoc(N), N0, DAG.getUNDEF(VT),
-                                createUnaryMask(SVN->getMask(), NumElts));
+                                createUnaryMask(Mask, NumElts));
 
-  // Canonicalize shuffle undef, v -> v, undef.  Commute the shuffle mask.
-  if (N0.isUndef())
+  // Canonicalization rules to order LHS/RHS.  Keep all patterns in a single
+  // if-cascade to avoid endless loops.
+  if (N0.isUndef()) {
+    // Put undef on RHS.
     return DAG.getCommutedVectorShuffle(*SVN);
+  }
+  bool Ordered = false;
+  if (Level < AfterLegalizeDAG && TLI.isTypeLegal(VT)) {
+    unsigned N0Op = N0.getOpcode();
+    unsigned N1Op = N1.getOpcode();
+    // Canonicalize shuffles according to rules:
+    //  shuffle(A, shuffle(A, B)) -> shuffle(shuffle(A,B), A)
+    //  shuffle(B, shuffle(A, B)) -> shuffle(shuffle(A,B), B)
+    //  shuffle(B, shuffle(A, Undef)) -> shuffle(shuffle(A, Undef), B)
+    if (N0Op == ISD::VECTOR_SHUFFLE && N1Op != ISD::VECTOR_SHUFFLE) {
+      SDValue SV0 = N0->getOperand(0);
+      SDValue SV1 = N0->getOperand(1);
+      if (SV1.isUndef() || N1 == SV0 || N1 == SV1)
+        Ordered = true;
+    } else if (N0Op != ISD::VECTOR_SHUFFLE && N1Op == ISD::VECTOR_SHUFFLE) {
+      // The incoming shuffle must be of the same type as the result of the
+      // current shuffle.
+      assert(N1->getOperand(0).getValueType() == VT &&
+             "Shuffle types don't match");
+
+      SDValue SV0 = N1->getOperand(0);
+      SDValue SV1 = N1->getOperand(1);
+      if (SV1.isUndef() || N0 == SV0 || N0 == SV1)
+        return DAG.getCommutedVectorShuffle(*SVN);
+    }
+
+    // Canonicalize splat shuffles to the RHS to improve merging below.
+    //  shuffle(splat(A,u), shuffle(C,D)) -> shuffle'(shuffle(C,D), splat(A,u))
+    if (N0Op == ISD::VECTOR_SHUFFLE && N1Op == ISD::VECTOR_SHUFFLE) {
+      bool N0Splat = cast<ShuffleVectorSDNode>(N0)->isSplat();
+      bool N1Splat = cast<ShuffleVectorSDNode>(N1)->isSplat();
+      if (!N0Splat && N1Splat) {
+        Ordered = true;
+      } else if (N0Splat && !N1Splat) {
+        return DAG.getCommutedVectorShuffle(*SVN);
+      }
+    }
+  }
+  if (!Ordered && getFirstNonUndef(Mask) >= static_cast<int>(NumElts)) {
+    // Order so first non-undef lane comes from LHS.
+    return DAG.getCommutedVectorShuffle(*SVN);
+  }
 
   // Remove references to rhs if it is undef
   if (N1.isUndef()) {
     bool Changed = false;
     SmallVector<int, 8> NewMask;
     for (unsigned i = 0; i != NumElts; ++i) {
-      int Idx = SVN->getMaskElt(i);
+      int Idx = Mask[i];
       if (Idx >= (int)NumElts) {
         Idx = -1;
         Changed = true;
