@@ -101,6 +101,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -133,6 +134,9 @@ STATISTIC(NumRetsDup, "Number of return instructions duplicated");
 STATISTIC(NumDbgValueMoved, "Number of debug value instructions moved");
 STATISTIC(NumSelectsExpanded, "Number of selects turned into branches");
 STATISTIC(NumStoreExtractExposed, "Number of store(extractelement) exposed");
+
+static cl::opt<unsigned> RandoShuffle(
+    "rando-shuffle", cl::Hidden, cl::init(false));
 
 static cl::opt<bool> DisableBranchOpts(
     "disable-cgp-branch-opts", cl::Hidden, cl::init(false),
@@ -767,6 +771,20 @@ bool CodeGenPrepare::_run(Function &F) {
   // preparatory transforms.
   EverMadeChange |= placeDbgValues(F);
   EverMadeChange |= placePseudoProbes(F);
+
+  if (RandoShuffle != 0) {
+    dbgs() << "Randomly commuting some shufflevector instructions...\n";
+    static std::mt19937 gen(RandoShuffle);
+    for (BasicBlock &BB : F) {
+      for (Instruction &I : BB) {
+        if (ShuffleVectorInst *SI = dyn_cast<ShuffleVectorInst>(&I)) {
+          if (gen() % 2 == 0) {
+            SI->commute();
+          }
+        }
+      }
+    }
+  }
 
 #ifndef NDEBUG
   if (VerifyBFIUpdates)
