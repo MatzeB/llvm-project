@@ -140,7 +140,7 @@ private:
 
   void emitCFIInstruction(const MCCFIInstruction &Inst) const;
 
-  /// Emit exception handling ranges for the function.
+  /// Emit exception handling ranges for the function fragment.
   void emitLSDA(BinaryFunction &BF, const FunctionFragment &FF);
 
   /// Emit line number information corresponding to \p NewLoc. \p PrevLoc
@@ -951,6 +951,7 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, const FunctionFragment &FF) {
   // zero-offset landing pad we have to place landing pads in the same section
   // as the corresponding invokes for shared objects.
   std::function<void(const MCSymbol *)> emitLandingPad;
+  const MCSymbol *LPStartSymbol = nullptr;
   if (0) {//BC.HasFixedLoadAddress) {
     Streamer.emitIntValue(dwarf::DW_EH_PE_udata4, 1); // LPStart format
     Streamer.emitIntValue(0, 4);                      // LPStart
@@ -963,14 +964,37 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, const FunctionFragment &FF) {
         Streamer.emitULEB128Value(MCSymbolRefExpr::create(LPSymbol, *BC.Ctx));
     };
   } else {
-    Streamer.emitIntValue(dwarf::DW_EH_PE_omit, 1); // LPStart format
+
+    //dbgs() << "*** Emitting fragment " << FF.getFragmentNum().get() << " for "
+           //<< BF << '\n';
+
+    // Emit LPStart encoding and optionally LPStart.
+    if (FF.getLandingPadFragmentNum() != FF.getFragmentNum()) {
+      FunctionFragment &LPFragment =
+          BF.getLayout().getFragment(FF.getLandingPadFragmentNum());
+      //dbgs() << "LP fragment number : " << FF.getLandingPadFragmentNum().get()
+             //<< '\n';
+      //dbgs() << "LP fragment number : " << LPFragment.getFragmentNum().get()
+             //<< '\n';
+      LPStartSymbol = BF.getSymbol(LPFragment.getFragmentNum());
+      //dbgs() << "LPStartSymbol : " << LPStartSymbol->getName() << '\n';
+      Streamer.emitIntValue(dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4, 1);
+      MCSymbol *DotSymbol = BC.Ctx->createTempSymbol("LPBase");
+      Streamer.emitLabel(DotSymbol);
+      Streamer.emitAbsoluteSymbolDiff(LPStartSymbol, DotSymbol, 4);
+      //Streamer.emitSymbolValue(LPStartSymbol, 4);
+    } else {
+      //dbgs() << "*** does not need LPStart\n";
+      LPStartSymbol = StartSymbol;
+      Streamer.emitIntValue(dwarf::DW_EH_PE_omit, 1);
+    }
     emitLandingPad = [&](const MCSymbol *LPSymbol) {
       if (!LPSymbol)
         //Streamer.emitIntValue(0, 4);
         Streamer.emitULEB128IntValue(0);
       else
         //Streamer.emitAbsoluteSymbolDiff(LPSymbol, StartSymbol, 4);
-        Streamer.emitAbsoluteSymbolDiffAsULEB128(LPSymbol, StartSymbol);
+        Streamer.emitAbsoluteSymbolDiffAsULEB128(LPSymbol, LPStartSymbol);
     };
   }
 

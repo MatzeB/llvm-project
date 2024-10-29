@@ -94,6 +94,12 @@ private:
   /// Offset in the file.
   uint64_t FileOffset = 0;
 
+  /// Fragment that contains landing pads for this fragment. Only set when
+  /// landing pads are in a different fragment. Note that landing pads for any
+  /// given fragment are expected to be collocated in a single fragment due
+  /// to runtime limitations of exception handling library.
+  std::optional<FragmentNum> LPFragmentNum;
+
   FunctionFragment(FunctionLayout &Layout, FragmentNum Num);
   FunctionFragment(const FunctionFragment &) = default;
   FunctionFragment(FunctionFragment &&) = default;
@@ -116,6 +122,15 @@ public:
   void setImageSize(uint64_t Size) { ImageSize = Size; }
   uint64_t getFileOffset() const { return FileOffset; }
   void setFileOffset(uint64_t Offset) { FileOffset = Offset; }
+
+  FragmentNum getLandingPadFragmentNum() const {
+    return LPFragmentNum.value_or(Num);
+  }
+  void setLandingPadFragmentNum(FragmentNum Num) { LPFragmentNum = Num; }
+
+  /// Return true if this fragment has an associated landing pad fragment that
+  /// contains all landing pads for it (could be the same fragment).
+  bool hasLandingPadFragment() const { return LPFragmentNum.has_value(); }
 
   unsigned size() const { return Size; };
   bool empty() const { return size() == 0; };
