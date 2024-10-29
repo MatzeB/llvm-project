@@ -753,29 +753,29 @@ define void @store_i64_stride5_vf8(ptr %in.vecptr0, ptr %in.vecptr1, ptr %in.vec
 ; AVX-NEXT:    vunpcklpd {{.*#+}} ymm8 = ymm9[0],mem[0],ymm9[2],mem[2]
 ; AVX-NEXT:    vblendpd {{.*#+}} ymm6 = ymm6[0,1],ymm8[2,3]
 ; AVX-NEXT:    vblendpd {{.*#+}} ymm6 = ymm6[0],ymm5[1],ymm6[2,3]
-; AVX-NEXT:    vperm2f128 {{.*#+}} ymm8 = mem[2,3],ymm9[2,3]
-; AVX-NEXT:    vmovapd 48(%rdx), %xmm10
-; AVX-NEXT:    vshufpd {{.*#+}} ymm8 = ymm10[0],ymm8[0],ymm10[2],ymm8[3]
-; AVX-NEXT:    vblendpd {{.*#+}} ymm8 = ymm8[0,1],ymm5[2],ymm8[3]
-; AVX-NEXT:    vmovaps 32(%rdx), %xmm11
-; AVX-NEXT:    vinsertf128 $1, %xmm11, %ymm0, %ymm12
-; AVX-NEXT:    vbroadcastsd 40(%rsi), %ymm13
-; AVX-NEXT:    vblendpd {{.*#+}} ymm9 = ymm9[0,1],ymm13[2,3]
-; AVX-NEXT:    vblendpd {{.*#+}} ymm9 = ymm9[0,1,2],ymm12[3]
-; AVX-NEXT:    vblendpd {{.*#+}} ymm9 = ymm5[0],ymm9[1,2,3]
+; AVX-NEXT:    vmovaps 32(%rdx), %xmm10
+; AVX-NEXT:    vinsertf128 $1, %xmm10, %ymm0, %ymm8
+; AVX-NEXT:    vbroadcastsd 40(%rsi), %ymm11
+; AVX-NEXT:    vblendpd {{.*#+}} ymm11 = ymm9[0,1],ymm11[2,3]
+; AVX-NEXT:    vblendpd {{.*#+}} ymm8 = ymm11[0,1,2],ymm8[3]
+; AVX-NEXT:    vblendpd {{.*#+}} ymm8 = ymm5[0],ymm8[1,2,3]
+; AVX-NEXT:    vperm2f128 {{.*#+}} ymm9 = mem[2,3],ymm9[2,3]
+; AVX-NEXT:    vmovapd 48(%rdx), %xmm11
+; AVX-NEXT:    vshufpd {{.*#+}} ymm9 = ymm11[0],ymm9[0],ymm11[2],ymm9[3]
+; AVX-NEXT:    vblendpd {{.*#+}} ymm9 = ymm9[0,1],ymm5[2],ymm9[3]
 ; AVX-NEXT:    vpermilps {{.*#+}} xmm12 = mem[2,3,2,3]
 ; AVX-NEXT:    vunpcklpd {{.*#+}} ymm13 = ymm1[0],mem[0],ymm1[2],mem[2]
 ; AVX-NEXT:    vblendps {{.*#+}} ymm12 = ymm12[0,1,2,3],ymm13[4,5,6,7]
 ; AVX-NEXT:    vblendps {{.*#+}} ymm12 = ymm12[0,1],ymm3[2,3],ymm12[4,5,6,7]
 ; AVX-NEXT:    vmovapd 48(%rsi), %xmm13
-; AVX-NEXT:    vunpckhpd {{.*#+}} xmm10 = xmm13[1],xmm10[1]
+; AVX-NEXT:    vunpckhpd {{.*#+}} xmm11 = xmm13[1],xmm11[1]
 ; AVX-NEXT:    vbroadcastsd 56(%rcx), %ymm13
-; AVX-NEXT:    vblendpd {{.*#+}} ymm10 = ymm10[0,1],ymm13[2,3]
-; AVX-NEXT:    vblendpd {{.*#+}} ymm5 = ymm10[0,1,2],ymm5[3]
+; AVX-NEXT:    vblendpd {{.*#+}} ymm11 = ymm11[0,1],ymm13[2,3]
+; AVX-NEXT:    vblendpd {{.*#+}} ymm5 = ymm11[0,1,2],ymm5[3]
 ; AVX-NEXT:    vunpcklpd {{.*#+}} xmm7 = xmm7[0],mem[0]
 ; AVX-NEXT:    vblendps {{.*#+}} ymm1 = ymm7[0,1,2,3],ymm1[4,5,6,7]
 ; AVX-NEXT:    vblendps {{.*#+}} ymm1 = ymm1[0,1,2,3],ymm3[4,5],ymm1[6,7]
-; AVX-NEXT:    vunpcklpd {{.*#+}} xmm3 = xmm11[0],mem[0]
+; AVX-NEXT:    vunpcklpd {{.*#+}} xmm3 = xmm10[0],mem[0]
 ; AVX-NEXT:    vmovaps (%rdi), %xmm7
 ; AVX-NEXT:    vmovaps 32(%rdi), %xmm10
 ; AVX-NEXT:    vunpcklpd {{.*#+}} xmm10 = xmm10[0],mem[0]
@@ -786,8 +786,8 @@ define void @store_i64_stride5_vf8(ptr %in.vecptr0, ptr %in.vecptr1, ptr %in.vec
 ; AVX-NEXT:    vmovaps %xmm10, 160(%r9)
 ; AVX-NEXT:    vmovaps %xmm3, 176(%r9)
 ; AVX-NEXT:    vmovaps %ymm12, 64(%r9)
-; AVX-NEXT:    vmovapd %ymm9, 192(%r9)
-; AVX-NEXT:    vmovapd %ymm8, 256(%r9)
+; AVX-NEXT:    vmovapd %ymm9, 256(%r9)
+; AVX-NEXT:    vmovapd %ymm8, 192(%r9)
 ; AVX-NEXT:    vmovapd %ymm6, 224(%r9)
 ; AVX-NEXT:    vmovaps %ymm2, 32(%r9)
 ; AVX-NEXT:    vmovaps %ymm1, 96(%r9)
@@ -854,8 +854,8 @@ define void @store_i64_stride5_vf8(ptr %in.vecptr0, ptr %in.vecptr1, ptr %in.vec
 ; AVX2-NEXT:    vmovaps %ymm11, 64(%r9)
 ; AVX2-NEXT:    vmovaps %ymm10, 160(%r9)
 ; AVX2-NEXT:    vmovaps %ymm0, 96(%r9)
-; AVX2-NEXT:    vmovaps %ymm9, 192(%r9)
 ; AVX2-NEXT:    vmovaps %ymm5, 256(%r9)
+; AVX2-NEXT:    vmovaps %ymm9, 192(%r9)
 ; AVX2-NEXT:    vmovaps %ymm8, 224(%r9)
 ; AVX2-NEXT:    vmovaps %ymm7, (%r9)
 ; AVX2-NEXT:    vmovaps %ymm3, 32(%r9)
@@ -922,8 +922,8 @@ define void @store_i64_stride5_vf8(ptr %in.vecptr0, ptr %in.vecptr1, ptr %in.vec
 ; AVX2-FP-NEXT:    vmovaps %ymm11, 64(%r9)
 ; AVX2-FP-NEXT:    vmovaps %ymm10, 160(%r9)
 ; AVX2-FP-NEXT:    vmovaps %ymm0, 96(%r9)
-; AVX2-FP-NEXT:    vmovaps %ymm9, 192(%r9)
 ; AVX2-FP-NEXT:    vmovaps %ymm5, 256(%r9)
+; AVX2-FP-NEXT:    vmovaps %ymm9, 192(%r9)
 ; AVX2-FP-NEXT:    vmovaps %ymm8, 224(%r9)
 ; AVX2-FP-NEXT:    vmovaps %ymm7, (%r9)
 ; AVX2-FP-NEXT:    vmovaps %ymm3, 32(%r9)
@@ -990,8 +990,8 @@ define void @store_i64_stride5_vf8(ptr %in.vecptr0, ptr %in.vecptr1, ptr %in.vec
 ; AVX2-FCP-NEXT:    vmovaps %ymm11, 64(%r9)
 ; AVX2-FCP-NEXT:    vmovaps %ymm10, 160(%r9)
 ; AVX2-FCP-NEXT:    vmovaps %ymm0, 96(%r9)
-; AVX2-FCP-NEXT:    vmovaps %ymm9, 192(%r9)
 ; AVX2-FCP-NEXT:    vmovaps %ymm5, 256(%r9)
+; AVX2-FCP-NEXT:    vmovaps %ymm9, 192(%r9)
 ; AVX2-FCP-NEXT:    vmovaps %ymm8, 224(%r9)
 ; AVX2-FCP-NEXT:    vmovaps %ymm7, (%r9)
 ; AVX2-FCP-NEXT:    vmovaps %ymm3, 32(%r9)

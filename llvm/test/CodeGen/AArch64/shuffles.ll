@@ -5,58 +5,62 @@
 define <16 x i32> @test_shuf1(<16 x i32> %x, <16 x i32> %y) {
 ; CHECKLE-LABEL: test_shuf1:
 ; CHECKLE:       // %bb.0:
-; CHECKLE-NEXT:    ext v3.16b, v6.16b, v1.16b, #4
+; CHECKLE-NEXT:    zip2 v3.4s, v7.4s, v6.4s
 ; CHECKLE-NEXT:    uzp1 v5.4s, v1.4s, v0.4s
-; CHECKLE-NEXT:    uzp2 v16.4s, v2.4s, v4.4s
-; CHECKLE-NEXT:    dup v17.4s, v4.s[0]
-; CHECKLE-NEXT:    trn2 v4.4s, v1.4s, v3.4s
-; CHECKLE-NEXT:    mov v17.s[0], v6.s[3]
-; CHECKLE-NEXT:    trn2 v1.4s, v5.4s, v1.4s
+; CHECKLE-NEXT:    zip1 v16.4s, v4.4s, v4.4s
+; CHECKLE-NEXT:    ext v6.16b, v6.16b, v4.16b, #12
+; CHECKLE-NEXT:    ext v4.16b, v1.16b, v1.16b, #4
+; CHECKLE-NEXT:    rev64 v2.4s, v2.4s
+; CHECKLE-NEXT:    trn2 v5.4s, v5.4s, v1.4s
+; CHECKLE-NEXT:    trn2 v1.4s, v7.4s, v3.4s
+; CHECKLE-NEXT:    ext v16.16b, v16.16b, v7.16b, #4
 ; CHECKLE-NEXT:    rev64 v3.4s, v7.4s
-; CHECKLE-NEXT:    trn1 v2.4s, v16.4s, v2.4s
-; CHECKLE-NEXT:    mov v4.s[0], v7.s[1]
-; CHECKLE-NEXT:    ext v1.16b, v0.16b, v1.16b, #12
-; CHECKLE-NEXT:    mov v3.d[0], v17.d[0]
-; CHECKLE-NEXT:    mov v2.s[3], v7.s[0]
+; CHECKLE-NEXT:    mov v4.d[0], v1.d[0]
+; CHECKLE-NEXT:    ext v1.16b, v0.16b, v5.16b, #12
+; CHECKLE-NEXT:    mov v2.d[1], v16.d[1]
+; CHECKLE-NEXT:    mov v3.d[0], v6.d[0]
 ; CHECKLE-NEXT:    mov v0.16b, v4.16b
 ; CHECKLE-NEXT:    ret
 ;
 ; CHECKBE-LABEL: test_shuf1:
 ; CHECKBE:       // %bb.0:
-; CHECKBE-NEXT:    rev64 v1.4s, v1.4s
-; CHECKBE-NEXT:    rev64 v3.4s, v6.4s
+; CHECKBE-NEXT:    rev64 v3.4s, v7.4s
+; CHECKBE-NEXT:    rev64 v5.4s, v6.4s
 ; CHECKBE-NEXT:    rev64 v0.4s, v0.4s
-; CHECKBE-NEXT:    rev64 v2.4s, v2.4s
+; CHECKBE-NEXT:    rev64 v1.4s, v1.4s
 ; CHECKBE-NEXT:    rev64 v4.4s, v4.4s
-; CHECKBE-NEXT:    rev64 v5.4s, v7.4s
-; CHECKBE-NEXT:    ext v1.16b, v1.16b, v1.16b, #8
+; CHECKBE-NEXT:    rev64 v2.4s, v2.4s
 ; CHECKBE-NEXT:    ext v3.16b, v3.16b, v3.16b, #8
-; CHECKBE-NEXT:    ext v0.16b, v0.16b, v0.16b, #8
-; CHECKBE-NEXT:    ext v2.16b, v2.16b, v2.16b, #8
-; CHECKBE-NEXT:    ext v4.16b, v4.16b, v4.16b, #8
 ; CHECKBE-NEXT:    ext v5.16b, v5.16b, v5.16b, #8
-; CHECKBE-NEXT:    ext v6.16b, v3.16b, v1.16b, #4
-; CHECKBE-NEXT:    uzp1 v16.4s, v1.4s, v0.4s
-; CHECKBE-NEXT:    uzp2 v7.4s, v2.4s, v4.4s
-; CHECKBE-NEXT:    dup v4.4s, v4.s[0]
-; CHECKBE-NEXT:    rev64 v17.4s, v5.4s
-; CHECKBE-NEXT:    trn2 v6.4s, v1.4s, v6.4s
-; CHECKBE-NEXT:    mov v4.s[0], v3.s[3]
-; CHECKBE-NEXT:    trn2 v1.4s, v16.4s, v1.4s
-; CHECKBE-NEXT:    trn1 v2.4s, v7.4s, v2.4s
-; CHECKBE-NEXT:    rev64 v3.4s, v17.4s
-; CHECKBE-NEXT:    mov v6.s[0], v5.s[1]
-; CHECKBE-NEXT:    rev64 v4.4s, v4.4s
-; CHECKBE-NEXT:    ext v0.16b, v0.16b, v1.16b, #12
-; CHECKBE-NEXT:    mov v2.s[3], v5.s[0]
-; CHECKBE-NEXT:    rev64 v1.4s, v6.4s
-; CHECKBE-NEXT:    mov v3.d[0], v4.d[0]
-; CHECKBE-NEXT:    rev64 v4.4s, v0.4s
-; CHECKBE-NEXT:    rev64 v2.4s, v2.4s
-; CHECKBE-NEXT:    ext v0.16b, v1.16b, v1.16b, #8
-; CHECKBE-NEXT:    ext v3.16b, v3.16b, v3.16b, #8
-; CHECKBE-NEXT:    ext v1.16b, v4.16b, v4.16b, #8
+; CHECKBE-NEXT:    ext v0.16b, v0.16b, v0.16b, #8
+; CHECKBE-NEXT:    ext v1.16b, v1.16b, v1.16b, #8
+; CHECKBE-NEXT:    ext v4.16b, v4.16b, v4.16b, #8
 ; CHECKBE-NEXT:    ext v2.16b, v2.16b, v2.16b, #8
+; CHECKBE-NEXT:    zip2 v6.4s, v3.4s, v5.4s
+; CHECKBE-NEXT:    zip1 v7.4s, v4.4s, v4.4s
+; CHECKBE-NEXT:    uzp1 v16.4s, v1.4s, v0.4s
+; CHECKBE-NEXT:    ext v4.16b, v5.16b, v4.16b, #12
+; CHECKBE-NEXT:    rev64 v5.4s, v3.4s
+; CHECKBE-NEXT:    ext v17.16b, v1.16b, v1.16b, #4
+; CHECKBE-NEXT:    rev64 v2.4s, v2.4s
+; CHECKBE-NEXT:    trn2 v6.4s, v3.4s, v6.4s
+; CHECKBE-NEXT:    ext v3.16b, v7.16b, v3.16b, #4
+; CHECKBE-NEXT:    trn2 v1.4s, v16.4s, v1.4s
+; CHECKBE-NEXT:    rev64 v4.4s, v4.4s
+; CHECKBE-NEXT:    rev64 v5.4s, v5.4s
+; CHECKBE-NEXT:    rev64 v7.4s, v17.4s
+; CHECKBE-NEXT:    rev64 v2.4s, v2.4s
+; CHECKBE-NEXT:    rev64 v6.4s, v6.4s
+; CHECKBE-NEXT:    rev64 v3.4s, v3.4s
+; CHECKBE-NEXT:    ext v0.16b, v0.16b, v1.16b, #12
+; CHECKBE-NEXT:    mov v5.d[0], v4.d[0]
+; CHECKBE-NEXT:    mov v7.d[0], v6.d[0]
+; CHECKBE-NEXT:    mov v2.d[1], v3.d[1]
+; CHECKBE-NEXT:    rev64 v1.4s, v0.4s
+; CHECKBE-NEXT:    ext v3.16b, v5.16b, v5.16b, #8
+; CHECKBE-NEXT:    ext v0.16b, v7.16b, v7.16b, #8
+; CHECKBE-NEXT:    ext v2.16b, v2.16b, v2.16b, #8
+; CHECKBE-NEXT:    ext v1.16b, v1.16b, v1.16b, #8
 ; CHECKBE-NEXT:    ret
   %s3 = shufflevector <16 x i32> %x, <16 x i32> %y, <16 x i32> <i32 29, i32 26, i32 7, i32 4, i32 3, i32 6, i32 5, i32 2, i32 9, i32 8, i32 17, i32 28, i32 27, i32 16, i32 31, i32 30>
   ret <16 x i32> %s3
@@ -221,21 +225,19 @@ define <4 x i32> @test4366(<4 x i32> %a, <4 x i32> %b)
 define <4 x i32> @test7367(<4 x i32> %a, <4 x i32> %b)
 ; CHECKLE-LABEL: test7367:
 ; CHECKLE:       // %bb.0:
-; CHECKLE-NEXT:    mov v2.16b, v1.16b
-; CHECKLE-NEXT:    mov v2.d[0], v0.d[1]
-; CHECKLE-NEXT:    mov v2.s[0], v1.s[3]
-; CHECKLE-NEXT:    mov v0.16b, v2.16b
+; CHECKLE-NEXT:    mov v1.s[0], v1.s[3]
+; CHECKLE-NEXT:    mov v1.s[1], v0.s[3]
+; CHECKLE-NEXT:    mov v0.16b, v1.16b
 ; CHECKLE-NEXT:    ret
 ;
 ; CHECKBE-LABEL: test7367:
 ; CHECKBE:       // %bb.0:
-; CHECKBE-NEXT:    ext v0.16b, v0.16b, v0.16b, #8
-; CHECKBE-NEXT:    ext v2.16b, v1.16b, v1.16b, #8
 ; CHECKBE-NEXT:    rev64 v1.4s, v1.4s
-; CHECKBE-NEXT:    mov v2.d[0], v0.d[1]
-; CHECKBE-NEXT:    ext v0.16b, v1.16b, v1.16b, #8
-; CHECKBE-NEXT:    rev64 v1.4s, v2.4s
-; CHECKBE-NEXT:    mov v1.s[0], v0.s[3]
+; CHECKBE-NEXT:    rev64 v0.4s, v0.4s
+; CHECKBE-NEXT:    ext v1.16b, v1.16b, v1.16b, #8
+; CHECKBE-NEXT:    ext v0.16b, v0.16b, v0.16b, #8
+; CHECKBE-NEXT:    mov v1.s[0], v1.s[3]
+; CHECKBE-NEXT:    mov v1.s[1], v0.s[3]
 ; CHECKBE-NEXT:    rev64 v0.4s, v1.4s
 ; CHECKBE-NEXT:    ext v0.16b, v0.16b, v0.16b, #8
 ; CHECKBE-NEXT:    ret

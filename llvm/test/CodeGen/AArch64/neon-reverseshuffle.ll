@@ -46,11 +46,11 @@ entry:
 define <8 x i16> @v8i16_2(<4 x i16> %a, <4 x i16> %b) {
 ; CHECK-LABEL: v8i16_2:
 ; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1_q2
 ; CHECK-NEXT:    adrp x8, .LCPI4_0
-; CHECK-NEXT:    // kill: def $d1 killed $d1 killed $q0_q1 def $q0_q1
-; CHECK-NEXT:    ldr q2, [x8, :lo12:.LCPI4_0]
-; CHECK-NEXT:    // kill: def $d0 killed $d0 killed $q0_q1 def $q0_q1
-; CHECK-NEXT:    tbl v0.16b, { v0.16b, v1.16b }, v2.16b
+; CHECK-NEXT:    fmov d2, d0
+; CHECK-NEXT:    ldr q3, [x8, :lo12:.LCPI4_0]
+; CHECK-NEXT:    tbl v0.16b, { v1.16b, v2.16b }, v3.16b
 ; CHECK-NEXT:    ret
 entry:
   %V128 = shufflevector <4 x i16> %a, <4 x i16> %b, <8 x i32> <i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0>
@@ -81,11 +81,11 @@ entry:
 define <16 x i8> @v16i8_2(<8 x i8> %a, <8 x i8> %b) {
 ; CHECK-LABEL: v16i8_2:
 ; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1_q2
 ; CHECK-NEXT:    adrp x8, .LCPI7_0
-; CHECK-NEXT:    // kill: def $d1 killed $d1 killed $q0_q1 def $q0_q1
-; CHECK-NEXT:    ldr q2, [x8, :lo12:.LCPI7_0]
-; CHECK-NEXT:    // kill: def $d0 killed $d0 killed $q0_q1 def $q0_q1
-; CHECK-NEXT:    tbl v0.16b, { v0.16b, v1.16b }, v2.16b
+; CHECK-NEXT:    fmov d2, d0
+; CHECK-NEXT:    ldr q3, [x8, :lo12:.LCPI7_0]
+; CHECK-NEXT:    tbl v0.16b, { v1.16b, v2.16b }, v3.16b
 ; CHECK-NEXT:    ret
 entry:
   %V128 = shufflevector <8 x i8> %a, <8 x i8> %b, <16 x i32> <i32 15, i32 14, i32 13, i32 12, i32 11, i32 10, i32 9, i32 8, i32 7, i32 6, i32 5, i32 4, i32 3, i32 2, i32 1, i32 0>

@@ -560,8 +560,9 @@ define <2 x double> @test22(<2 x double> %a0, <2 x double> %a1) {
 define <4 x float> @test23(<4 x float> %a0, <4 x float> %a1) {
 ; SSE2-LABEL: test23:
 ; SSE2:       # %bb.0:
-; SSE2-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,2],xmm1[0,3]
-; SSE2-NEXT:    shufps {{.*#+}} xmm0 = xmm0[2,0,1,3]
+; SSE2-NEXT:    shufps {{.*#+}} xmm1 = xmm1[0,3],xmm0[1,2]
+; SSE2-NEXT:    shufps {{.*#+}} xmm1 = xmm1[0,2,3,1]
+; SSE2-NEXT:    movaps %xmm1, %xmm0
 ; SSE2-NEXT:    retq
 ;
 ; SSE4-LABEL: test23:

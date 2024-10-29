@@ -199,10 +199,11 @@ define <8 x i16> @test10(<8 x i16> %a, <8 x i16> %b) {
 define <8 x i16> @test11(<8 x i16> %a, <8 x i16> %b) {
 ; SSE2-LABEL: test11:
 ; SSE2:       # %bb.0:
-; SSE2-NEXT:    movaps {{.*#+}} xmm2 = [0,65535,65535,0,0,65535,65535,0]
-; SSE2-NEXT:    andps %xmm2, %xmm0
-; SSE2-NEXT:    andnps %xmm1, %xmm2
-; SSE2-NEXT:    orps %xmm2, %xmm0
+; SSE2-NEXT:    movaps {{.*#+}} xmm2 = [65535,0,0,65535,65535,0,0,65535]
+; SSE2-NEXT:    andps %xmm2, %xmm1
+; SSE2-NEXT:    andnps %xmm0, %xmm2
+; SSE2-NEXT:    orps %xmm1, %xmm2
+; SSE2-NEXT:    movaps %xmm2, %xmm0
 ; SSE2-NEXT:    retq
 ;
 ; SSE41-LABEL: test11:

@@ -715,6 +715,7 @@ for.cond.cleanup:
 define void @uitofp_ld4_v32i16_to_v8f64(ptr nocapture noundef readonly %x, ptr nocapture noundef writeonly %y, i32 noundef %n) {
 ; CHECK-LABEL: uitofp_ld4_v32i16_to_v8f64:
 ; CHECK:       ; %bb.0: ; %entry
+; CHECK-NEXT:    movi.2d v0, #0x0000000000ffff
 ; CHECK-NEXT:  Lloh30:
 ; CHECK-NEXT:    adrp x8, lCPI11_0@PAGE
 ; CHECK-NEXT:  Lloh31:
@@ -722,77 +723,72 @@ define void @uitofp_ld4_v32i16_to_v8f64(ptr nocapture noundef readonly %x, ptr n
 ; CHECK-NEXT:  Lloh32:
 ; CHECK-NEXT:    adrp x10, lCPI11_2@PAGE
 ; CHECK-NEXT:  Lloh33:
-; CHECK-NEXT:    ldr q0, [x8, lCPI11_0@PAGEOFF]
+; CHECK-NEXT:    ldr q1, [x8, lCPI11_0@PAGEOFF]
 ; CHECK-NEXT:  Lloh34:
-; CHECK-NEXT:    adrp x8, lCPI11_3@PAGE
+; CHECK-NEXT:    ldr q2, [x9, lCPI11_1@PAGEOFF]
 ; CHECK-NEXT:  Lloh35:
-; CHECK-NEXT:    ldr q1, [x9, lCPI11_1@PAGEOFF]
-; CHECK-NEXT:  Lloh36:
-; CHECK-NEXT:    ldr q2, [x10, lCPI11_2@PAGEOFF]
-; CHECK-NEXT:  Lloh37:
-; CHECK-NEXT:    ldr q3, [x8, lCPI11_3@PAGEOFF]
+; CHECK-NEXT:    ldr q3, [x10, lCPI11_2@PAGEOFF]
 ; CHECK-NEXT:    mov x8, xzr
 ; CHECK-NEXT:  LBB11_1: ; %vector.body
 ; CHECK-NEXT:    ; =>This Inner Loop Header: Depth=1
 ; CHECK-NEXT:    add x9, x0, x8
-; CHECK-NEXT:    ldp q5, q4, [x9, #32]
-; CHECK-NEXT:    ldp q7, q6, [x9]
+; CHECK-NEXT:    ldp q4, q5, [x9, #16]
+; CHECK-NEXT:    ldr q6, [x9]
+; CHECK-NEXT:    ldr q7, [x9, #48]
 ; CHECK-NEXT:    add x9, x1, x8
 ; CHECK-NEXT:    add x8, x8, #64
-; CHECK-NEXT:    tbl.16b v16, { v4 }, v0
-; CHECK-NEXT:    tbl.16b v17, { v5 }, v0
-; CHECK-NEXT:    tbl.16b v21, { v4 }, v1
-; CHECK-NEXT:    tbl.16b v18, { v6 }, v0
-; CHECK-NEXT:    tbl.16b v19, { v7 }, v0
+; CHECK-NEXT:    and.16b v18, v6, v0
+; CHECK-NEXT:    tbl.16b v24, { v6 }, v1
+; CHECK-NEXT:    tbl.16b v25, { v6 }, v2
+; CHECK-NEXT:    and.16b v16, v4, v0
+; CHECK-NEXT:    and.16b v17, v5, v0
+; CHECK-NEXT:    and.16b v19, v7, v0
 ; CHECK-NEXT:    tbl.16b v20, { v7 }, v1
-; CHECK-NEXT:    tbl.16b v22, { v5 }, v1
-; CHECK-NEXT:    tbl.16b v23, { v5 }, v2
-; CHECK-NEXT:    tbl.16b v24, { v4 }, v2
-; CHECK-NEXT:    tbl.16b v25, { v7 }, v2
-; CHECK-NEXT:    tbl.16b v5, { v5 }, v3
-; CHECK-NEXT:    tbl.16b v4, { v4 }, v3
+; CHECK-NEXT:    tbl.16b v21, { v5 }, v1
+; CHECK-NEXT:    tbl.16b v22, { v5 }, v2
+; CHECK-NEXT:    tbl.16b v23, { v7 }, v2
 ; CHECK-NEXT:    tbl.16b v7, { v7 }, v3
-; CHECK-NEXT:    tbl.16b v26, { v6 }, v1
-; CHECK-NEXT:    tbl.16b v27, { v6 }, v2
+; CHECK-NEXT:    tbl.16b v5, { v5 }, v3
 ; CHECK-NEXT:    tbl.16b v6, { v6 }, v3
+; CHECK-NEXT:    tbl.16b v26, { v4 }, v1
+; CHECK-NEXT:    tbl.16b v27, { v4 }, v2
+; CHECK-NEXT:    tbl.16b v4, { v4 }, v3
 ; CHECK-NEXT:    ucvtf.2d v17, v17
-; CHECK-NEXT:    ucvtf.2d v16, v16
 ; CHECK-NEXT:    ucvtf.2d v19, v19
 ; CHECK-NEXT:    ucvtf.2d v18, v18
-; CHECK-NEXT:    ucvtf.2d v22, v22
-; CHECK-NEXT:    ucvtf.2d v23, v23
-; CHECK-NEXT:    ucvtf.2d v5, v5
-; CHECK-NEXT:    ucvtf.2d v21, v21
-; CHECK-NEXT:    ucvtf.2d v24, v24
-; CHECK-NEXT:    ucvtf.2d v4, v4
+; CHECK-NEXT:    ucvtf.2d v16, v16
 ; CHECK-NEXT:    cmp x8, #2, lsl #12 ; =8192
+; CHECK-NEXT:    ucvtf.2d v21, v21
+; CHECK-NEXT:    ucvtf.2d v22, v22
+; CHECK-NEXT:    ucvtf.2d v5, v5
 ; CHECK-NEXT:    ucvtf.2d v20, v20
-; CHECK-NEXT:    ucvtf.2d v25, v25
+; CHECK-NEXT:    ucvtf.2d v23, v23
 ; CHECK-NEXT:    ucvtf.2d v7, v7
+; CHECK-NEXT:    ucvtf.2d v24, v24
+; CHECK-NEXT:    ucvtf.2d v25, v25
+; CHECK-NEXT:    ucvtf.2d v6, v6
 ; CHECK-NEXT:    ucvtf.2d v26, v26
 ; CHECK-NEXT:    ucvtf.2d v27, v27
-; CHECK-NEXT:    ucvtf.2d v6, v6
-; CHECK-NEXT:    fadd.2d v17, v22, v17
-; CHECK-NEXT:    fadd.2d v5, v23, v5
-; CHECK-NEXT:    fadd.2d v16, v21, v16
-; CHECK-NEXT:    fadd.2d v4, v24, v4
+; CHECK-NEXT:    ucvtf.2d v4, v4
+; CHECK-NEXT:    fadd.2d v17, v21, v17
+; CHECK-NEXT:    fadd.2d v5, v22, v5
 ; CHECK-NEXT:    fadd.2d v19, v20, v19
-; CHECK-NEXT:    fadd.2d v7, v25, v7
-; CHECK-NEXT:    fadd.2d v18, v26, v18
-; CHECK-NEXT:    fadd.2d v6, v27, v6
+; CHECK-NEXT:    fadd.2d v7, v23, v7
+; CHECK-NEXT:    fadd.2d v18, v24, v18
+; CHECK-NEXT:    fadd.2d v6, v25, v6
+; CHECK-NEXT:    fadd.2d v16, v26, v16
+; CHECK-NEXT:    fadd.2d v4, v27, v4
 ; CHECK-NEXT:    fadd.2d v5, v17, v5
-; CHECK-NEXT:    fadd.2d v4, v16, v4
 ; CHECK-NEXT:    fadd.2d v7, v19, v7
 ; CHECK-NEXT:    fadd.2d v6, v18, v6
-; CHECK-NEXT:    stp q5, q4, [x9, #32]
-; CHECK-NEXT:    stp q7, q6, [x9]
+; CHECK-NEXT:    fadd.2d v4, v16, v4
+; CHECK-NEXT:    stp q5, q7, [x9, #32]
+; CHECK-NEXT:    stp q6, q4, [x9]
 ; CHECK-NEXT:    b.ne LBB11_1
 ; CHECK-NEXT:  ; %bb.2: ; %for.cond.cleanup
 ; CHECK-NEXT:    ret
-; CHECK-NEXT:    .loh AdrpLdr Lloh34, Lloh37
-; CHECK-NEXT:    .loh AdrpLdr Lloh32, Lloh36
-; CHECK-NEXT:    .loh AdrpLdr Lloh31, Lloh35
-; CHECK-NEXT:    .loh AdrpAdrp Lloh30, Lloh34
+; CHECK-NEXT:    .loh AdrpLdr Lloh32, Lloh35
+; CHECK-NEXT:    .loh AdrpLdr Lloh31, Lloh34
 ; CHECK-NEXT:    .loh AdrpLdr Lloh30, Lloh33
 entry:
   br label %vector.body

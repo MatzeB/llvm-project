@@ -2635,20 +2635,16 @@ define <32 x float> @expandload_v32f32_v32i32(ptr %base, <32 x float> %src0, <32
 ;
 
 define <2 x i64> @expandload_v2i64_const(ptr %base, <2 x i64> %src0) {
-; SSE2-LABEL: expandload_v2i64_const:
-; SSE2:       ## %bb.0:
-; SSE2-NEXT:    movsd (%rdi), %xmm1 ## xmm1 = mem[0],zero
-; SSE2-NEXT:    movlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
-; SSE2-NEXT:    retq
-;
-; SSE42-LABEL: expandload_v2i64_const:
-; SSE42:       ## %bb.0:
-; SSE42-NEXT:    pinsrq $1, (%rdi), %xmm0
-; SSE42-NEXT:    retq
+; SSE-LABEL: expandload_v2i64_const:
+; SSE:       ## %bb.0:
+; SSE-NEXT:    movsd (%rdi), %xmm1 ## xmm1 = mem[0],zero
+; SSE-NEXT:    movlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
+; SSE-NEXT:    retq
 ;
 ; AVX1OR2-LABEL: expandload_v2i64_const:
 ; AVX1OR2:       ## %bb.0:
-; AVX1OR2-NEXT:    vpinsrq $1, (%rdi), %xmm0, %xmm0
+; AVX1OR2-NEXT:    vmovddup (%rdi), %xmm1 ## xmm1 = mem[0,0]
+; AVX1OR2-NEXT:    vmovlhps {{.*#+}} xmm0 = xmm0[0],xmm1[0]
 ; AVX1OR2-NEXT:    retq
 ;
 ; AVX512F-LABEL: expandload_v2i64_const:

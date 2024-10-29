@@ -342,11 +342,11 @@ define void @store_i16_stride6_vf4(ptr %in.vecptr0, ptr %in.vecptr1, ptr %in.vec
 ; SSE-NEXT:    pshufd {{.*#+}} xmm1 = xmm4[3,1,1,3]
 ; SSE-NEXT:    pshuflw {{.*#+}} xmm1 = xmm1[2,0,2,3,4,5,6,7]
 ; SSE-NEXT:    pshufhw {{.*#+}} xmm1 = xmm1[0,1,2,3,4,5,5,7]
-; SSE-NEXT:    shufps {{.*#+}} xmm0 = xmm0[1,2],xmm1[0,3]
-; SSE-NEXT:    shufps {{.*#+}} xmm0 = xmm0[2,0,1,3]
+; SSE-NEXT:    shufps {{.*#+}} xmm1 = xmm1[0,3],xmm0[1,2]
+; SSE-NEXT:    shufps {{.*#+}} xmm1 = xmm1[0,2,3,1]
 ; SSE-NEXT:    movaps %xmm3, 16(%rax)
 ; SSE-NEXT:    movaps %xmm5, (%rax)
-; SSE-NEXT:    movaps %xmm0, 32(%rax)
+; SSE-NEXT:    movaps %xmm1, 32(%rax)
 ; SSE-NEXT:    retq
 ;
 ; AVX-LABEL: store_i16_stride6_vf4:

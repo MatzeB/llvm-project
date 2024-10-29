@@ -209,11 +209,12 @@ entry:
 define <4 x i32> @test12(ptr nocapture noundef readonly %a, ptr nocapture noundef readonly %b) {
 ; CHECK-LABEL: test12:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    ld1r { v0.2s }, [x0]
-; CHECK-NEXT:    ldr w8, [x1]
-; CHECK-NEXT:    mov v1.16b, v0.16b
-; CHECK-NEXT:    mov v0.s[1], w8
-; CHECK-NEXT:    mov v1.s[0], w8
+; CHECK-NEXT:    ldr w8, [x0]
+; CHECK-NEXT:    ldr w9, [x1]
+; CHECK-NEXT:    dup v0.2s, w8
+; CHECK-NEXT:    dup v1.2s, w9
+; CHECK-NEXT:    mov v1.s[1], w8
+; CHECK-NEXT:    mov v0.s[1], w9
 ; CHECK-NEXT:    mov v0.d[1], v1.d[0]
 ; CHECK-NEXT:    ret
 entry:

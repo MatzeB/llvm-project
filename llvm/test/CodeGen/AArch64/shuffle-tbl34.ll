@@ -182,10 +182,10 @@ define <16 x i8> @shuffle4_v16i8(<16 x i8> %a, <16 x i8> %b, <16 x i8> %c, <16 x
 ; CHECK-NEXT:    adrp x8, .LCPI3_1
 ; CHECK-NEXT:    ldr q3, [x8, :lo12:.LCPI3_1]
 ; CHECK-NEXT:    adrp x8, .LCPI3_2
-; CHECK-NEXT:    tbl v1.16b, { v0.16b }, v1.16b
-; CHECK-NEXT:    tbl v0.16b, { v2.16b }, v3.16b
-; CHECK-NEXT:    ldr q2, [x8, :lo12:.LCPI3_2]
-; CHECK-NEXT:    tbl v0.16b, { v0.16b, v1.16b }, v2.16b
+; CHECK-NEXT:    tbl v2.16b, { v2.16b }, v1.16b
+; CHECK-NEXT:    tbl v1.16b, { v0.16b }, v3.16b
+; CHECK-NEXT:    ldr q0, [x8, :lo12:.LCPI3_2]
+; CHECK-NEXT:    tbl v0.16b, { v1.16b, v2.16b }, v0.16b
 ; CHECK-NEXT:    ret
   %x = shufflevector <16 x i8> %a, <16 x i8> %b, <8 x i32> <i32 0, i32 3, i32 2, i32 1, i32 12, i32 15, i32 14, i32 12>
   %y = shufflevector <16 x i8> %c, <16 x i8> %d, <8 x i32> <i32 4, i32 7, i32 6, i32 7, i32 8, i32 10, i32 9, i32 11>
@@ -563,17 +563,17 @@ define <8 x i8> @insert4_v8i8(<8 x i8> %a, <16 x i8> %b, <8 x i8> %c, <16 x i8> 
 ; CHECK-LABEL: insert4_v8i8:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    // kill: def $d0 killed $d0 def $q0
-; CHECK-NEXT:    mov v4.16b, v3.16b
 ; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
+; CHECK-NEXT:    mov v4.16b, v3.16b
 ; CHECK-NEXT:    adrp x8, .LCPI14_0
-; CHECK-NEXT:    adrp x9, .LCPI14_1
 ; CHECK-NEXT:    mov v0.d[1], v2.d[0]
 ; CHECK-NEXT:    mov v3.16b, v1.16b
 ; CHECK-NEXT:    ldr d1, [x8, :lo12:.LCPI14_0]
-; CHECK-NEXT:    ldr q2, [x9, :lo12:.LCPI14_1]
+; CHECK-NEXT:    adrp x8, .LCPI14_1
 ; CHECK-NEXT:    tbl v0.8b, { v0.16b }, v1.8b
-; CHECK-NEXT:    tbl v1.16b, { v3.16b, v4.16b }, v2.16b
-; CHECK-NEXT:    trn1 v0.4h, v1.4h, v0.4h
+; CHECK-NEXT:    ldr q1, [x8, :lo12:.LCPI14_1]
+; CHECK-NEXT:    tbl v1.16b, { v3.16b, v4.16b }, v1.16b
+; CHECK-NEXT:    rev32 v0.4h, v0.4h
 ; CHECK-NEXT:    trn2 v0.4h, v0.4h, v1.4h
 ; CHECK-NEXT:    ret
   %e1 = extractelement <8 x i8> %a, i32 4
@@ -632,17 +632,17 @@ define <8 x i8> @insert4_v8i8(<8 x i8> %a, <16 x i8> %b, <8 x i8> %c, <16 x i8> 
 define <16 x i8> @insert4_v16i8(<8 x i8> %a, <16 x i8> %b, <8 x i8> %c, <16 x i8> %d) {
 ; CHECK-LABEL: insert4_v16i8:
 ; CHECK:       // %bb.0:
+; CHECK-NEXT:    fmov d5, d0
 ; CHECK-NEXT:    mov v4.16b, v3.16b
 ; CHECK-NEXT:    adrp x8, .LCPI15_0
-; CHECK-NEXT:    // kill: def $d0 killed $d0 def $q31_q0
-; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
 ; CHECK-NEXT:    mov v3.16b, v1.16b
-; CHECK-NEXT:    ldr q5, [x8, :lo12:.LCPI15_0]
-; CHECK-NEXT:    mov v0.d[1], v2.d[0]
+; CHECK-NEXT:    ldr q0, [x8, :lo12:.LCPI15_0]
+; CHECK-NEXT:    // kill: def $d2 killed $d2 def $q2
 ; CHECK-NEXT:    adrp x8, .LCPI15_1
-; CHECK-NEXT:    ldr q1, [x8, :lo12:.LCPI15_1]
-; CHECK-NEXT:    tbl v31.16b, { v3.16b, v4.16b }, v5.16b
-; CHECK-NEXT:    tbl v0.16b, { v31.16b, v0.16b }, v1.16b
+; CHECK-NEXT:    mov v5.d[1], v2.d[0]
+; CHECK-NEXT:    tbl v6.16b, { v3.16b, v4.16b }, v0.16b
+; CHECK-NEXT:    ldr q0, [x8, :lo12:.LCPI15_1]
+; CHECK-NEXT:    tbl v0.16b, { v5.16b, v6.16b }, v0.16b
 ; CHECK-NEXT:    ret
   %e1 = extractelement <8 x i8> %a, i32 4
   %e2 = extractelement <8 x i8> %c, i32 0
