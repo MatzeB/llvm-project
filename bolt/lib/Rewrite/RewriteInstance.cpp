@@ -4846,7 +4846,8 @@ void RewriteInstance::updateELFSymbolTable(
     }
 
     if (*SymbolName == "_end") {
-      if (NextAvailableAddress > Symbol.st_value)
+      if (NextAvailableAddress > Symbol.st_value &&
+          NextAvailableAddress > NewTextSegmentAddress)
         updateSymbolValue(*SymbolName, NextAvailableAddress);
       goto registerSymbol;
     }
