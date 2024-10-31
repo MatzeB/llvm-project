@@ -5849,15 +5849,34 @@ void RewriteInstance::writeEHFrameHeader() {
   LLVM_DEBUG(dbgs() << "BOLT: writing a new " << getEHFrameHdrSectionName()
                     << '\n');
 
-  NextAvailableAddress =
-      appendPadding(Out->os(), NextAvailableAddress, EHFrameHdrAlign);
+  // Try to fit new section in-place.
+  uint64_t EHFrameHdrOutputAddress = 0;
+  uint64_t EHFrameHdrFileOffset = 0;
+  std::vector<char> NewEHFrameHdr;
+  BinarySection *OldEHFrameHdrSection = getSection(getEHFrameHdrSectionName());
+  if (OldEHFrameHdrSection) {
+    NewEHFrameHdr = CFIRdWrt->generateEHFrameHeader(
+        RelocatedEHFrame, NewEHFrame, OldEHFrameHdrSection->getAddress());
+    if (NewEHFrameHdr.size() <= OldEHFrameHdrSection->getSize()) {
+      BC->outs() << "BOLT-INFO: rewriting " << getEHFrameHdrSectionName()
+                 << " in-place\n";
+      EHFrameHdrOutputAddress = OldEHFrameHdrSection->getAddress();
+      EHFrameHdrFileOffset = OldEHFrameHdrSection->getInputFileOffset();
+    }
+  }
 
-  const uint64_t EHFrameHdrOutputAddress = NextAvailableAddress;
-  const uint64_t EHFrameHdrFileOffset =
-      getFileOffsetForAddress(NextAvailableAddress);
+  if (!EHFrameHdrOutputAddress) {
+    NextAvailableAddress =
+        appendPadding(Out->os(), NextAvailableAddress, EHFrameHdrAlign);
 
-  std::vector<char> NewEHFrameHdr = CFIRdWrt->generateEHFrameHeader(
-      RelocatedEHFrame, NewEHFrame, EHFrameHdrOutputAddress);
+    EHFrameHdrOutputAddress = NextAvailableAddress;
+    EHFrameHdrFileOffset = getFileOffsetForAddress(NextAvailableAddress);
+
+    NewEHFrameHdr = CFIRdWrt->generateEHFrameHeader(
+        RelocatedEHFrame, NewEHFrame, EHFrameHdrOutputAddress);
+
+    NextAvailableAddress += NewEHFrameHdr.size();
+  }
 
   Out->os().seek(EHFrameHdrFileOffset);
   Out->os().write(NewEHFrameHdr.data(), NewEHFrameHdr.size());
@@ -5865,7 +5884,6 @@ void RewriteInstance::writeEHFrameHeader() {
   const unsigned Flags = BinarySection::getFlags(/*IsReadOnly=*/true,
                                                  /*IsText=*/false,
                                                  /*IsAllocatable=*/true);
-  BinarySection *OldEHFrameHdrSection = getSection(getEHFrameHdrSectionName());
   if (OldEHFrameHdrSection)
     OldEHFrameHdrSection->setOutputName(getOrgSecPrefix() +
                                         getEHFrameHdrSectionName());
@@ -5876,8 +5894,6 @@ void RewriteInstance::writeEHFrameHeader() {
   EHFrameHdrSec.setOutputFileOffset(EHFrameHdrFileOffset);
   EHFrameHdrSec.setOutputAddress(EHFrameHdrOutputAddress);
   EHFrameHdrSec.setOutputName(getEHFrameHdrSectionName());
-
-  NextAvailableAddress += EHFrameHdrSec.getOutputSize();
 
   if (!BC->BOLTReserved.empty() &&
       (NextAvailableAddress > BC->BOLTReserved.end())) {
