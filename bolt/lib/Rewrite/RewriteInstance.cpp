@@ -3928,6 +3928,38 @@ void RewriteInstance::mapCodeSections(BOLTLinker::SectionMapper MapSection) {
 
 void RewriteInstance::mapAllocatableSections(
     BOLTLinker::SectionMapper MapSection) {
+
+  auto replaceSection = [&](BinarySection &OldSection,
+                            BinarySection &NewSection) {
+    if (OldSection.getSize() < NewSection.getOutputSize())
+      return;
+
+    dbgs() << "BOLT-DEBUG: rewriting contents for " << OldSection.getName()
+           << '\n';
+
+    NewSection.setOutputAddress(OldSection.getAddress());
+    NewSection.setOutputFileOffset(OldSection.getInputFileOffset());
+    MapSection(NewSection, OldSection.getAddress());
+
+      // FIXME: pad contents with zeros.
+  };
+
+  if (opts::UseOldText) {
+    if (EHFrameSection) {
+      BinarySection *NewEHFrameSection =
+          getSection(getNewSecPrefix() + getEHFrameSectionName());
+      assert(NewEHFrameSection && "New contents expected for .eh_frame");
+      replaceSection(*EHFrameSection, *NewEHFrameSection);
+    }
+    BinarySection *EHSection = getSection(".gcc_except_table");
+    BinarySection *NewEHSection =
+        getSection(getNewSecPrefix() + ".gcc_except_table");
+    if (EHSection) {
+      assert(NewEHSection);
+      replaceSection(*EHSection, *NewEHSection);
+    }
+  }
+
   // Allocate read-only sections first, then writable sections.
   enum : uint8_t { ST_READONLY, ST_READWRITE };
   for (uint8_t SType = ST_READONLY; SType <= ST_READWRITE; ++SType) {
