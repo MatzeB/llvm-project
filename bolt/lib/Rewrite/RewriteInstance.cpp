@@ -2423,6 +2423,13 @@ void RewriteInstance::readDynamicRelocations(const SectionRef &Section,
     if (Symbol)
       SymbolIndex[Symbol] = getRelocationSymbol(InputFile, Rel);
 
+    // Workaround for AArch64 issue with hot text.
+    if (BC->isAArch64() && (SymbolName == "__hot_start" ||
+          SymbolName == "__hot_end")) {
+      BC->addRelocation(Rel.getOffset(), Symbol, ELF::R_AARCH64_ABS64, Addend);
+      continue;
+    }
+
     BC->addDynamicRelocation(Rel.getOffset(), Symbol, RType, Addend);
   }
 }
