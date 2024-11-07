@@ -91,7 +91,7 @@ class LongJmpPass : public BinaryFunctionPass {
 
   /// Maximum size of the function cluster. Note that it's less than 128MB
   /// as the size of the cluster plus thunk island should be less than 128MB.
-  static constexpr uint64_t MaxClusterSize = 124 * 1024 * 1024;
+  static constexpr uint64_t MaxClusterSize = 125 * 1024 * 1024;
 
   /// Relax calls for medium code model where code is < 256MB.
   /// A thunk island will be introduced between two clusters of functions to
