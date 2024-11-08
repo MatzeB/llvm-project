@@ -71,12 +71,9 @@ class LongJmpPass : public BinaryFunctionPass {
   static constexpr size_t LongestJumpBits = 28;
   static constexpr size_t LongestJumpSpan = 1ULL << (LongestJumpBits - 1);
 
-  /// Size of the instruction on AArch64.
-  static constexpr size_t InstSize = 4;
-
   /// Relax all internal function branches including those between fragments.
-  /// Assume fragments are placed in different sections but are within 128MB
-  /// branch span ("medium" code model).
+  /// Assume that fragments are placed in different sections but are within
+  /// 128MB of each other.
   void relaxLocalBranches(BinaryFunction &BF);
 
   struct FunctionCluster {
