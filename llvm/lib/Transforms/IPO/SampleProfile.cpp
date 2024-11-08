@@ -470,7 +470,8 @@ public:
       std::function<AssumptionCache &(Function &)> GetAssumptionCache,
       std::function<TargetTransformInfo &(Function &)> GetTargetTransformInfo,
       std::function<const TargetLibraryInfo &(Function &)> GetTLI,
-      LazyCallGraph &CG)
+      LazyCallGraph &CG, bool DisableSampleProfileInlining,
+      bool UseFlattenedProfile)
       : SampleProfileLoaderBaseImpl(std::string(Name), std::string(RemapName),
                                     std::move(FS)),
         GetAC(std::move(GetAssumptionCache)),
@@ -479,7 +480,9 @@ public:
         AnnotatedPassName(AnnotateSampleProfileInlinePhase
                               ? llvm::AnnotateInlinePassName(InlineContext{
                                     LTOPhase, InlinePass::SampleProfileInliner})
-                              : CSINLINE_DEBUG) {}
+                              : CSINLINE_DEBUG),
+        DisableSampleProfileInlining(DisableSampleProfileInlining),
+        UseFlattenedProfile(UseFlattenedProfile) {}
 
   bool doInitialization(Module &M, FunctionAnalysisManager *FAM = nullptr);
   bool runOnModule(Module &M, ModuleAnalysisManager *AM,
@@ -592,6 +595,10 @@ protected:
   // overriden by -profile-sample-accurate or profile-sample-accurate
   // attribute.
   bool ProfAccForSymsInList;
+
+  bool DisableSampleProfileInlining;
+
+  bool UseFlattenedProfile;
 
   // External inline advisor used to replay inline decision from remarks.
   std::unique_ptr<InlineAdvisor> ExternalInlineAdvisor;
@@ -920,7 +927,7 @@ bool SampleProfileLoader::tryPromoteAndInlineCandidate(
     Function &F, InlineCandidate &Candidate, uint64_t SumOrigin, uint64_t &Sum,
     SmallVector<CallBase *, 8> *InlinedCallSite) {
   // Bail out early if sample-loader inliner is disabled.
-  if (DisableSampleLoaderInlining)
+  if (DisableSampleProfileInlining)
     return false;
 
   // Bail out early if MaxNumPromotions is zero.
@@ -1231,7 +1238,7 @@ bool SampleProfileLoader::tryInlineCandidate(
     InlineCandidate &Candidate, SmallVector<CallBase *, 8> *InlinedCallSites) {
   // Do not attempt to inline a candidate if
   // --disable-sample-loader-inlining is true.
-  if (DisableSampleLoaderInlining)
+  if (DisableSampleProfileInlining)
     return false;
 
   CallBase &CB = *Candidate.CallInstr;
@@ -1975,6 +1982,13 @@ bool SampleProfileLoader::doInitialization(Module &M,
 
   PSL = Reader->getProfileSymbolList();
 
+  if (DisableSampleLoaderInlining.getNumOccurrences())
+    DisableSampleProfileInlining = DisableSampleLoaderInlining;
+
+  if (UseFlattenedProfile)
+    ProfileConverter::flattenProfile(Reader->getProfiles(),
+                                     Reader->profileIsCS());
+
   // While profile-sample-accurate is on, ignore symbol list.
   ProfAccForSymsInList =
       ProfileAccurateForSymsInList && PSL && !ProfileSampleAccurate;
@@ -2307,9 +2321,12 @@ bool SampleProfileLoader::runOnFunction(Function &F, ModuleAnalysisManager *AM) 
 }
 SampleProfileLoaderPass::SampleProfileLoaderPass(
     std::string File, std::string RemappingFile, ThinOrFullLTOPhase LTOPhase,
-    IntrusiveRefCntPtr<vfs::FileSystem> FS)
+    IntrusiveRefCntPtr<vfs::FileSystem> FS, bool DisableSampleProfileInlining,
+    bool UseFlattenedProfile)
     : ProfileFileName(File), ProfileRemappingFileName(RemappingFile),
-      LTOPhase(LTOPhase), FS(std::move(FS)) {}
+      LTOPhase(LTOPhase), FS(std::move(FS)),
+      DisableSampleProfileInlining(DisableSampleProfileInlining),
+      UseFlattenedProfile(UseFlattenedProfile) {}
 
 PreservedAnalyses SampleProfileLoaderPass::run(Module &M,
                                                ModuleAnalysisManager &AM) {
@@ -2334,7 +2351,8 @@ PreservedAnalyses SampleProfileLoaderPass::run(Module &M,
       ProfileFileName.empty() ? SampleProfileFile : ProfileFileName,
       ProfileRemappingFileName.empty() ? SampleProfileRemappingFile
                                        : ProfileRemappingFileName,
-      LTOPhase, FS, GetAssumptionCache, GetTTI, GetTLI, CG);
+      LTOPhase, FS, GetAssumptionCache, GetTTI, GetTLI, CG,
+      DisableSampleProfileInlining, UseFlattenedProfile);
   if (!SampleLoader.doInitialization(M, &FAM))
     return PreservedAnalyses::all();
 
