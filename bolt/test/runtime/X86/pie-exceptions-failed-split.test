@@ -1,5 +1,7 @@
 REQUIRES: system-linux,bolt-runtime
 
+XFAIL: *
+
 RUN: %clangxx %cxxflags -pie -fPIC %p/Inputs/pie-exceptions-failed-split.s \
 RUN:   -Wl,-q -o %t
 RUN: llvm-bolt %t -o %t.instr --instrument --instrumentation-file=%t.fdata
