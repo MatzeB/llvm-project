@@ -2423,6 +2423,13 @@ void RewriteInstance::readDynamicRelocations(const SectionRef &Section,
     if (Symbol)
       SymbolIndex[Symbol] = getRelocationSymbol(InputFile, Rel);
 
+    // Workaround for AArch64 issue with hot text.
+    if (BC->isAArch64() && (SymbolName == "__hot_start" ||
+          SymbolName == "__hot_end")) {
+      BC->addRelocation(Rel.getOffset(), Symbol, ELF::R_AARCH64_ABS64, Addend);
+      continue;
+    }
+
     BC->addDynamicRelocation(Rel.getOffset(), Symbol, RType, Addend);
   }
 }
@@ -3833,7 +3840,6 @@ void RewriteInstance::mapCodeSections(BOLTLinker::SectionMapper MapSection) {
     if (!Function.isEmitted())
       continue;
 
-    bool TooLarge = false;
     ErrorOr<BinarySection &> FuncSection = Function.getCodeSection();
     assert(FuncSection && "cannot find section for function");
     FuncSection->setOutputAddress(Function.getAddress());
@@ -3844,11 +3850,8 @@ void RewriteInstance::mapCodeSections(BOLTLinker::SectionMapper MapSection) {
     MapSection(*FuncSection, Function.getAddress());
     Function.setImageAddress(FuncSection->getAllocAddress());
     Function.setImageSize(FuncSection->getOutputSize());
-    if (Function.getImageSize() > Function.getMaxSize()) {
-      assert(!BC->isX86() && "Unexpected large function.");
-      TooLarge = true;
-      FailedAddresses.emplace_back(Function.getAddress());
-    }
+    assert(Function.getImageSize() <= Function.getMaxSize() &&
+           "Unexpected large function");
 
     // Map jump tables if updating in-place.
     if (opts::JumpTables == JTS_BASIC) {
@@ -3878,28 +3881,17 @@ void RewriteInstance::mapCodeSections(BOLTLinker::SectionMapper MapSection) {
     assert(ColdSection && "cannot find section for cold part");
     // Cold fragments are aligned at 16 bytes.
     NextAvailableAddress = alignTo(NextAvailableAddress, 16);
-    if (TooLarge) {
-      // The corresponding FDE will refer to address 0.
-      FF.setAddress(0);
-      FF.setImageAddress(0);
-      FF.setImageSize(0);
-      FF.setFileOffset(0);
-    } else {
-      FF.setAddress(NextAvailableAddress);
-      FF.setImageAddress(ColdSection->getAllocAddress());
-      FF.setImageSize(ColdSection->getOutputSize());
-      FF.setFileOffset(getFileOffsetForAddress(NextAvailableAddress));
-      ColdSection->setOutputAddress(FF.getAddress());
-    }
+    FF.setAddress(NextAvailableAddress);
+    FF.setImageAddress(ColdSection->getAllocAddress());
+    FF.setImageSize(ColdSection->getOutputSize());
+    FF.setFileOffset(getFileOffsetForAddress(NextAvailableAddress));
+    ColdSection->setOutputAddress(FF.getAddress());
 
     LLVM_DEBUG(
         dbgs() << formatv(
             "BOLT: mapping cold fragment {0:x+} to {1:x+} with size {2:x+}\n",
             FF.getImageAddress(), FF.getAddress(), FF.getImageSize()));
     MapSection(*ColdSection, FF.getAddress());
-
-    if (TooLarge)
-      BC->deregisterSection(*ColdSection);
 
     NextAvailableAddress += FF.getImageSize();
   }
@@ -3928,6 +3920,38 @@ void RewriteInstance::mapCodeSections(BOLTLinker::SectionMapper MapSection) {
 
 void RewriteInstance::mapAllocatableSections(
     BOLTLinker::SectionMapper MapSection) {
+
+  auto replaceSection = [&](BinarySection &OldSection,
+                            BinarySection &NewSection) {
+    if (OldSection.getSize() < NewSection.getOutputSize())
+      return;
+
+    dbgs() << "BOLT-DEBUG: rewriting contents for " << OldSection.getName()
+           << '\n';
+
+    NewSection.setOutputAddress(OldSection.getAddress());
+    NewSection.setOutputFileOffset(OldSection.getInputFileOffset());
+    MapSection(NewSection, OldSection.getAddress());
+
+      // FIXME: pad contents with zeros.
+  };
+
+  if (opts::UseOldText) {
+    if (EHFrameSection) {
+      BinarySection *NewEHFrameSection =
+          getSection(getNewSecPrefix() + getEHFrameSectionName());
+      assert(NewEHFrameSection && "New contents expected for .eh_frame");
+      replaceSection(*EHFrameSection, *NewEHFrameSection);
+    }
+    BinarySection *EHSection = getSection(".gcc_except_table");
+    BinarySection *NewEHSection =
+        getSection(getNewSecPrefix() + ".gcc_except_table");
+    if (EHSection) {
+      assert(NewEHSection);
+      replaceSection(*EHSection, *NewEHSection);
+    }
+  }
+
   // Allocate read-only sections first, then writable sections.
   enum : uint8_t { ST_READONLY, ST_READWRITE };
   for (uint8_t SType = ST_READONLY; SType <= ST_READWRITE; ++SType) {
@@ -4043,6 +4067,11 @@ void RewriteInstance::patchELFPHDRTable() {
       NewTextSegmentSize = NextAvailableAddress - NewTextSegmentAddress;
   } else {
     NewWritableSegmentSize = NextAvailableAddress - NewWritableSegmentAddress;
+  }
+
+  if (!NewTextSegmentSize && !NewWritableSegmentSize) {
+    BC->outs() << "BOLT-INFO: no new segments added\n";
+    return;
   }
 
   const uint64_t SavedPos = OS.tell();
@@ -4824,7 +4853,8 @@ void RewriteInstance::updateELFSymbolTable(
     }
 
     if (*SymbolName == "_end") {
-      if (NextAvailableAddress > Symbol.st_value)
+      if (NextAvailableAddress > Symbol.st_value &&
+          NextAvailableAddress > NewTextSegmentAddress)
         updateSymbolValue(*SymbolName, NextAvailableAddress);
       goto registerSymbol;
     }
@@ -5832,15 +5862,34 @@ void RewriteInstance::writeEHFrameHeader() {
   LLVM_DEBUG(dbgs() << "BOLT: writing a new " << getEHFrameHdrSectionName()
                     << '\n');
 
-  NextAvailableAddress =
-      appendPadding(Out->os(), NextAvailableAddress, EHFrameHdrAlign);
+  // Try to fit new section in-place.
+  uint64_t EHFrameHdrOutputAddress = 0;
+  uint64_t EHFrameHdrFileOffset = 0;
+  std::vector<char> NewEHFrameHdr;
+  BinarySection *OldEHFrameHdrSection = getSection(getEHFrameHdrSectionName());
+  if (OldEHFrameHdrSection) {
+    NewEHFrameHdr = CFIRdWrt->generateEHFrameHeader(
+        RelocatedEHFrame, NewEHFrame, OldEHFrameHdrSection->getAddress());
+    if (NewEHFrameHdr.size() <= OldEHFrameHdrSection->getSize()) {
+      BC->outs() << "BOLT-INFO: rewriting " << getEHFrameHdrSectionName()
+                 << " in-place\n";
+      EHFrameHdrOutputAddress = OldEHFrameHdrSection->getAddress();
+      EHFrameHdrFileOffset = OldEHFrameHdrSection->getInputFileOffset();
+    }
+  }
 
-  const uint64_t EHFrameHdrOutputAddress = NextAvailableAddress;
-  const uint64_t EHFrameHdrFileOffset =
-      getFileOffsetForAddress(NextAvailableAddress);
+  if (!EHFrameHdrOutputAddress) {
+    NextAvailableAddress =
+        appendPadding(Out->os(), NextAvailableAddress, EHFrameHdrAlign);
 
-  std::vector<char> NewEHFrameHdr = CFIRdWrt->generateEHFrameHeader(
-      RelocatedEHFrame, NewEHFrame, EHFrameHdrOutputAddress, FailedAddresses);
+    EHFrameHdrOutputAddress = NextAvailableAddress;
+    EHFrameHdrFileOffset = getFileOffsetForAddress(NextAvailableAddress);
+
+    NewEHFrameHdr = CFIRdWrt->generateEHFrameHeader(
+        RelocatedEHFrame, NewEHFrame, EHFrameHdrOutputAddress);
+
+    NextAvailableAddress += NewEHFrameHdr.size();
+  }
 
   Out->os().seek(EHFrameHdrFileOffset);
   Out->os().write(NewEHFrameHdr.data(), NewEHFrameHdr.size());
@@ -5848,7 +5897,6 @@ void RewriteInstance::writeEHFrameHeader() {
   const unsigned Flags = BinarySection::getFlags(/*IsReadOnly=*/true,
                                                  /*IsText=*/false,
                                                  /*IsAllocatable=*/true);
-  BinarySection *OldEHFrameHdrSection = getSection(getEHFrameHdrSectionName());
   if (OldEHFrameHdrSection)
     OldEHFrameHdrSection->setOutputName(getOrgSecPrefix() +
                                         getEHFrameHdrSectionName());
@@ -5859,8 +5907,6 @@ void RewriteInstance::writeEHFrameHeader() {
   EHFrameHdrSec.setOutputFileOffset(EHFrameHdrFileOffset);
   EHFrameHdrSec.setOutputAddress(EHFrameHdrOutputAddress);
   EHFrameHdrSec.setOutputName(getEHFrameHdrSectionName());
-
-  NextAvailableAddress += EHFrameHdrSec.getOutputSize();
 
   if (!BC->BOLTReserved.empty() &&
       (NextAvailableAddress > BC->BOLTReserved.end())) {

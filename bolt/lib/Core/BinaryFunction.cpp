@@ -489,6 +489,8 @@ void BinaryFunction::print(raw_ostream &OS, std::string Annotation) {
     OS << "\n  Branch Count: " << RawBranchCount;
     OS << "\n  Profile Acc : " << format("%.1f%%", ProfileMatchRatio * 100.0f);
   }
+  if (hasConstantIsland())
+    OS << "\n  Has constant island";
 
   if (opts::PrintDynoStats && !getLayout().block_empty()) {
     OS << '\n';
@@ -2589,6 +2591,7 @@ private:
     case MCCFIInstruction::OpNegateRAStateWithPC:
     case MCCFIInstruction::OpLLVMDefAspaceCfa:
     case MCCFIInstruction::OpLabel:
+    case MCCFIInstruction::OpValOffset:
       llvm_unreachable("unsupported CFI opcode");
       break;
     case MCCFIInstruction::OpRememberState:
@@ -2728,6 +2731,7 @@ struct CFISnapshotDiff : public CFISnapshot {
     case MCCFIInstruction::OpNegateRAStateWithPC:
     case MCCFIInstruction::OpLLVMDefAspaceCfa:
     case MCCFIInstruction::OpLabel:
+    case MCCFIInstruction::OpValOffset:
       llvm_unreachable("unsupported CFI opcode");
       return false;
     case MCCFIInstruction::OpRememberState:
@@ -2878,6 +2882,7 @@ BinaryFunction::unwindCFIState(int32_t FromState, int32_t ToState,
     case MCCFIInstruction::OpNegateRAStateWithPC:
     case MCCFIInstruction::OpLLVMDefAspaceCfa:
     case MCCFIInstruction::OpLabel:
+    case MCCFIInstruction::OpValOffset:
       llvm_unreachable("unsupported CFI opcode");
       break;
     case MCCFIInstruction::OpGnuArgsSize:

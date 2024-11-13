@@ -901,8 +901,49 @@ void SplitFunctions::splitFunction(BinaryFunction &BF, SplitStrategy &S) {
   // have to be placed in the same fragment. When we split them, create
   // trampoline landing pads that will redirect the execution to real LPs.
   TrampolineSetType Trampolines;
-  if (!BC.HasFixedLoadAddress && BF.hasEHRanges() && BF.isSplit())
-    Trampolines = createEHTrampolines(BF);
+  if (/*!BC.HasFixedLoadAddress &&*/ BF.hasEHRanges() && BF.isSplit()) {
+    // If all landing pads for this fragment are grouped in one (potentially
+    // different) fragment, we can set LPStart to the start of that fragment
+    // and avoid trampoline code.
+    bool NeedsTrampolines = false;
+    for (FunctionFragment &FF : BF.getLayout().fragments()) {
+      // List of fragments that contain landing pads for this fragment.
+      SmallVector<FragmentNum, 4> LandingPadFragments;
+      for (const BinaryBasicBlock *BB : FF) {
+        for (const BinaryBasicBlock *LPB : BB->landing_pads()) {
+          LandingPadFragments.push_back(LPB->getFragmentNum());
+        }
+      }
+      llvm::sort(LandingPadFragments);
+      auto Last = llvm::unique(LandingPadFragments);
+      LandingPadFragments.erase(Last, LandingPadFragments.end());
+
+      if (LandingPadFragments.size() == 1) {
+        //dbgs() << "*** no EH trampolines needed for " << BF << '\n';
+        FF.setLandingPadFragmentNum(LandingPadFragments.front());
+        if (LandingPadFragments.front() != FF.getFragmentNum()) {
+          LLVM_DEBUG();
+          //dbgs() << "*** " << FF.getFragmentNum().get() << " needs a different LPStart fragment: "
+                 //<< LandingPadFragments.front().get() << "\n";
+          //if (FF.isMainFragment())
+            //dbgs() << "*** from main fragment\n";
+        }
+
+      } else if (LandingPadFragments.size() > 1) {
+        NeedsTrampolines = true;
+        //dbgs() << "*** EH trampolines are needed for " << BF << '\n';
+        //for (const auto Index : LandingPadFragments)
+          //dbgs() << Index.get() << '\n';
+      }
+    }
+
+    // TODO: create trampolines only for a fragment that requires them.
+    if (NeedsTrampolines) {
+      for (FunctionFragment &FF : BF.getLayout().fragments())
+        FF.setLandingPadFragmentNum(FF.getFragmentNum());
+      Trampolines = createEHTrampolines(BF);
+    }
+  }
 
   // Check the new size to see if it's worth splitting the function.
   if (BC.isX86() && LayoutUpdated) {
