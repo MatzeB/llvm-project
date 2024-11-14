@@ -969,14 +969,18 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, const FunctionFragment &FF) {
            //<< BF << '\n';
 
     // Emit LPStart encoding and optionally LPStart.
+    LPStartSymbol = BF.getLPStartSymbol(FF.getFragmentNum());
+    if (LPStartSymbol) {
+      /*
     if (FF.getLandingPadFragmentNum() != FF.getFragmentNum()) {
       FunctionFragment &LPFragment =
           BF.getLayout().getFragment(FF.getLandingPadFragmentNum());
+          */
       //dbgs() << "LP fragment number : " << FF.getLandingPadFragmentNum().get()
              //<< '\n';
       //dbgs() << "LP fragment number : " << LPFragment.getFragmentNum().get()
              //<< '\n';
-      LPStartSymbol = BF.getSymbol(LPFragment.getFragmentNum());
+      //LPStartSymbol = BF.getSymbol(LPFragment.getFragmentNum());
       //dbgs() << "LPStartSymbol : " << LPStartSymbol->getName() << '\n';
       Streamer.emitIntValue(dwarf::DW_EH_PE_pcrel | dwarf::DW_EH_PE_sdata4, 1);
       MCSymbol *DotSymbol = BC.Ctx->createTempSymbol("LPBase");

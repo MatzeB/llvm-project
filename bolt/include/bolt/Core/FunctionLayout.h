@@ -123,15 +123,6 @@ public:
   uint64_t getFileOffset() const { return FileOffset; }
   void setFileOffset(uint64_t Offset) { FileOffset = Offset; }
 
-  FragmentNum getLandingPadFragmentNum() const {
-    return LPFragmentNum.value_or(Num);
-  }
-  void setLandingPadFragmentNum(FragmentNum Num) { LPFragmentNum = Num; }
-
-  /// Return true if this fragment has an associated landing pad fragment that
-  /// contains all landing pads for it (could be the same fragment).
-  bool hasLandingPadFragment() const { return LPFragmentNum.has_value(); }
-
   unsigned size() const { return Size; };
   bool empty() const { return size() == 0; };
   iterator begin();

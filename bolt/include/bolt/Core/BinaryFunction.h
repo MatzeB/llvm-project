@@ -531,6 +531,11 @@ private:
   /// fragment of the function.
   SmallVector<MCSymbol *, 0> LSDASymbols;
 
+  /// Each function fragment may have another fragment containing all landing
+  /// pads for it. If that's the case, the LP fragment will be stored in the
+  /// vector below with indexing starting with the main fragment.
+  SmallVector<std::optional<FragmentNum>, 0> LPFragments;
+
   /// Map to discover which CFIs are attached to a given instruction offset.
   /// Maps an instruction offset into a FrameInstructions offset.
   /// This is only relevant to the buildCFG phase and is discarded afterwards.
@@ -577,6 +582,9 @@ private:
   };
   SmallVector<BasicBlockOffset, 0> BasicBlockOffsets;
 
+  /// Every function fragment excluding the main one will have a symbol
+  /// pointing to its start stored in the vector ColdSymbols. ColdSymbols[0]
+  /// stores start symbol for the first "cold" fragment.
   SmallVector<MCSymbol *, 0> ColdSymbols;
 
   /// Symbol at the end of each fragment of a split function.
@@ -1118,7 +1126,7 @@ public:
     return false;
   }
 
-  /// Return MC symbol associated with the function.
+  /// Return MC symbol associated with the function or its fragment.
   /// All references to the function should use this symbol.
   MCSymbol *getSymbol(const FragmentNum Fragment = FragmentNum::main()) {
     if (Fragment == FragmentNum::main())
@@ -1891,6 +1899,28 @@ public:
     LSDASymbols[F.get()] = BC.Ctx->getOrCreateSymbol(SymbolName);
 
     return LSDASymbols[F.get()];
+  }
+
+  /// If all landing pads for function fragment \p F are located in fragment
+  /// \p LPF, designate \p LPF as a landing-pad fragment for \p F.
+  void setLPFragment(const FragmentNum F, const FragmentNum LPF) {
+    if (F.get() >= LPFragments.size())
+      LPFragments.resize(F.get() + 1);
+
+    LPFragments[F.get()] = LPF;
+  }
+
+  /// If function fragment \p F has a designated landing-pad fragment, return
+  /// LPStart symbol or nullptr otherwise.
+  MCSymbol *getLPStartSymbol(const FragmentNum F) {
+    if (F.get() >= LPFragments.size())
+      return nullptr;
+
+    std::optional<FragmentNum> LPFragmentNum = LPFragments[F.get()];
+    if (!LPFragmentNum)
+      return nullptr;
+
+    return getSymbol(*LPFragmentNum);
   }
 
   void setOutputDataAddress(uint64_t Address) { OutputDataOffset = Address; }

@@ -920,7 +920,8 @@ void SplitFunctions::splitFunction(BinaryFunction &BF, SplitStrategy &S) {
 
       if (LandingPadFragments.size() == 1) {
         //dbgs() << "*** no EH trampolines needed for " << BF << '\n';
-        FF.setLandingPadFragmentNum(LandingPadFragments.front());
+        //FF.setLandingPadFragmentNum(LandingPadFragments.front());
+        BF.setLPFragment(FF.getFragmentNum(), LandingPadFragments.front());
         if (LandingPadFragments.front() != FF.getFragmentNum()) {
           LLVM_DEBUG();
           //dbgs() << "*** " << FF.getFragmentNum().get() << " needs a different LPStart fragment: "
@@ -940,7 +941,8 @@ void SplitFunctions::splitFunction(BinaryFunction &BF, SplitStrategy &S) {
     // TODO: create trampolines only for a fragment that requires them.
     if (NeedsTrampolines) {
       for (FunctionFragment &FF : BF.getLayout().fragments())
-        FF.setLandingPadFragmentNum(FF.getFragmentNum());
+        BF.setLPFragment(FF.getFragmentNum(), FF.getFragmentNum());
+        //FF.setLandingPadFragmentNum(FF.getFragmentNum());
       Trampolines = createEHTrampolines(BF);
     }
   }
@@ -973,6 +975,10 @@ void SplitFunctions::splitFunction(BinaryFunction &BF, SplitStrategy &S) {
       SplitBytesCold += ColdSize;
     }
   }
+
+  // Restore LP fragment for "main" if the split decision was reversed.
+  if (BF.hasEHRanges() && !BF.isSplit())
+    BF.setLPFragment(FragmentNum::main(), FragmentNum::main());
 
   // Fix branches if the splitting decision of the pass after function
   // reordering is different from that of the pass before function reordering.
