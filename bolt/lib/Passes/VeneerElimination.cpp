@@ -29,35 +29,33 @@ static llvm::cl::opt<bool>
 namespace llvm {
 namespace bolt {
 
+static bool isPossibleVeneer(const BinaryFunction &BF) {
+  return BF.isAArch64Veneer() || BF.getOneName().starts_with("__AArch64");
+}
+
 Error VeneerElimination::runOnFunctions(BinaryContext &BC) {
   if (!opts::EliminateVeneers || !BC.isAArch64())
     return Error::success();
 
   std::unordered_map<const MCSymbol *, const MCSymbol *> VeneerDestinations;
-  uint64_t VeneersCount = 0;
-  uint64_t NumAllVeneers = 0;
+  uint64_t NumEliminatedVeneers = 0;
   for (BinaryFunction &BF : llvm::make_second_range(BC.getBinaryFunctions())) {
-    if (!BF.isAArch64Veneer())
+    if (!isPossibleVeneer(BF))
       continue;
-
-    ++NumAllVeneers;
 
     if (BF.isIgnored())
       continue;
 
-    MCInst &FirstInstruction = *(BF.begin()->begin());
     const MCSymbol *VeneerTargetSymbol = 0;
     uint64_t TargetAddress;
-    if (BC.MIB->isTailCall(FirstInstruction)) {
-      VeneerTargetSymbol = BC.MIB->getTargetSymbol(FirstInstruction);
-    } else if (BC.MIB->matchAbsLongVeneer(BF, TargetAddress)) {
+    if (BC.MIB->matchAbsLongVeneer(BF, TargetAddress)) {
       if (BinaryFunction *TargetBF =
               BC.getBinaryFunctionAtAddress(TargetAddress))
         VeneerTargetSymbol = TargetBF->getSymbol();
     } else {
-      if (!BC.MIB->hasAnnotation(FirstInstruction, "AArch64Veneer"))
-        continue;
-      VeneerTargetSymbol = BC.MIB->getTargetSymbol(FirstInstruction, 1);
+      MCInst &FirstInstruction = *(BF.begin()->begin());
+      if (BC.MIB->hasAnnotation(FirstInstruction, "AArch64Veneer"))
+        VeneerTargetSymbol = BC.MIB->getTargetSymbol(FirstInstruction, 1);
     }
 
     if (!VeneerTargetSymbol)
@@ -66,12 +64,12 @@ Error VeneerElimination::runOnFunctions(BinaryContext &BC) {
     for (const MCSymbol *Symbol : BF.getSymbols())
       VeneerDestinations[Symbol] = VeneerTargetSymbol;
 
-    VeneersCount++;
+    NumEliminatedVeneers++;
     BF.setPseudo(true);
   }
 
   BC.outs() << "BOLT-INFO: number of removed linker-inserted veneers: "
-            << VeneersCount << ". Total veneers: " << NumAllVeneers << '\n';
+            << NumEliminatedVeneers << '\n';
 
   // Handle veneers to veneers in case they occur
   for (auto &Entry : VeneerDestinations) {

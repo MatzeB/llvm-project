@@ -435,9 +435,9 @@ Error BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
   Manager.registerPass(std::make_unique<EliminateUnreachableBlocks>(PrintUCE),
                        opts::EliminateUnreachable);
 
-  Manager.registerPass(std::make_unique<LoopInversionPass>());
-
   Manager.registerPass(std::make_unique<SplitFunctions>(PrintSplit));
+
+  Manager.registerPass(std::make_unique<LoopInversionPass>());
 
   Manager.registerPass(std::make_unique<TailDuplication>());
 

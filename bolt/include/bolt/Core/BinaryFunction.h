@@ -582,9 +582,6 @@ private:
   };
   SmallVector<BasicBlockOffset, 0> BasicBlockOffsets;
 
-  /// Every function fragment excluding the main one will have a symbol
-  /// pointing to its start stored in the vector ColdSymbols. ColdSymbols[0]
-  /// stores start symbol for the first "cold" fragment.
   SmallVector<MCSymbol *, 0> ColdSymbols;
 
   /// Symbol at the end of each fragment of a split function.
@@ -1126,7 +1123,7 @@ public:
     return false;
   }
 
-  /// Return MC symbol associated with the function or its fragment.
+  /// Return MC symbol associated with the function.
   /// All references to the function should use this symbol.
   MCSymbol *getSymbol(const FragmentNum Fragment = FragmentNum::main()) {
     if (Fragment == FragmentNum::main())
@@ -1901,26 +1898,40 @@ public:
     return LSDASymbols[F.get()];
   }
 
-  /// If all landing pads for function fragment \p F are located in fragment
-  /// \p LPF, designate \p LPF as a landing-pad fragment for \p F.
-  void setLPFragment(const FragmentNum F, const FragmentNum LPF) {
+  /// If all landing pads for the function fragment \p F are located in fragment
+  /// \p LPF, designate \p LPF as a landing-pad fragment for \p F. Passing
+  /// std::nullopt in LPF, means that landing pads for \p F are located in more
+  /// than one fragment.
+  void setLPFragment(const FragmentNum F, std::optional<FragmentNum> LPF) {
     if (F.get() >= LPFragments.size())
       LPFragments.resize(F.get() + 1);
 
     LPFragments[F.get()] = LPF;
   }
 
-  /// If function fragment \p F has a designated landing-pad fragment, return
-  /// LPStart symbol or nullptr otherwise.
-  MCSymbol *getLPStartSymbol(const FragmentNum F) {
+  /// If function fragment \p F has a designated landing pad fragment, i.e. a
+  /// fragment that contains all landing pads for throwers in \p F, then return
+  /// that landing pad fragment number. If \p F does not need landing pads,
+  /// return \p F. Return nullptr if landing pads for \p F are scattered among
+  /// several function fragments.
+  std::optional<FragmentNum> getLPFragment(const FragmentNum F) {
+    if (!isSplit()) {
+      assert(F == FragmentNum::main() && "Invalid fragment number");
+      return FragmentNum::main();
+    }
+
     if (F.get() >= LPFragments.size())
-      return nullptr;
+      return std::nullopt;
 
-    std::optional<FragmentNum> LPFragmentNum = LPFragments[F.get()];
-    if (!LPFragmentNum)
-      return nullptr;
+    return LPFragments[F.get()];
+  }
 
-    return getSymbol(*LPFragmentNum);
+  /// Return a symbol corresponding to a landing pad fragment for fragment \p F.
+  /// See getLPFragment().
+  MCSymbol *getLPStartSymbol(const FragmentNum F) {
+    if (std::optional<FragmentNum> LPFragment = getLPFragment(F))
+      return getSymbol(*LPFragment);
+    return nullptr;
   }
 
   void setOutputDataAddress(uint64_t Address) { OutputDataOffset = Address; }

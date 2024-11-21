@@ -2423,13 +2423,6 @@ void RewriteInstance::readDynamicRelocations(const SectionRef &Section,
     if (Symbol)
       SymbolIndex[Symbol] = getRelocationSymbol(InputFile, Rel);
 
-    // Workaround for AArch64 issue with hot text.
-    if (BC->isAArch64() && (SymbolName == "__hot_start" ||
-          SymbolName == "__hot_end")) {
-      BC->addRelocation(Rel.getOffset(), Symbol, ELF::R_AARCH64_ABS64, Addend);
-      continue;
-    }
-
     BC->addDynamicRelocation(Rel.getOffset(), Symbol, RType, Addend);
   }
 }
@@ -3921,34 +3914,39 @@ void RewriteInstance::mapCodeSections(BOLTLinker::SectionMapper MapSection) {
 void RewriteInstance::mapAllocatableSections(
     BOLTLinker::SectionMapper MapSection) {
 
-  auto replaceSection = [&](BinarySection &OldSection,
-                            BinarySection &NewSection) {
-    if (OldSection.getSize() < NewSection.getOutputSize())
-      return;
+  if (opts::UseOldText || opts::StrictMode) {
+    auto tryRewriteSection = [&](BinarySection &OldSection,
+                                 BinarySection &NewSection) {
+      if (OldSection.getSize() < NewSection.getOutputSize())
+        return;
 
-    dbgs() << "BOLT-DEBUG: rewriting contents for " << OldSection.getName()
-           << '\n';
+      BC->outs() << "BOLT-INFO: rewriting " << OldSection.getName()
+                 << " in-place\n";
 
-    NewSection.setOutputAddress(OldSection.getAddress());
-    NewSection.setOutputFileOffset(OldSection.getInputFileOffset());
-    MapSection(NewSection, OldSection.getAddress());
+      NewSection.setOutputAddress(OldSection.getAddress());
+      NewSection.setOutputFileOffset(OldSection.getInputFileOffset());
+      MapSection(NewSection, OldSection.getAddress());
 
-      // FIXME: pad contents with zeros.
-  };
+      // Pad contents with zeros.
+      NewSection.addPadding(OldSection.getSize() - NewSection.getOutputSize());
 
-  if (opts::UseOldText) {
+      // Prevent the original section name from appearing in the section header
+      // table.
+      OldSection.setAnonymous(true);
+    };
+
     if (EHFrameSection) {
       BinarySection *NewEHFrameSection =
           getSection(getNewSecPrefix() + getEHFrameSectionName());
       assert(NewEHFrameSection && "New contents expected for .eh_frame");
-      replaceSection(*EHFrameSection, *NewEHFrameSection);
+      tryRewriteSection(*EHFrameSection, *NewEHFrameSection);
     }
     BinarySection *EHSection = getSection(".gcc_except_table");
     BinarySection *NewEHSection =
         getSection(getNewSecPrefix() + ".gcc_except_table");
     if (EHSection) {
-      assert(NewEHSection);
-      replaceSection(*EHSection, *NewEHSection);
+      assert(NewEHSection && "New contents expected for .gcc_except_table");
+      tryRewriteSection(*EHSection, *NewEHSection);
     }
   }
 
@@ -4070,7 +4068,7 @@ void RewriteInstance::patchELFPHDRTable() {
   }
 
   if (!NewTextSegmentSize && !NewWritableSegmentSize) {
-    BC->outs() << "BOLT-INFO: no new segments added\n";
+    BC->outs() << "BOLT-INFO: not adding new segments\n";
     return;
   }
 
@@ -4234,7 +4232,6 @@ void RewriteInstance::rewriteNoteSections() {
     // New section size.
     uint64_t Size = 0;
     bool DataWritten = false;
-    uint8_t *SectionData = nullptr;
     // Copy over section contents unless it's one of the sections we overwrite.
     if (!willOverwriteSection(SectionName)) {
       Size = Section.sh_size;
@@ -4266,12 +4263,7 @@ void RewriteInstance::rewriteNoteSections() {
     if (BSec->getAllocAddress()) {
       assert(!DataWritten && "Writing section twice.");
       (void)DataWritten;
-      SectionData = BSec->getOutputData();
-
-      LLVM_DEBUG(dbgs() << "BOLT-DEBUG: " << (Size ? "appending" : "writing")
-                        << " contents to section " << SectionName << '\n');
-      OS.write(reinterpret_cast<char *>(SectionData), BSec->getOutputSize());
-      Size += BSec->getOutputSize();
+      Size += BSec->write(OS);
     }
 
     BSec->setOutputFileOffset(NextAvailableOffset);
@@ -4302,8 +4294,7 @@ void RewriteInstance::rewriteNoteSections() {
                << " of size " << Section.getOutputSize() << " at offset 0x"
                << Twine::utohexstr(Section.getOutputFileOffset()) << '\n');
 
-    OS.write(Section.getOutputContents().data(), Section.getOutputSize());
-    NextAvailableOffset += Section.getOutputSize();
+    NextAvailableOffset += Section.write(OS);
   }
 }
 
@@ -4416,6 +4407,10 @@ RewriteInstance::getOutputSections(ELFObjectFile<ELFT> *File,
     SectionRef SecRef = File->toSectionRef(&Section);
     BinarySection *BinSec = BC->getSectionForSectionRef(SecRef);
     assert(BinSec && "Matching BinarySection should exist.");
+
+    // Exclude anonymous sections.
+    if (BinSec->isAnonymous())
+      continue;
 
     addSection(Section, *BinSec);
   }
@@ -4853,8 +4848,7 @@ void RewriteInstance::updateELFSymbolTable(
     }
 
     if (*SymbolName == "_end") {
-      if (NextAvailableAddress > Symbol.st_value &&
-          NextAvailableAddress > NewTextSegmentAddress)
+      if (NextAvailableAddress > Symbol.st_value)
         updateSymbolValue(*SymbolName, NextAvailableAddress);
       goto registerSymbol;
     }
@@ -5770,8 +5764,8 @@ void RewriteInstance::rewriteFile() {
                  << Twine::utohexstr(Section.getAllocAddress()) << "\n of size "
                  << Section.getOutputSize() << "\n at offset "
                  << Section.getOutputFileOffset() << '\n';
-    OS.pwrite(reinterpret_cast<const char *>(Section.getOutputData()),
-              Section.getOutputSize(), Section.getOutputFileOffset());
+    OS.seek(Section.getOutputFileOffset());
+    Section.write(OS);
   }
 
   for (BinarySection &Section : BC->allocatableSections())
@@ -5862,7 +5856,7 @@ void RewriteInstance::writeEHFrameHeader() {
   LLVM_DEBUG(dbgs() << "BOLT: writing a new " << getEHFrameHdrSectionName()
                     << '\n');
 
-  // Try to fit new section in-place.
+  // Try to overwrite the original .eh_frame_hdr if the size permits.
   uint64_t EHFrameHdrOutputAddress = 0;
   uint64_t EHFrameHdrFileOffset = 0;
   std::vector<char> NewEHFrameHdr;
@@ -5875,10 +5869,15 @@ void RewriteInstance::writeEHFrameHeader() {
                  << " in-place\n";
       EHFrameHdrOutputAddress = OldEHFrameHdrSection->getAddress();
       EHFrameHdrFileOffset = OldEHFrameHdrSection->getInputFileOffset();
+    } else {
+      OldEHFrameHdrSection->setOutputName(getOrgSecPrefix() +
+                                          getEHFrameHdrSectionName());
+      OldEHFrameHdrSection = nullptr;
     }
   }
 
-  if (!EHFrameHdrOutputAddress) {
+  // If there was not enough space, allocate more memory for .eh_frame_hdr.
+  if (!OldEHFrameHdrSection) {
     NextAvailableAddress =
         appendPadding(Out->os(), NextAvailableAddress, EHFrameHdrAlign);
 
@@ -5889,31 +5888,32 @@ void RewriteInstance::writeEHFrameHeader() {
         RelocatedEHFrame, NewEHFrame, EHFrameHdrOutputAddress);
 
     NextAvailableAddress += NewEHFrameHdr.size();
+    if (!BC->BOLTReserved.empty() &&
+        (NextAvailableAddress > BC->BOLTReserved.end())) {
+      BC->errs() << "BOLT-ERROR: unable to fit " << getEHFrameHdrSectionName()
+                 << " into reserved space\n";
+      exit(1);
+    }
+
+    // Create a new entry in the section header table.
+    const unsigned Flags = BinarySection::getFlags(/*IsReadOnly=*/true,
+                                                   /*IsText=*/false,
+                                                   /*IsAllocatable=*/true);
+    BinarySection &EHFrameHdrSec = BC->registerOrUpdateSection(
+        getNewSecPrefix() + getEHFrameHdrSectionName(), ELF::SHT_PROGBITS,
+        Flags, nullptr, NewEHFrameHdr.size(), /*Alignment=*/1);
+    EHFrameHdrSec.setOutputFileOffset(EHFrameHdrFileOffset);
+    EHFrameHdrSec.setOutputAddress(EHFrameHdrOutputAddress);
+    EHFrameHdrSec.setOutputName(getEHFrameHdrSectionName());
   }
 
   Out->os().seek(EHFrameHdrFileOffset);
   Out->os().write(NewEHFrameHdr.data(), NewEHFrameHdr.size());
 
-  const unsigned Flags = BinarySection::getFlags(/*IsReadOnly=*/true,
-                                                 /*IsText=*/false,
-                                                 /*IsAllocatable=*/true);
+  // Pad the contents if overwriting in-place.
   if (OldEHFrameHdrSection)
-    OldEHFrameHdrSection->setOutputName(getOrgSecPrefix() +
-                                        getEHFrameHdrSectionName());
-
-  BinarySection &EHFrameHdrSec = BC->registerOrUpdateSection(
-      getNewSecPrefix() + getEHFrameHdrSectionName(), ELF::SHT_PROGBITS, Flags,
-      nullptr, NewEHFrameHdr.size(), /*Alignment=*/1);
-  EHFrameHdrSec.setOutputFileOffset(EHFrameHdrFileOffset);
-  EHFrameHdrSec.setOutputAddress(EHFrameHdrOutputAddress);
-  EHFrameHdrSec.setOutputName(getEHFrameHdrSectionName());
-
-  if (!BC->BOLTReserved.empty() &&
-      (NextAvailableAddress > BC->BOLTReserved.end())) {
-    BC->errs() << "BOLT-ERROR: unable to fit " << getEHFrameHdrSectionName()
-               << " into reserved space\n";
-    exit(1);
-  }
+    Out->os().write_zeros(OldEHFrameHdrSection->getSize() -
+                          NewEHFrameHdr.size());
 
   // Merge new .eh_frame with the relocated original so that gdb can locate all
   // FDEs.

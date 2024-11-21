@@ -10,7 +10,8 @@ set(LLVM_LINK_COMPONENTS
    Support
    Target
    TargetParser
-  )
+   TransformUtils
+   )
 
 if (EMSCRIPTEN AND "lld" IN_LIST LLVM_ENABLE_PROJECTS)
   set(WASM_SRC Wasm.cpp)
@@ -25,7 +26,6 @@ add_clang_library(clangInterpreter
   Interpreter.cpp
   InterpreterValuePrinter.cpp
   InterpreterUtils.cpp
-  RemoteJITUtils.cpp
   Value.cpp
   ${WASM_SRC}
   PARTIAL_SOURCES_INTENDED

@@ -94,12 +94,6 @@ private:
   /// Offset in the file.
   uint64_t FileOffset = 0;
 
-  /// Fragment that contains landing pads for this fragment. Only set when
-  /// landing pads are in a different fragment. Note that landing pads for any
-  /// given fragment are expected to be collocated in a single fragment due
-  /// to runtime limitations of exception handling library.
-  std::optional<FragmentNum> LPFragmentNum;
-
   FunctionFragment(FunctionLayout &Layout, FragmentNum Num);
   FunctionFragment(const FunctionFragment &) = default;
   FunctionFragment(FunctionFragment &&) = default;

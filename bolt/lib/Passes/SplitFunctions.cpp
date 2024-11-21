@@ -901,48 +901,43 @@ void SplitFunctions::splitFunction(BinaryFunction &BF, SplitStrategy &S) {
   // have to be placed in the same fragment. When we split them, create
   // trampoline landing pads that will redirect the execution to real LPs.
   TrampolineSetType Trampolines;
-  if (/*!BC.HasFixedLoadAddress &&*/ BF.hasEHRanges() && BF.isSplit()) {
+  if (BF.hasEHRanges() && BF.isSplit()) {
     // If all landing pads for this fragment are grouped in one (potentially
     // different) fragment, we can set LPStart to the start of that fragment
     // and avoid trampoline code.
     bool NeedsTrampolines = false;
     for (FunctionFragment &FF : BF.getLayout().fragments()) {
-      // List of fragments that contain landing pads for this fragment.
+      // Vector of fragments that contain landing pads for this fragment.
       SmallVector<FragmentNum, 4> LandingPadFragments;
-      for (const BinaryBasicBlock *BB : FF) {
-        for (const BinaryBasicBlock *LPB : BB->landing_pads()) {
+      for (const BinaryBasicBlock *BB : FF)
+        for (const BinaryBasicBlock *LPB : BB->landing_pads())
           LandingPadFragments.push_back(LPB->getFragmentNum());
-        }
-      }
+
       llvm::sort(LandingPadFragments);
       auto Last = llvm::unique(LandingPadFragments);
       LandingPadFragments.erase(Last, LandingPadFragments.end());
 
-      if (LandingPadFragments.size() == 1) {
-        //dbgs() << "*** no EH trampolines needed for " << BF << '\n';
-        //FF.setLandingPadFragmentNum(LandingPadFragments.front());
+      if (LandingPadFragments.size() == 0) {
+        // If the fragment has no landing pads, we can safely set itself as its
+        // landing pad fragment.
+        BF.setLPFragment(FF.getFragmentNum(), FF.getFragmentNum());
+      } else if (LandingPadFragments.size() == 1) {
         BF.setLPFragment(FF.getFragmentNum(), LandingPadFragments.front());
-        if (LandingPadFragments.front() != FF.getFragmentNum()) {
-          LLVM_DEBUG();
-          //dbgs() << "*** " << FF.getFragmentNum().get() << " needs a different LPStart fragment: "
-                 //<< LandingPadFragments.front().get() << "\n";
-          //if (FF.isMainFragment())
-            //dbgs() << "*** from main fragment\n";
+      } else {
+        if (!BC.HasFixedLoadAddress) {
+          NeedsTrampolines = true;
+          break;
+        } else {
+          BF.setLPFragment(FF.getFragmentNum(), std::nullopt);
         }
-
-      } else if (LandingPadFragments.size() > 1) {
-        NeedsTrampolines = true;
-        //dbgs() << "*** EH trampolines are needed for " << BF << '\n';
-        //for (const auto Index : LandingPadFragments)
-          //dbgs() << Index.get() << '\n';
       }
     }
 
-    // TODO: create trampolines only for a fragment that requires them.
+    // Trampolines guarantee that all landing pads for any given fragment will
+    // be contained in the same fragment.
     if (NeedsTrampolines) {
       for (FunctionFragment &FF : BF.getLayout().fragments())
         BF.setLPFragment(FF.getFragmentNum(), FF.getFragmentNum());
-        //FF.setLandingPadFragmentNum(FF.getFragmentNum());
       Trampolines = createEHTrampolines(BF);
     }
   }
@@ -976,7 +971,7 @@ void SplitFunctions::splitFunction(BinaryFunction &BF, SplitStrategy &S) {
     }
   }
 
-  // Restore LP fragment for "main" if the split decision was reversed.
+  // Restore LP fragment for the main fragment if the splitting was undone.
   if (BF.hasEHRanges() && !BF.isSplit())
     BF.setLPFragment(FragmentNum::main(), FragmentNum::main());
 
