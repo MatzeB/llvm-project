@@ -4222,6 +4222,11 @@ void RewriteInstance::patchELFPHDRTable() {
     NewWritableSegmentSize = NextAvailableAddress - NewWritableSegmentAddress;
   }
 
+  if (!NewTextSegmentSize && !NewWritableSegmentSize) {
+    BC->outs() << "BOLT-INFO: not adding new segments\n";
+    return;
+  }
+
   const uint64_t SavedPos = OS.tell();
   OS.seek(PHDRTableOffset);
 
