@@ -525,6 +525,8 @@ public:
   bool ignoreCSRForAllocationOrder(const MachineFunction &MF,
                                    unsigned PhysReg) const override;
   unsigned getGPRAllocationOrder(const MachineFunction &MF) const;
+
+  void mirFileLoaded(MachineFunction &MF) const override;
 };
 
 } // end namespace llvm

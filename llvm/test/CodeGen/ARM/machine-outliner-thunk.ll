@@ -113,7 +113,7 @@ entry:
 
 ; MACHO-LABEL: name:            OUTLINED_FUNCTION_0
 ; MACHO:        bb.0:
-; MACHO-NEXT:   liveins: $r7, $r6, $r5, $r4, $r11, $r10, $r8, $d15, $d14, $d13, $d12, $d11, $d10, $d9, $d8
+; MACHO-NEXT:   liveins: $r6, $r5, $r4, $r11, $r10, $r8, $d15, $d14, $d13, $d12, $d11, $d10, $d9, $d8
 ; MACHO:        $r0, dead $cpsr = tMOVi8 1, 14 /* CC::al */, $noreg
 ; MACHO-NEXT:   $r1, dead $cpsr = tMOVi8 2, 14 /* CC::al */, $noreg
 ; MACHO-NEXT:   $r2, dead $cpsr = tMOVi8 3, 14 /* CC::al */, $noreg

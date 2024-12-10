@@ -45,15 +45,17 @@ declare void @func_4000(ptr, ptr byval(%type_4000))
 define void @test_4000() {
 ; CHECK-LABEL: test_4000:
 ; CHECK:       @ %bb.0:
-; CHECK-NEXT:    .save {r11, lr}
-; CHECK-NEXT:    push {r11, lr}
+; CHECK-NEXT:    .save {r4, r5, r11, lr}
+; CHECK-NEXT:    push {r4, r5, r11, lr}
+; CHECK-NEXT:    .setfp r11, sp, #8
+; CHECK-NEXT:    add r11, sp, #8
 ; CHECK-NEXT:    .pad #4000
 ; CHECK-NEXT:    sub sp, sp, #4000
 ; CHECK-NEXT:    sub sp, sp, #920
 ; CHECK-NEXT:    sub sp, sp, #3072
-; CHECK-NEXT:    add lr, sp, #3072
+; CHECK-NEXT:    sub lr, r11, #3072
 ; CHECK-NEXT:    ldr r1, .LCPI1_0
-; CHECK-NEXT:    add r0, lr, #920
+; CHECK-NEXT:    sub r0, lr, #936
 ; CHECK-NEXT:    mov r2, sp
 ; CHECK-NEXT:    add r0, r0, #12
 ; CHECK-NEXT:  .LBB1_1: @ =>This Inner Loop Header: Depth=1
@@ -62,15 +64,15 @@ define void @test_4000() {
 ; CHECK-NEXT:    str r3, [r2], #4
 ; CHECK-NEXT:    bne .LBB1_1
 ; CHECK-NEXT:  @ %bb.2:
-; CHECK-NEXT:    ldr r1, [sp, #3992]
+; CHECK-NEXT:    ldr r1, [r11, #-4008]
 ; CHECK-NEXT:    mov r0, #0
-; CHECK-NEXT:    ldr r2, [sp, #3996]
-; CHECK-NEXT:    ldr r3, [sp, #4000]
+; CHECK-NEXT:    ldr r2, [r11, #-4004]
+; CHECK-NEXT:    ldr r3, [r11, #-4000]
 ; CHECK-NEXT:    bl func_4000
 ; CHECK-NEXT:    add sp, sp, #920
 ; CHECK-NEXT:    add sp, sp, #3072
-; CHECK-NEXT:    add sp, sp, #4000
-; CHECK-NEXT:    pop {r11, lr}
+; CHECK-NEXT:    sub sp, r11, #8
+; CHECK-NEXT:    pop {r4, r5, r11, lr}
 ; CHECK-NEXT:    mov pc, lr
 ; CHECK-NEXT:    .p2align 2
 ; CHECK-NEXT:  @ %bb.3:

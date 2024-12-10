@@ -343,8 +343,30 @@ bool ARMFrameLowering::hasFPImpl(const MachineFunction &MF) const {
     return true;
 
   // Frame pointer required for use within this function.
-  return (RegInfo->hasStackRealignment(MF) || MFI.hasVarSizedObjects() ||
-          MFI.isFrameAddressTaken());
+  if (RegInfo->hasStackRealignment(MF) || MFI.hasVarSizedObjects() ||
+          MFI.isFrameAddressTaken())
+    return true;
+
+  /// This is the biggest offset to the stack pointer we can encode in aarch64
+  /// instructions (without using a separate calculation and a temp register).
+  /// Note that the exception here are vector stores/loads which cannot encode any
+  /// displacements (see also estimateRSStackSizeLimit(), this should be the
+  /// minimum returned by this function for loads/stores used for function
+  /// parameters).
+  const unsigned DefaultSafeSPDisplacement = (1u << 7) - 1;
+
+  // With large callframes around we may need to use FP to access the scavenging
+  // emergency spillslot.
+  //
+  // Unfortunately some calls to hasFP() like machine verifier ->
+  // getReservedReg() -> hasFP in the middle of global isel are too early
+  // to know the max call frame size. Hopefully conservatively returning "true"
+  // in those cases is fine.
+  if (!MFI.isMaxCallFrameSizeComputed() ||
+      MFI.getMaxCallFrameSize() > DefaultSafeSPDisplacement)
+    return true;
+
+  return false;
 }
 
 /// isFPReserved - Return true if the frame pointer register should be

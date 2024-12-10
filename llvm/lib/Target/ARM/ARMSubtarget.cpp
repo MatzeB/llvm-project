@@ -526,3 +526,13 @@ ARMSubtarget::getPushPopSplitVariation(const MachineFunction &MF) const {
     return SplitR11AAPCSSignRA;
   return NoSplit;
 }
+
+void ARMSubtarget::mirFileLoaded(MachineFunction &MF) const {
+  // We usually compute max call frame size after ISel. Do the computation now
+  // if the .mir file didn't specify it. Note that this will probably give you
+  // bogus values after PEI has eliminated the callframe setup/destroy pseudo
+  // instructions, specify explicitely if you need it to be correct.
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  if (!MFI.isMaxCallFrameSizeComputed())
+    MFI.computeMaxCallFrameSize(MF);
+}

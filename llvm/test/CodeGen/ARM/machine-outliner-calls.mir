@@ -18,6 +18,8 @@
 
 name:           outline_call_arm
 tracksRegLiveness: true
+frameInfo:
+  maxCallFrameSize: 0
 body:             |
   ; CHECK-LABEL: name: outline_call_arm
   ; CHECK: bb.0:
@@ -80,6 +82,8 @@ body:             |
 
 name:           outline_call_thumb
 tracksRegLiveness: true
+frameInfo:
+  maxCallFrameSize: 0
 body:             |
   ; CHECK-LABEL: name: outline_call_thumb
   ; CHECK: bb.0:
@@ -131,6 +135,8 @@ body:             |
 
 name:           outline_call_tailcall_arm
 tracksRegLiveness: true
+frameInfo:
+  maxCallFrameSize: 0
 body:             |
   ; CHECK-LABEL: name: outline_call_tailcall_arm
   ; CHECK: bb.0:
@@ -188,6 +194,8 @@ body:             |
 
 name:           outline_call_tailcall_thumb
 tracksRegLiveness: true
+frameInfo:
+  maxCallFrameSize: 0
 body:             |
   ; CHECK-LABEL: name: outline_call_tailcall_thumb
   ; CHECK: bb.0:
@@ -236,6 +244,8 @@ body:             |
 
 name:           outline_call_KO_mcount
 tracksRegLiveness: true
+frameInfo:
+  maxCallFrameSize: 0
 body:             |
   ; CHECK-LABEL: name: outline_call_KO_mcount
   ; CHECK: bb.0:
@@ -303,13 +313,15 @@ body:             |
 
 name:           bar
 tracksRegLiveness: true
+frameInfo:
+  maxCallFrameSize: 0
 body:             |
   bb.0:
     BX_RET 14, $noreg
 
   ; CHECK-LABEL: name: OUTLINED_FUNCTION_0
   ; CHECK: bb.0:
-  ; CHECK:   liveins: $r11, $r10, $r9, $r8, $r7, $r6, $r5, $d15, $d14, $d13, $d12, $d11, $d10, $d9, $d8
+  ; CHECK:   liveins: $r10, $r9, $r8, $r7, $r6, $r5, $d15, $d14, $d13, $d12, $d11, $d10, $d9, $d8
   ; CHECK:   $r0 = MOVi 2, 14 /* CC::al */, $noreg, $noreg
   ; CHECK:   $r1 = MOVi 2, 14 /* CC::al */, $noreg, $noreg
   ; CHECK:   $r2 = MOVi 2, 14 /* CC::al */, $noreg, $noreg
@@ -319,7 +331,7 @@ body:             |
 
   ; CHECK-LABEL: name: OUTLINED_FUNCTION_1
   ; CHECK: bb.0:
-  ; CHECK:   liveins: $r11, $r10, $r9, $r8, $r7, $r6, $r5, $d15, $d14, $d13, $d12, $d11, $d10, $d9, $d8
+  ; CHECK:   liveins: $r10, $r9, $r8, $r7, $r6, $r5, $d15, $d14, $d13, $d12, $d11, $d10, $d9, $d8
   ; CHECK:   $r0 = MOVi 3, 14 /* CC::al */, $noreg, $noreg
   ; CHECK:   $r1 = MOVi 3, 14 /* CC::al */, $noreg, $noreg
   ; CHECK:   $r2 = MOVi 3, 14 /* CC::al */, $noreg, $noreg
@@ -329,7 +341,7 @@ body:             |
 
   ; CHECK-LABEL: name: OUTLINED_FUNCTION_2
   ; CHECK: bb.0:
-  ; CHECK:   liveins: $r11, $r10, $r9, $r8, $r7, $r6, $r5, $d15, $d14, $d13, $d12, $d11, $d10, $d9, $d8
+  ; CHECK:   liveins: $r10, $r9, $r8, $r7, $r6, $r5, $d15, $d14, $d13, $d12, $d11, $d10, $d9, $d8
   ; CHECK:   $r0 = MOVi 1, 14 /* CC::al */, $noreg, $noreg
   ; CHECK:   $r1 = MOVi 1, 14 /* CC::al */, $noreg, $noreg
   ; CHECK:   $r2 = MOVi 1, 14 /* CC::al */, $noreg, $noreg

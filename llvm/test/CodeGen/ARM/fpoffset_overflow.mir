@@ -10,6 +10,8 @@ fixedStack:
       isAliased: false }
   - { id: 1, offset: -12, size: 4096, alignment: 4, isImmutable: false,
       isAliased: false }
+frameInfo:
+  maxCallFrameSize: 0
 body: |
   bb.0:
     ; CHECK-LABEL: name: func0
@@ -100,6 +102,8 @@ fixedStack:
       isAliased: false }
   - { id: 1, offset: -12, size: 4056, alignment: 4, isImmutable: false,
       isAliased: false }
+frameInfo:
+  maxCallFrameSize: 0
 body: |
   bb.0:
     ; CHECK-LABEL: name: func1

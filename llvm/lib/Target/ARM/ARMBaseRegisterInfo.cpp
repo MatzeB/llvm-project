@@ -246,13 +246,15 @@ isAsmClobberable(const MachineFunction &MF, MCRegister PhysReg) const {
 
 bool ARMBaseRegisterInfo::isInlineAsmReadOnlyReg(const MachineFunction &MF,
                                                  unsigned PhysReg) const {
-  const ARMSubtarget &STI = MF.getSubtarget<ARMSubtarget>();
-  const ARMFrameLowering *TFI = getFrameLowering(MF);
-
   BitVector Reserved(getNumRegs());
   markSuperRegs(Reserved, ARM::PC);
-  if (TFI->isFPReserved(MF))
-    markSuperRegs(Reserved, STI.getFramePointerReg());
+
+  // Note: We would like to check for the FP register here, however this
+  // function is typically called early when MFI.computeMaxCallFrameSize()
+  // has not been called yet and we do not know the final decision in
+  // hasFP() yet. We ignore FP here and instead check for it in
+  // `ARMTargetLowering::finalizeLowering`.
+
   if (hasBasePointer(MF))
     markSuperRegs(Reserved, BasePtr);
   assert(checkAllSuperRegsMarked(Reserved));

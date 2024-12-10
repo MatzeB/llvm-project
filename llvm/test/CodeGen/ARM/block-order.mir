@@ -9,6 +9,8 @@ jumpTable:
   entries:
     - id:              0
       blocks:          [ '%bb.7', '%bb.16', '%bb.25', '%bb.32' ]
+frameInfo:
+  maxCallFrameSize: 0
 body:             |
   ; CHECK-LABEL: name: fn
   ; CHECK: bb.0:

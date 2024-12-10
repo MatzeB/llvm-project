@@ -22004,6 +22004,45 @@ void ARMTargetLowering::insertCopiesSplitCSR(
 void ARMTargetLowering::finalizeLowering(MachineFunction &MF) const {
   MF.getFrameInfo().computeMaxCallFrameSize(MF);
   TargetLoweringBase::finalizeLowering(MF);
+
+  // Usually SelectionDAGBuilder / DetectWriteToReservedRegister checks for
+  // writes to reserved registers. However we cannot know for sure whether an
+  // FP is needed before `computeMaxCallFrameSize()`. So we repeat the check
+  // here for FP.
+  const ARMFrameLowering &TFI = *Subtarget->getFrameLowering();
+  if (MF.hasInlineAsm() && TFI.isFPReserved(MF)) {
+    const TargetRegisterInfo &TRI = *Subtarget->getRegisterInfo();
+    MCPhysReg FPReg = Subtarget->getFramePointerReg();
+    for (const MachineBasicBlock &MBB : MF) {
+      for (const MachineInstr &MI : MBB) {
+        if (MI.isInlineAsm()) {
+          // Note that we only look for definitions (but not clobbers).
+          // Somehow clobbers only produce warnings in AsmPrinter but no
+          // errors...
+          for (unsigned I = InlineAsm::MIOp_FirstOperand,
+               NumOps = MI.getNumOperands(); I < NumOps; I++) {
+            const MachineOperand &MO = MI.getOperand(I);
+            if (!MO.isImm())
+              continue;
+            InlineAsm::Flag F(MO.getImm());
+            if (!F.isRegDefKind() && !F.isRegDefEarlyClobberKind()
+                && !F.isRegUseKind())
+              continue;
+            const MachineOperand &RegOp = MI.getOperand(I + 1);
+            if (!RegOp.isReg()) {
+              // Guards against incorrect inline asm flags.
+              continue;
+            }
+            Register DefReg = RegOp.getReg();
+            if (TRI.regsOverlap(DefReg, FPReg)) {
+              const char *RegName = TRI.getName(FPReg);
+              MI.emitInlineAsmError("write to reserved register '" + Twine(RegName) + "'");
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 bool ARMTargetLowering::isComplexDeinterleavingSupported() const {
