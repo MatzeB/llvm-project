@@ -1767,7 +1767,8 @@ static Value *simplifyInstructionWithPHI(Instruction &I, PHINode *PN,
   return nullptr;
 }
 
-Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
+Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN,
+                                             bool AllowMultipleUses) {
   unsigned NumPHIValues = PN->getNumIncomingValues();
   if (NumPHIValues == 0)
     return nullptr;
@@ -1775,7 +1776,9 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
   // We normally only transform phis with a single use.  However, if a PHI has
   // multiple uses and they are all the same operation, we can fold *all* of the
   // uses into the PHI.
-  if (!PN->hasOneUse()) {
+  bool OneUse = PN->hasOneUse();
+  bool IdenticalUsers = false;
+  if (!AllowMultipleUses && !OneUse) {
     // Walk the use list for the instruction, comparing them to I.
     for (User *U : PN->users()) {
       Instruction *UI = cast<Instruction>(U);
@@ -1783,6 +1786,7 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
         return nullptr;
     }
     // Otherwise, we can replace *all* users with the new PHI we form.
+    IdenticalUsers = true;
   }
 
   // Check to see whether the instruction can be folded into each phi operand.
@@ -1799,6 +1803,9 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
       NewPhiValues.push_back(NewVal);
       continue;
     }
+
+    if (!OneUse && !IdenticalUsers)
+      return nullptr;
 
     if (NonSimplifiedBB) return nullptr;  // More than one non-simplified value.
 
@@ -1860,16 +1867,22 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
       NewPN->addIncoming(Clone, PN->getIncomingBlock(i));
   }
 
-  for (User *U : make_early_inc_range(PN->users())) {
-    Instruction *User = cast<Instruction>(U);
-    if (User == &I) continue;
-    replaceInstUsesWith(*User, NewPN);
-    eraseInstFromFunction(*User);
+  if (IdenticalUsers) {
+    for (User *U : make_early_inc_range(PN->users())) {
+      Instruction *User = cast<Instruction>(U);
+      if (User == &I)
+        continue;
+      replaceInstUsesWith(*User, NewPN);
+      eraseInstFromFunction(*User);
+    }
+    OneUse = true;
   }
 
-  replaceAllDbgUsesWith(const_cast<PHINode &>(*PN),
-                        const_cast<PHINode &>(*NewPN),
-                        const_cast<PHINode &>(*PN), DT);
+  if (OneUse) {
+    replaceAllDbgUsesWith(const_cast<PHINode &>(*PN),
+                          const_cast<PHINode &>(*NewPN),
+                          const_cast<PHINode &>(*PN), DT);
+  }
   return replaceInstUsesWith(I, NewPN);
 }
 
