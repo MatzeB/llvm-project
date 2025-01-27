@@ -755,6 +755,10 @@ def FeatureLdpAlignedOnly : SubtargetFeature<"ldp-aligned-only", "HasLdpAlignedO
 def FeatureStpAlignedOnly : SubtargetFeature<"stp-aligned-only", "HasStpAlignedOnly",
     "true", "In order to emit stp, first check if the store will be aligned to 2 * element_size">;
 
+// For performance reasons we prefer to use ldapr to ldapur on certain cores.
+def FeatureAvoidLDAPUR : SubtargetFeature<"avoid-ldapur", "AvoidLDAPUR", "true",
+  "Prefer add+ldapr to offset ldapur">;
+
 //===----------------------------------------------------------------------===//
 // Architectures.
 //

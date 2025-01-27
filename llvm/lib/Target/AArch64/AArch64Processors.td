@@ -238,6 +238,7 @@ def TuneX3 : SubtargetFeature<"cortex-x3", "ARMProcFamily", "CortexX3",
                                FeatureFuseAES,
                                FeaturePostRAScheduler,
                                FeatureEnableSelectOptimize,
+                               FeatureAvoidLDAPUR,
                                FeaturePredictableSelectIsExpensive]>;
 
 def TuneX4 : SubtargetFeature<"cortex-x4", "ARMProcFamily", "CortexX4",
@@ -247,6 +248,7 @@ def TuneX4 : SubtargetFeature<"cortex-x4", "ARMProcFamily", "CortexX4",
                                FeatureFuseAES,
                                FeaturePostRAScheduler,
                                FeatureEnableSelectOptimize,
+                               FeatureAvoidLDAPUR,
                                FeaturePredictableSelectIsExpensive]>;
 
 def TuneX925 : SubtargetFeature<"cortex-x925", "ARMProcFamily",
@@ -256,6 +258,7 @@ def TuneX925 : SubtargetFeature<"cortex-x925", "ARMProcFamily",
                                 FeatureFuseAES,
                                 FeaturePostRAScheduler,
                                 FeatureEnableSelectOptimize,
+                                FeatureAvoidLDAPUR,
                                 FeaturePredictableSelectIsExpensive]>;
 
 def TuneA64FX : SubtargetFeature<"a64fx", "ARMProcFamily", "A64FX",
@@ -526,6 +529,7 @@ def TuneNeoverseV2 : SubtargetFeature<"neoversev2", "ARMProcFamily", "NeoverseV2
                                       FeaturePostRAScheduler,
                                       FeatureEnableSelectOptimize,
                                       FeatureUseFixedOverScalableIfEqualCost,
+                                      FeatureAvoidLDAPUR,
                                       FeaturePredictableSelectIsExpensive]>;
 
 def TuneNeoverseV3 : SubtargetFeature<"neoversev3", "ARMProcFamily", "NeoverseV3",
@@ -535,6 +539,7 @@ def TuneNeoverseV3 : SubtargetFeature<"neoversev3", "ARMProcFamily", "NeoverseV3
                                       FeatureFuseAdrpAdd,
                                       FeaturePostRAScheduler,
                                       FeatureEnableSelectOptimize,
+                                      FeatureAvoidLDAPUR,
                                       FeaturePredictableSelectIsExpensive]>;
 
 def TuneNeoverseV3AE : SubtargetFeature<"neoversev3AE", "ARMProcFamily", "NeoverseV3",
@@ -544,6 +549,7 @@ def TuneNeoverseV3AE : SubtargetFeature<"neoversev3AE", "ARMProcFamily", "Neover
                                       FeatureFuseAdrpAdd,
                                       FeaturePostRAScheduler,
                                       FeatureEnableSelectOptimize,
+                                      FeatureAvoidLDAPUR,
                                       FeaturePredictableSelectIsExpensive]>;
 
 def TuneSaphira  : SubtargetFeature<"saphira", "ARMProcFamily", "Saphira",
