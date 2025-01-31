@@ -15,9 +15,8 @@
 # RUN: llvm-bolt %t.exe -o %t.bolt.4.4 --pad-funcs-before=_start:4 --pad-funcs=_start:4
 # RUN: llvm-bolt %t.exe -o %t.bolt.4.8 --pad-funcs-before=_start:4 --pad-funcs=_start:8
 
-# Unblock autorebaser: current command is not playing nice with NFC checker,
-# so disaable it
-# UN: not llvm-bolt %t.exe -o %t.bolt.8 --pad-funcs-before=_start:1 2>&1 | FileCheck --check-prefix=CHECK-BAD-ALIGN %s
+# RUN: not llvm-bolt %t.exe -o %t.bolt.1 --pad-funcs-before=_start:1 2>&1 | FileCheck --check-prefix=CHECK-BAD-ALIGN %s
+
 # CHECK-BAD-ALIGN: user-requested 1 padding bytes before function _start(*2) is not a multiple of the minimum function alignment (4).
 
 # RUN: llvm-objdump --section=.text --disassemble %t.bolt.0 | FileCheck --check-prefix=CHECK-0 %s
