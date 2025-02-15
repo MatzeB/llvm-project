@@ -11,7 +11,6 @@
 #include "pointer-assignment.h"
 #include "resolve-names-utils.h"
 #include "resolve-names.h"
-#include "flang/Common/Fortran.h"
 #include "flang/Common/idioms.h"
 #include "flang/Evaluate/common.h"
 #include "flang/Evaluate/fold.h"
@@ -24,6 +23,7 @@
 #include "flang/Semantics/semantics.h"
 #include "flang/Semantics/symbol.h"
 #include "flang/Semantics/tools.h"
+#include "flang/Support/Fortran.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <functional>
@@ -4078,8 +4078,7 @@ bool ExpressionAnalyzer::CheckIntrinsicKind(
     return true;
   } else if (foldingContext_.targetCharacteristics().CanSupportType(
                  category, kind)) {
-    Warn(common::UsageWarning::BadTypeForTarget,
-        "%s(KIND=%jd) is not an enabled type for this target"_warn_en_US,
+    Say("%s(KIND=%jd) is not an enabled type for this target"_err_en_US,
         ToUpperCase(EnumToString(category)), kind);
     return true;
   } else {
@@ -4101,20 +4100,7 @@ bool ExpressionAnalyzer::CheckIntrinsicSize(
       return false;
     }
   }
-  if (foldingContext_.targetCharacteristics().IsTypeEnabled(
-          category, kind)) { // C712, C714, C715, C727
-    return true;
-  } else if (foldingContext_.targetCharacteristics().CanSupportType(
-                 category, kind)) {
-    Warn(common::UsageWarning::BadTypeForTarget,
-        "%s*%jd is not an enabled type for this target"_warn_en_US,
-        ToUpperCase(EnumToString(category)), size);
-    return true;
-  } else {
-    Say("%s*%jd is not a supported type"_err_en_US,
-        ToUpperCase(EnumToString(category)), size);
-    return false;
-  }
+  return CheckIntrinsicKind(category, kind);
 }
 
 bool ExpressionAnalyzer::AddImpliedDo(parser::CharBlock name, int kind) {
