@@ -283,7 +283,7 @@ Changes in existing checks
   casts bug-free.
 
 - Improved :doc:`bugprone-exception-escape
-  <clang-tidy/checks/bugprone/exception-escape>`  check to correctly detect exception 
+  <clang-tidy/checks/bugprone/exception-escape>`  check to correctly detect exception
   handler of type ``CV void *`` as catching all  ``CV`` compatible pointer types.
 
 - Improved :doc:`bugprone-forwarding-reference-overload
