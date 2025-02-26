@@ -55,6 +55,7 @@
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -86,6 +87,13 @@ class AArch64AsmPrinter : public AsmPrinter {
   FaultMaps FM;
   const AArch64Subtarget *STI;
   bool ShouldEmitWeakSwiftAsyncExtendedFramePointerFlags = false;
+
+  bool EmitJumpTableInfo = false;
+  struct JumpTableInfo {
+    MCSymbol *LoadLabel = nullptr;
+    MCSymbol *BranchLabel = nullptr;
+  };
+  SmallVector<JumpTableInfo, 2> JumpTableInfos;
 
 public:
   AArch64AsmPrinter(TargetMachine &TM, std::unique_ptr<MCStreamer> Streamer)
@@ -192,7 +200,10 @@ public:
     }
 
     // Emit the rest of the function body.
+    assert(JumpTableInfos.size() == 0);
+    EmitJumpTableInfo = MF.getFunction().hasFnAttribute("emit-jump-table-info");
     emitFunctionBody();
+    JumpTableInfos.clear();
 
     // Emit the XRay table for this function.
     emitXRayTable();
@@ -231,6 +242,8 @@ private:
   /// Emit instruction to set float register to zero.
   void emitFMov0(const MachineInstr &MI);
 
+  void emitJumpTableInfoSection() const;
+
   using MInstToMCSymbol = std::map<const MachineInstr *, MCSymbol *>;
 
   MInstToMCSymbol LOHInstToLabel;
@@ -247,6 +260,8 @@ private:
                               MCSymbol *LazyPointer) override;
   void emitMachOIFuncStubHelperBody(Module &M, const GlobalIFunc &GI,
                                     MCSymbol *LazyPointer) override;
+
+  void recordJumpTableBranch(const MachineInstr &BR);
 };
 
 } // end anonymous namespace
@@ -1163,6 +1178,66 @@ void AArch64AsmPrinter::PrintDebugValueComment(const MachineInstr *MI,
   printOperand(MI, NOps - 2, OS);
 }
 
+void AArch64AsmPrinter::emitJumpTableInfoSection() const {
+  const MachineJumpTableInfo *MJTI = MF->getJumpTableInfo();
+  assert(MJTI && "must be called with jump tables present");
+
+  const TargetLoweringObjectFile &TLOF = getObjFileLowering();
+  MCSection *Section = TLOF.getSectionForJumpTableInfo(MF->getFunction(), TM);
+  OutStreamer->switchSection(Section);
+
+  const std::vector<MachineJumpTableEntry> &JT = MJTI->getJumpTables();
+  for (unsigned I = 0, E = JT.size(); I != E; ++I) {
+    const MachineJumpTableEntry &JTE = JT[I];
+    unsigned Size = AArch64FI->getJumpTableEntrySize(I);
+    const char *Comment;
+    unsigned Format;
+    if (Size == 1) {
+      Format = 2;
+      Comment = "format 2: 1b relative; shr 2";
+    } else if (Size == 2) {
+      Format = 3;
+      Comment = "format 3: 2b relative; shr 2";
+    } else if (Size == 4) {
+      Format = 4;
+      Comment = "format 4: 4b relative";
+    } else {
+      llvm_unreachable("invalid jump table size");
+    }
+    OutStreamer->AddComment(Comment);
+    OutStreamer->emitInt8(Format);
+
+    const MCSymbol *BaseSym = AArch64FI->getJumpTableEntryPCRelSymbol(I);
+
+    MCSymbol *LoadLabel = nullptr;
+    MCSymbol *BranchLabel = nullptr;
+    if (I < JumpTableInfos.size()) {
+      const JumpTableInfo &Info = JumpTableInfos[I];
+      LoadLabel = Info.LoadLabel;
+      BranchLabel = Info.BranchLabel;
+    }
+
+    unsigned PointerSize = TM.getProgramPointerSize();
+    OutStreamer->emitSymbolValue(GetJTISymbol(I), PointerSize);
+    OutStreamer->AddComment("Base");
+    OutStreamer->emitSymbolValue(BaseSym, PointerSize);
+    OutStreamer->AddComment("Load Instruction");
+    if (LoadLabel != nullptr) {
+      OutStreamer->emitSymbolValue(LoadLabel, PointerSize);
+    } else {
+      OutStreamer->emitZeros(PointerSize);
+    }
+    OutStreamer->AddComment("Branch Instruction");
+    if (BranchLabel != nullptr) {
+      OutStreamer->emitSymbolValue(BranchLabel, PointerSize);
+    } else {
+      OutStreamer->emitZeros(PointerSize);
+    }
+    OutStreamer->AddComment("Number of Entries");
+    OutStreamer->emitULEB128IntValue(JTE.MBBs.size());
+  }
+}
+
 void AArch64AsmPrinter::emitJumpTableInfo() {
   const MachineJumpTableInfo *MJTI = MF->getJumpTableInfo();
   if (!MJTI) return;
@@ -1204,6 +1279,9 @@ void AArch64AsmPrinter::emitJumpTableInfo() {
       OutStreamer->emitValue(Value, Size);
     }
   }
+
+  if (EmitJumpTableInfo)
+    emitJumpTableInfoSection();
 }
 
 std::tuple<const MCSymbol *, uint64_t, const MCSymbol *,
@@ -1360,6 +1438,19 @@ void AArch64AsmPrinter::LowerJumpTableDest(llvm::MCStreamer &OutStreamer,
   case 4: LdrOpcode = AArch64::LDRSWroX; break;
   default:
     llvm_unreachable("Unknown jump table size");
+  }
+
+  if (EmitJumpTableInfo) {
+    MCSymbol *LoadLabel = MF->getContext().createTempSymbol();
+    while (JumpTableInfos.size() <= static_cast<size_t>(JTIdx)) {
+      JumpTableInfos.push_back(JumpTableInfo());
+    }
+    JumpTableInfo &Info = JumpTableInfos[JTIdx];
+    if (Info.LoadLabel != nullptr) {
+      report_fatal_error("more than one JumpTableDest for jump table");
+    }
+    Info.LoadLabel = LoadLabel;
+    OutStreamer.emitLabel(LoadLabel);
   }
 
   EmitToStreamer(OutStreamer, MCInstBuilder(LdrOpcode)
@@ -2633,6 +2724,8 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
     return;
 
   case AArch64::BR_JumpTable:
+    if (EmitJumpTableInfo)
+      report_fatal_error("EmitJumpTableInfo not implemented for hardened jump table");
     LowerHardenedBRJumpTable(*MI);
     return;
 
@@ -2815,6 +2908,11 @@ void AArch64AsmPrinter::emitInstruction(const MachineInstr *MI) {
     TS->emitARM64WinCFISaveAnyRegQPX(MI->getOperand(0).getImm(),
                                      -MI->getOperand(2).getImm());
     return;
+
+  case AArch64::BR:
+    if (EmitJumpTableInfo)
+      recordJumpTableBranch(*MI);
+    break;
   }
 
   // Finally, do the automated lowerings for everything else.
@@ -3025,6 +3123,47 @@ const MCExpr *AArch64AsmPrinter::lowerConstant(const Constant *CV) {
   }
 
   return AsmPrinter::lowerConstant(CV);
+}
+
+static const MachineInstr *findCloseRegisterDef(const TargetRegisterInfo &TRI,
+                                                const MachineInstr &Before,
+                                                Register Reg) {
+  const MachineBasicBlock &MBB = *Before.getParent();
+  MachineBasicBlock::const_iterator I = Before.getIterator();
+  do {
+    I = std::prev(I);
+    const MachineInstr &MI = *I;
+    if (MI.definesRegister(Reg, /*TRI=*/nullptr))
+      return &MI;
+    if (MI.modifiesRegister(Reg, &TRI))
+      break;
+  } while (I != MBB.begin());
+  return nullptr;
+}
+
+void AArch64AsmPrinter::recordJumpTableBranch(const MachineInstr &BR) {
+  const MachineOperand &MO = BR.getOperand(0);
+  Register Reg = MO.getReg();
+  const MachineInstr *Def =
+      findCloseRegisterDef(*STI->getRegisterInfo(), BR, Reg);
+  if (Def == nullptr)
+    return;
+  unsigned Opc = Def->getOpcode();
+  if (Opc != AArch64::JumpTableDest32 && Opc != AArch64::JumpTableDest16 &&
+      Opc != AArch64::JumpTableDest8)
+    return;
+
+  int JTIdx = Def->getOperand(4).getIndex();
+  MCSymbol *BranchLabel = MF->getContext().createTempSymbol();
+  while (JumpTableInfos.size() <= static_cast<size_t>(JTIdx)) {
+    JumpTableInfos.push_back(JumpTableInfo());
+  }
+  JumpTableInfo &Info = JumpTableInfos[JTIdx];
+  if (Info.BranchLabel != nullptr) {
+    report_fatal_error("more than one BR for jump table");
+  }
+  Info.BranchLabel = BranchLabel;
+  OutStreamer->emitLabel(BranchLabel);
 }
 
 // Force static initialization.

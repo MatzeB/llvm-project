@@ -24,6 +24,9 @@ class SectionKind {
     /// Metadata - Debug info sections or other metadata.
     Metadata,
 
+           /// Jump Table metadata for binary analyzers.
+           JumpTableInfo,
+
     /// Exclude - This section will be excluded from the final executable or
     /// shared library. Only valid for ELF / COFF targets.
     Exclude,
@@ -122,6 +125,8 @@ public:
 
   bool isMetadata() const { return K == Metadata; }
 
+  bool isJumpTableInfo() const { return K == JumpTableInfo; }
+
   bool isExclude() const { return K == Exclude; }
 
   bool isText() const { return K == Text || K == ExecuteOnly; }
@@ -186,6 +191,7 @@ private:
 public:
 
   static SectionKind getMetadata() { return get(Metadata); }
+  static SectionKind getJumpTableInfo() { return get(JumpTableInfo); }
   static SectionKind getExclude() { return get(Exclude); }
   static SectionKind getText() { return get(Text); }
   static SectionKind getExecuteOnly() { return get(ExecuteOnly); }

@@ -530,6 +530,9 @@ static unsigned getELFSectionType(StringRef Name, SectionKind K) {
   if (K.isBSS() || K.isThreadBSS())
     return ELF::SHT_NOBITS;
 
+  if (K.isJumpTableInfo())
+    return ELF::SHT_LLVM_JUMP_TABLE_INFO;
+
   return ELF::SHT_PROGBITS;
 }
 
@@ -629,6 +632,8 @@ static StringRef getSectionPrefixForGlobal(SectionKind Kind, bool IsLarge) {
     return IsLarge ? ".ldata" : ".data";
   if (Kind.isReadOnlyWithRel())
     return IsLarge ? ".ldata.rel.ro" : ".data.rel.ro";
+  if (Kind.isJumpTableInfo())
+    return ".llvm_jump_table_info";
   llvm_unreachable("Unknown section kind");
 }
 
@@ -959,6 +964,16 @@ MCSection *TargetLoweringObjectFileELF::getSectionForJumpTable(
                                    getMangler(), TM, EmitUniqueSection,
                                    ELF::SHF_ALLOC, &NextUniqueID,
                                    /* AssociatedSymbol */ nullptr);
+}
+
+MCSection *TargetLoweringObjectFileELF::getSectionForJumpTableInfo(
+    const Function &F, const TargetMachine &TM) const {
+  bool EmitUniqueSection = TM.getFunctionSections() || F.getComdat() != nullptr;
+  return selectELFSectionForGlobal(getContext(), &F,
+                                   SectionKind::getJumpTableInfo(),
+                                   getMangler(), TM, EmitUniqueSection,
+                                   ELF::SHF_LINK_ORDER, &NextUniqueID,
+                                   /*AssociatedSymbol=*/cast<MCSymbolELF>(TM.getSymbol(&F)));
 }
 
 MCSection *TargetLoweringObjectFileELF::getSectionForLSDA(

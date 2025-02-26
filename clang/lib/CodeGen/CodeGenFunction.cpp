@@ -993,6 +993,9 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
   if (CGM.getCodeGenOpts().ProfileSampleAccurate)
     Fn->addFnAttr("profile-sample-accurate");
 
+  if (CGM.getCodeGenOpts().EmitJumpTableInfo)
+    Fn->addFnAttr("emit-jump-table-info");
+
   if (!CGM.getCodeGenOpts().SampleProfileFile.empty())
     Fn->addFnAttr("use-sample-profile");
 

@@ -6177,6 +6177,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
+  if (Args.hasFlag(options::OPT_femit_jump_table_info,
+                   options::OPT_fno_emit_jump_table_info, /*Default=*/false)) {
+    CmdArgs.push_back("-femit-jump-table-info");
+  }
+
   if (Arg *A = Args.getLastArg(options::OPT_fbasic_block_sections_EQ)) {
     StringRef Val = A->getValue();
     if (Triple.isX86() && Triple.isOSBinFormatELF()) {

@@ -4191,6 +4191,10 @@ defm basic_block_address_map : BoolFOption<"basic-block-address-map",
   CodeGenOpts<"BBAddrMap">, DefaultFalse,
   PosFlag<SetTrue, [], [CC1Option], "Emit the basic block address map section.">,
   NegFlag<SetFalse>>;
+defm emit_jump_table_info : BoolFOption<"emit-jump-table-info",
+  CodeGenOpts<"EmitJumpTableInfo">, DefaultFalse,
+  PosFlag<SetTrue, [], [CC1Option], "Emit jump table metadata in llvm_jump_table_info section.">,
+  NegFlag<SetFalse>>;
 def fbasic_block_sections_EQ : Joined<["-"], "fbasic-block-sections=">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option, CC1AsOption]>,
   HelpText<"Place each function's basic blocks in unique sections (ELF Only)">,

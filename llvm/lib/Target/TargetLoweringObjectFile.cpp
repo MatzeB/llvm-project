@@ -355,6 +355,11 @@ MCSection *TargetLoweringObjectFile::getSectionForJumpTable(
                                Alignment);
 }
 
+MCSection *TargetLoweringObjectFile::getSectionForJumpTableInfo(
+    const Function &F, const TargetMachine &TM) const {
+  report_fatal_error("jump table info not supported for this object file");
+}
+
 bool TargetLoweringObjectFile::shouldPutJumpTableInFunctionSection(
     bool UsesLabelDifference, const Function &F) const {
   // In PIC mode, we need to emit the jump table to the same section as the
