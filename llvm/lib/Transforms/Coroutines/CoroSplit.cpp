@@ -82,22 +82,6 @@ using namespace llvm;
 
 namespace {
 
-/// Collect (a known) subset of global debug info metadata potentially used by
-/// the function \p F.
-///
-/// This metadata set can be used to avoid cloning debug info not owned by \p F
-/// and is shared among all potential clones \p F.
-MetadataSetTy collectCommonDebugInfo(Function &F) {
-  TimeTraceScope FunctionScope("CollectCommonDebugInfo");
-
-  DebugInfoFinder DIFinder;
-  DISubprogram *SPClonedWithinModule = CollectDebugInfoForCloning(
-      F, CloneFunctionChangeType::LocalChangesOnly, DIFinder);
-
-  return FindDebugInfoToIdentityMap(CloneFunctionChangeType::LocalChangesOnly,
-                                    DIFinder, SPClonedWithinModule);
-}
-
 /// A little helper class for building
 class CoroCloner {
 public:
@@ -134,28 +118,21 @@ private:
 
   TargetTransformInfo &TTI;
 
-  // Common module-level metadata that's shared between all coroutine clones and
-  // doesn't need to be cloned itself.
-  const MetadataSetTy &CommonDebugInfo;
-
   /// Create a cloner for a switch lowering.
   CoroCloner(Function &OrigF, const Twine &Suffix, coro::Shape &Shape,
-             Kind FKind, TargetTransformInfo &TTI,
-             const MetadataSetTy &CommonDebugInfo)
+             Kind FKind, TargetTransformInfo &TTI)
       : OrigF(OrigF), NewF(nullptr), Suffix(Suffix), Shape(Shape), FKind(FKind),
-        Builder(OrigF.getContext()), TTI(TTI),
-        CommonDebugInfo(CommonDebugInfo) {
+        Builder(OrigF.getContext()), TTI(TTI) {
     assert(Shape.ABI == coro::ABI::Switch);
   }
 
   /// Create a cloner for a continuation lowering.
   CoroCloner(Function &OrigF, const Twine &Suffix, coro::Shape &Shape,
              Function *NewF, AnyCoroSuspendInst *ActiveSuspend,
-             TargetTransformInfo &TTI, const MetadataSetTy &CommonDebugInfo)
+             TargetTransformInfo &TTI)
       : OrigF(OrigF), NewF(NewF), Suffix(Suffix), Shape(Shape),
         FKind(Shape.ABI == coro::ABI::Async ? Kind::Async : Kind::Continuation),
-        Builder(OrigF.getContext()), ActiveSuspend(ActiveSuspend), TTI(TTI),
-        CommonDebugInfo(CommonDebugInfo) {
+        Builder(OrigF.getContext()), ActiveSuspend(ActiveSuspend), TTI(TTI) {
     assert(Shape.ABI == coro::ABI::Retcon ||
            Shape.ABI == coro::ABI::RetconOnce || Shape.ABI == coro::ABI::Async);
     assert(NewF && "need existing function for continuation");
@@ -166,11 +143,10 @@ public:
   /// Create a clone for a switch lowering.
   static Function *createClone(Function &OrigF, const Twine &Suffix,
                                coro::Shape &Shape, Kind FKind,
-                               TargetTransformInfo &TTI,
-                               const MetadataSetTy &CommonDebugInfo) {
+                               TargetTransformInfo &TTI) {
     TimeTraceScope FunctionScope("CoroCloner");
 
-    CoroCloner Cloner(OrigF, Suffix, Shape, FKind, TTI, CommonDebugInfo);
+    CoroCloner Cloner(OrigF, Suffix, Shape, FKind, TTI);
     Cloner.create();
     return Cloner.getFunction();
   }
@@ -179,12 +155,10 @@ public:
   static Function *createClone(Function &OrigF, const Twine &Suffix,
                                coro::Shape &Shape, Function *NewF,
                                AnyCoroSuspendInst *ActiveSuspend,
-                               TargetTransformInfo &TTI,
-                               const MetadataSetTy &CommonDebugInfo) {
+                               TargetTransformInfo &TTI) {
     TimeTraceScope FunctionScope("CoroCloner");
 
-    CoroCloner Cloner(OrigF, Suffix, Shape, NewF, ActiveSuspend, TTI,
-                      CommonDebugInfo);
+    CoroCloner Cloner(OrigF, Suffix, Shape, NewF, ActiveSuspend, TTI);
     Cloner.create();
     return Cloner.getFunction();
   }
@@ -1487,21 +1461,16 @@ struct SwitchCoroutineSplitter {
                     TargetTransformInfo &TTI) {
     assert(Shape.ABI == coro::ABI::Switch);
 
-    MetadataSetTy CommonDebugInfo{collectCommonDebugInfo(F)};
-
     // Create a resume clone by cloning the body of the original function,
     // setting new entry block and replacing coro.suspend an appropriate value
     // to force resume or cleanup pass for every suspend point.
     createResumeEntryBlock(F, Shape);
-    auto *ResumeClone = CoroCloner::createClone(F, ".resume", Shape,
-                                                CoroCloner::Kind::SwitchResume,
-                                                TTI, CommonDebugInfo);
-    auto *DestroyClone = CoroCloner::createClone(F, ".destroy", Shape,
-                                                 CoroCloner::Kind::SwitchUnwind,
-                                                 TTI, CommonDebugInfo);
+    auto *ResumeClone = CoroCloner::createClone(
+        F, ".resume", Shape, CoroCloner::Kind::SwitchResume, TTI);
+    auto *DestroyClone = CoroCloner::createClone(
+        F, ".destroy", Shape, CoroCloner::Kind::SwitchUnwind, TTI);
     auto *CleanupClone = CoroCloner::createClone(
-        F, ".cleanup", Shape, CoroCloner::Kind::SwitchCleanup, TTI,
-        CommonDebugInfo);
+        F, ".cleanup", Shape, CoroCloner::Kind::SwitchCleanup, TTI);
 
     postSplitCleanup(*ResumeClone);
     postSplitCleanup(*DestroyClone);
@@ -1886,13 +1855,12 @@ static void splitAsyncCoroutine(Function &F, coro::Shape &Shape,
   }
 
   assert(Clones.size() == Shape.CoroSuspends.size());
-  MetadataSetTy CommonDebugInfo{collectCommonDebugInfo(F)};
   for (size_t Idx = 0, End = Shape.CoroSuspends.size(); Idx != End; ++Idx) {
     auto *Suspend = Shape.CoroSuspends[Idx];
     auto *Clone = Clones[Idx];
 
     CoroCloner::createClone(F, "resume." + Twine(Idx), Shape, Clone, Suspend,
-                            TTI, CommonDebugInfo);
+                            TTI);
   }
 }
 
@@ -2017,13 +1985,12 @@ static void splitRetconCoroutine(Function &F, coro::Shape &Shape,
   }
 
   assert(Clones.size() == Shape.CoroSuspends.size());
-  MetadataSetTy CommonDebugInfo{collectCommonDebugInfo(F)};
   for (size_t i = 0, e = Shape.CoroSuspends.size(); i != e; ++i) {
     auto Suspend = Shape.CoroSuspends[i];
     auto Clone = Clones[i];
 
-    CoroCloner::createClone(F, "resume." + Twine(i), Shape, Clone, Suspend, TTI,
-                            CommonDebugInfo);
+    CoroCloner::createClone(F, "resume." + Twine(i), Shape, Clone, Suspend,
+                            TTI);
   }
 }
 
