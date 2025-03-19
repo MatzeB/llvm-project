@@ -98,7 +98,7 @@ class AsanThread {
     fiber_stack_bottom_ = reinterpret_cast<uptr>(fiber_stack_base);
     fiber_stack_top_ =
       reinterpret_cast<uptr>(fiber_stack_base) + fiber_stack_extent;
-    fiber_stack_size_ = reinterpret_cast<uptr>(fiber_stack_extent);
+    fiber_stack_size_ = fiber_stack_extent;
   }
 
   void exit_fiber() {
