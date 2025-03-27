@@ -1308,24 +1308,9 @@ void AArch64AsmPrinter::emitJumpTableInfoSection() const {
   const MachineJumpTableInfo *MJTI = MF->getJumpTableInfo();
   assert(MJTI && "must be called with jump tables present");
 
-  MCSection *JumpTableSizesSection = nullptr;
-  StringRef sectionName = ".llvm_jump_table_info";
-
-  const Triple &TT = TM.getTargetTriple();
-  if (TT.isOSBinFormatELF()) {
-    MCSymbolELF *LinkedToSym = dyn_cast<MCSymbolELF>(CurrentFnSym);
-    const Function &F = MF->getFunction();
-    int Flags = F.hasComdat() ? static_cast<int>(ELF::SHF_GROUP) : 0;
-
-    StringRef GroupName = F.hasComdat() ? F.getComdat()->getName() : "";
-    JumpTableSizesSection = OutContext.getELFSection(
-        sectionName, ELF::SHT_LLVM_JUMP_TABLE_INFO, Flags, 0, GroupName,
-        F.hasComdat(), MCSection::NonUniqueID, LinkedToSym);
-  } else {
-    report_fatal_error("jump_table_info_section only implemented for ELF yet");
-  }
-
-  OutStreamer->switchSection(JumpTableSizesSection);
+  const TargetLoweringObjectFile &TLOF = getObjFileLowering();
+  MCSection *Section = TLOF.getSectionForJumpTableInfo(MF->getFunction(), TM);
+  OutStreamer->switchSection(Section);
 
   const std::vector<MachineJumpTableEntry> &JT = MJTI->getJumpTables();
   for (unsigned I = 0, E = JT.size(); I != E; ++I) {
