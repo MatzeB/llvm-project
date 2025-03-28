@@ -77,11 +77,11 @@ class LongJmpPass : public BinaryFunctionPass {
   void relaxLocalBranches(BinaryFunction &BF);
 
   struct FunctionCluster {
-    std::set<BinaryFunction *> Functions;
+    DenseSet<BinaryFunction *> Functions;
 
     // Functions that this cluster of functions is calling. Note that it
     // excludes all functions in the cluster itself.
-    std::set<BinaryFunction *> Callees;
+    DenseSet<BinaryFunction *> Callees;
 
     uint64_t Size{0};
 
