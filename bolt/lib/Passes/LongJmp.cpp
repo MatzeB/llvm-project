@@ -1025,10 +1025,12 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
   };
 
   DenseMap<BinaryFunction *, BinaryFunction *> Thunks;
-  for (const FunctionCluster &FC : Clusters) {
-    for (BinaryFunction *Callee : FC.Callees) {
+  for (FunctionCluster &FC : Clusters) {
+    SmallVector<BinaryFunction *, 16> Callees(FC.Callees.begin(),
+                                              FC.Callees.end());
+    llvm::sort(Callees, compareBinaryFunctionByIndex);
+    for (BinaryFunction *Callee : Callees)
       Thunks[Callee] = createSmallThunk(*Callee);
-    }
   }
 
   BC.outs() << "BOLT-INFO: " << Thunks.size() << " thunks created\n";
