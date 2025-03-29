@@ -46,9 +46,10 @@ using namespace llvm;
 
 namespace opts {
 
-cl::opt<bool> NoHugePages("no-huge-pages",
-                          cl::desc("use regular size pages for code alignment"),
-                          cl::Hidden, cl::cat(BoltCategory));
+static cl::opt<bool>
+    NoHugePages("no-huge-pages",
+                cl::desc("use regular size pages for code alignment"),
+                cl::Hidden, cl::cat(BoltCategory));
 
 static cl::opt<bool>
 PrintDebugInfo("print-debug-info",
@@ -2297,7 +2298,7 @@ ErrorOr<int64_t> BinaryContext::getSignedValueAtAddress(uint64_t Address,
 }
 
 void BinaryContext::addRelocation(uint64_t Address, MCSymbol *Symbol,
-                                  uint64_t Type, uint64_t Addend,
+                                  uint32_t Type, uint64_t Addend,
                                   uint64_t Value) {
   ErrorOr<BinarySection &> Section = getSectionForAddress(Address);
   assert(Section && "cannot find section for address");
@@ -2306,7 +2307,7 @@ void BinaryContext::addRelocation(uint64_t Address, MCSymbol *Symbol,
 }
 
 void BinaryContext::addDynamicRelocation(uint64_t Address, MCSymbol *Symbol,
-                                         uint64_t Type, uint64_t Addend,
+                                         uint32_t Type, uint64_t Addend,
                                          uint64_t Value) {
   ErrorOr<BinarySection &> Section = getSectionForAddress(Address);
   assert(Section && "cannot find section for address");
@@ -2412,6 +2413,32 @@ BinaryContext::createInjectedBinaryFunction(const std::string &Name,
   setSymbolToFunctionMap(BF->getSymbol(), BF);
   BF->CurrentState = BinaryFunction::State::CFG;
   return BF;
+}
+
+BinaryFunction *BinaryContext::createInstructionPatch(
+    uint64_t Address, InstructionListType &Instructions, const Twine &Name) {
+  ErrorOr<BinarySection &> Section = getSectionForAddress(Address);
+  assert(Section && "cannot get section for patching");
+  assert(Section->hasSectionRef() && Section->isText() &&
+         "can only patch input file code sections");
+
+  const uint64_t FileOffset =
+      Section->getInputFileOffset() + Address - Section->getAddress();
+
+  std::string PatchName = Name.str();
+  if (PatchName.empty()) {
+    // Assign unique name to the patch.
+    static uint64_t N = 0;
+    PatchName = "__BP_" + std::to_string(N++);
+  }
+
+  BinaryFunction *PBF = createInjectedBinaryFunction(PatchName);
+  PBF->setOutputAddress(Address);
+  PBF->setFileOffset(FileOffset);
+  PBF->setOriginSection(&Section.get());
+  PBF->addBasicBlock()->addInstructions(Instructions);
+
+  return PBF;
 }
 
 BinaryFunction *

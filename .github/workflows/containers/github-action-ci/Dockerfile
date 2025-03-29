@@ -14,9 +14,13 @@ RUN apt-get update && \
     python3 \
     git \
     curl \
-    zlib1g-dev
+    zlib1g-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN curl -O -L https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-$LLVM_VERSION.tar.gz && tar -xf llvmorg-$LLVM_VERSION.tar.gz
+RUN curl -O -L https://github.com/llvm/llvm-project/archive/refs/tags/llvmorg-$LLVM_VERSION.tar.gz && \
+  tar -xf llvmorg-$LLVM_VERSION.tar.gz && \
+  rm -f llvmorg-$LLVM_VERSION.tar.gz
 
 WORKDIR /llvm-project-llvmorg-$LLVM_VERSION
 
@@ -40,7 +44,7 @@ RUN cmake -B ./build -G Ninja ./llvm \
 RUN ninja -C ./build stage2-clang-bolt stage2-install-distribution && ninja -C ./build install-distribution
 
 FROM base as ci-container
-    
+
 COPY --from=stage1-toolchain $LLVM_SYSROOT $LLVM_SYSROOT
 
 # Need to install curl for hendrikmuhs/ccache-action
@@ -49,7 +53,7 @@ COPY --from=stage1-toolchain $LLVM_SYSROOT $LLVM_SYSROOT
 # Need git for SPIRV-Tools tests.
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    binutils \ 
+    binutils \
     cmake \
     curl \
     git \
@@ -59,14 +63,15 @@ RUN apt-get update && \
     perl-modules \
     python3-psutil \
     sudo \
-
     # These are needed by the premerge pipeline. Pip is used to install
     # dependent python packages and ccache is used for build caching. File and
     # tzdata are used for tests.
     python3-pip \
     ccache \
     file \
-    tzdata
+    tzdata && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install sccache as it is needed by most of the project test workflows and
 # cannot be installed by the ccache action when executing as a non-root user.

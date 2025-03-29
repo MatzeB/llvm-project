@@ -343,9 +343,6 @@ private:
   /// True if the function uses ORC format for stack unwinding.
   bool HasORC{false};
 
-  /// True if the original entry point was patched.
-  bool IsPatched{false};
-
   /// True if the function contains explicit or implicit indirect branch to its
   /// split fragments, e.g., split jump table, landing pad in split fragment
   bool HasIndirectTargetToSplitFragment{false};
@@ -1267,7 +1264,7 @@ public:
   /// Register relocation type \p RelType at a given \p Address in the function
   /// against \p Symbol.
   /// Assert if the \p Address is not inside this function.
-  void addRelocation(uint64_t Address, MCSymbol *Symbol, uint64_t RelType,
+  void addRelocation(uint64_t Address, MCSymbol *Symbol, uint32_t RelType,
                      uint64_t Addend, uint64_t Value);
 
   /// Return the name of the section this function originated from.
@@ -1379,9 +1376,6 @@ public:
 
   /// Return true if the function uses ORC format for stack unwinding.
   bool hasORC() const { return HasORC; }
-
-  /// Return true if the original entry point was patched.
-  bool isPatched() const { return IsPatched; }
 
   bool isHotTextMover() const { return IsHotTextMover; }
 
@@ -1734,8 +1728,6 @@ public:
 
   /// Mark function that should not be emitted.
   void setIgnored();
-
-  void setIsPatched(bool V) { IsPatched = V; }
 
   void setHotTextMover(bool V) { IsHotTextMover = V; }
 
