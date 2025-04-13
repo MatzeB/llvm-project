@@ -38,11 +38,10 @@ define <vscale x 4 x i32> @combine_ld1_masked(ptr %ptr) #0 {
 
 define <vscale x 8 x i16> @combine_ld1_masked_casted_predicate(ptr %ptr) #0 {
 ; CHECK-LABEL: @combine_ld1_masked_casted_predicate(
-; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
-; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> [[TMP1]])
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 8 x i1> @llvm.aarch64.sve.convert.from.svbool.nxv8i1(<vscale x 16 x i1> [[TMP2]])
-; CHECK-NEXT:    [[TMP5:%.*]] = call <vscale x 8 x i16> @llvm.masked.load.nxv8i16.p0(ptr [[PTR:%.*]], i32 1, <vscale x 8 x i1> [[TMP3]], <vscale x 8 x i16> zeroinitializer), !annotation !0
-; CHECK-NEXT:    ret <vscale x 8 x i16> [[TMP5]]
+; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer))
+; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 8 x i1> @llvm.aarch64.sve.convert.from.svbool.nxv8i1(<vscale x 16 x i1> [[TMP1]])
+; CHECK-NEXT:    [[TMP3:%.*]] = call <vscale x 8 x i16> @llvm.masked.load.nxv8i16.p0(ptr [[PTR:%.*]], i32 1, <vscale x 8 x i1> [[TMP2]], <vscale x 8 x i16> zeroinitializer)
+; CHECK-NEXT:    ret <vscale x 8 x i16> [[TMP3]]
 ;
   %1 = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
   %2 = tail call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> %1)
@@ -86,10 +85,9 @@ define void @combine_st1_masked(<vscale x 4 x i32> %vec, ptr %ptr) #0 {
 
 define void @combine_st1_masked_casted_predicate(<vscale x 8 x i16> %vec, ptr %ptr) #0 {
 ; CHECK-LABEL: @combine_st1_masked_casted_predicate(
-; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
-; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> [[TMP1]])
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 8 x i1> @llvm.aarch64.sve.convert.from.svbool.nxv8i1(<vscale x 16 x i1> [[TMP2]])
-; CHECK-NEXT:    call void @llvm.masked.store.nxv8i16.p0(<vscale x 8 x i16> [[VEC:%.*]], ptr [[PTR:%.*]], i32 1, <vscale x 8 x i1> [[TMP3]]), !annotation !0
+; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer))
+; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 8 x i1> @llvm.aarch64.sve.convert.from.svbool.nxv8i1(<vscale x 16 x i1> [[TMP1]])
+; CHECK-NEXT:    call void @llvm.masked.store.nxv8i16.p0(<vscale x 8 x i16> [[VEC:%.*]], ptr [[PTR:%.*]], i32 1, <vscale x 8 x i1> [[TMP2]])
 ; CHECK-NEXT:    ret void
 ;
   %1 = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)

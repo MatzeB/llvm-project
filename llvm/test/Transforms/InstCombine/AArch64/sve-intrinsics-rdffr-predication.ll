@@ -6,8 +6,7 @@ target triple = "aarch64-unknown-linux-gnu"
 ; Test that rdffr is substituted with predicated form which enables ptest optimization later.
 define <vscale x 16 x i1> @predicate_rdffr() #0 {
 ; CHECK-LABEL: @predicate_rdffr(
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.ptrue.nxv16i1(i32 31)
-; CHECK-NEXT:    [[OUT:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.rdffr.z(<vscale x 16 x i1> [[TMP1]])
+; CHECK-NEXT:    [[OUT:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.rdffr.z(<vscale x 16 x i1> shufflevector (<vscale x 16 x i1> insertelement (<vscale x 16 x i1> poison, i1 true, i64 0), <vscale x 16 x i1> poison, <vscale x 16 x i32> zeroinitializer))
 ; CHECK-NEXT:    ret <vscale x 16 x i1> [[OUT]]
 ;
   %out = call <vscale x 16 x i1> @llvm.aarch64.sve.rdffr()

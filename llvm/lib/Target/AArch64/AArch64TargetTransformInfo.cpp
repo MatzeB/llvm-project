@@ -1023,8 +1023,8 @@ static bool isAllActivePredicate(Value *Pred) {
         cast<ScalableVectorType>(UncastedPred->getType())->getMinNumElements())
       Pred = UncastedPred;
 
-  return match(Pred, m_Intrinsic<Intrinsic::aarch64_sve_ptrue>(
-                         m_ConstantInt<AArch64SVEPredPattern::all>()));
+  auto *C = dyn_cast<Constant>(Pred);
+  return (C && C->isAllOnesValue());
 }
 
 // Erase unary operation where predicate has all inactive lanes
@@ -1114,14 +1114,7 @@ static std::optional<Instruction *> instCombineSVECmpNE(InstCombiner &IC,
                                                         IntrinsicInst &II) {
   LLVMContext &Ctx = II.getContext();
 
-  // Check that the predicate is all active
-  auto *Pg = dyn_cast<IntrinsicInst>(II.getArgOperand(0));
-  if (!Pg || Pg->getIntrinsicID() != Intrinsic::aarch64_sve_ptrue)
-    return std::nullopt;
-
-  const auto PTruePattern =
-      cast<ConstantInt>(Pg->getOperand(0))->getZExtValue();
-  if (PTruePattern != AArch64SVEPredPattern::all)
+  if (!isAllActivePredicate(II.getArgOperand(0)))
     return std::nullopt;
 
   // Check that we have a compare of zero..
@@ -1535,8 +1528,7 @@ instCombineSVEVectorBinOp(InstCombiner &IC, IntrinsicInst &II) {
   auto *OpPredicate = II.getOperand(0);
   auto BinOpCode = intrinsicIDToBinOpCode(II.getIntrinsicID());
   if (BinOpCode == Instruction::BinaryOpsEnd ||
-      !match(OpPredicate, m_Intrinsic<Intrinsic::aarch64_sve_ptrue>(
-                              m_ConstantInt<AArch64SVEPredPattern::all>())))
+      !isAllActivePredicate(OpPredicate))
     return std::nullopt;
   IRBuilderBase::FastMathFlagGuard FMFGuard(IC.Builder);
   IC.Builder.setFastMathFlags(II.getFastMathFlags());
@@ -1550,8 +1542,7 @@ instCombineSVEVectorBinOp(InstCombiner &IC, IntrinsicInst &II) {
 static std::optional<Instruction *> instCombineSVEAllActive(IntrinsicInst &II,
                                                             Intrinsic::ID IID) {
   auto *OpPredicate = II.getOperand(0);
-  if (!match(OpPredicate, m_Intrinsic<Intrinsic::aarch64_sve_ptrue>(
-                              m_ConstantInt<AArch64SVEPredPattern::all>())))
+  if (!isAllActivePredicate(OpPredicate))
     return std::nullopt;
 
   auto *Mod = II.getModule();
@@ -2052,6 +2043,13 @@ static std::optional<Instruction *> instCombineSVESrshl(InstCombiner &IC,
   return IC.replaceInstUsesWith(II, LSL);
 }
 
+static std::optional<Instruction *> instCombinePTrue(InstCombiner &IC,
+                                                     IntrinsicInst &II) {
+  if (match(II.getOperand(0), m_ConstantInt<AArch64SVEPredPattern::all>()))
+    return IC.replaceInstUsesWith(II, Constant::getAllOnesValue(II.getType()));
+  return std::nullopt;
+}
+
 std::optional<Instruction *>
 AArch64TTIImpl::instCombineIntrinsic(InstCombiner &IC,
                                      IntrinsicInst &II) const {
@@ -2274,6 +2272,8 @@ AArch64TTIImpl::instCombineIntrinsic(InstCombiner &IC,
     return instCombineSVESrshl(IC, II);
   case Intrinsic::aarch64_sve_dupq_lane:
     return instCombineSVEDupqLane(IC, II);
+  case Intrinsic::aarch64_sve_ptrue:
+    return instCombinePTrue(IC, II);
   }
 
   return std::nullopt;

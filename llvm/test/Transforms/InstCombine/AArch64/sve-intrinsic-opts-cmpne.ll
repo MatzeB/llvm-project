@@ -23,8 +23,7 @@ define <vscale x 16 x i1> @dupq_b_0() #0 {
 define <vscale x 16 x i1> @dupq_b_d() #0 {
 ; CHECK-LABEL: define <vscale x 16 x i1> @dupq_b_d(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP2:%.*]] = call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv2i1(<vscale x 2 x i1> [[TMP2]])
+; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv2i1(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer))
 ; CHECK-NEXT:    ret <vscale x 16 x i1> [[TMP1]]
 ;
   %1 = tail call <vscale x 16 x i1> @llvm.aarch64.sve.ptrue.nxv16i1(i32 31)
@@ -40,8 +39,7 @@ define <vscale x 16 x i1> @dupq_b_d() #0 {
 define <vscale x 16 x i1> @dupq_b_w() #0 {
 ; CHECK-LABEL: define <vscale x 16 x i1> @dupq_b_w(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP2:%.*]] = call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> [[TMP2]])
+; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer))
 ; CHECK-NEXT:    ret <vscale x 16 x i1> [[TMP1]]
 ;
   %1 = tail call <vscale x 16 x i1> @llvm.aarch64.sve.ptrue.nxv16i1(i32 31)
@@ -57,8 +55,7 @@ define <vscale x 16 x i1> @dupq_b_w() #0 {
 define <vscale x 16 x i1> @dupq_b_h() #0 {
 ; CHECK-LABEL: define <vscale x 16 x i1> @dupq_b_h(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP2:%.*]] = call <vscale x 8 x i1> @llvm.aarch64.sve.ptrue.nxv8i1(i32 31)
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv8i1(<vscale x 8 x i1> [[TMP2]])
+; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv8i1(<vscale x 8 x i1> shufflevector (<vscale x 8 x i1> insertelement (<vscale x 8 x i1> poison, i1 true, i64 0), <vscale x 8 x i1> poison, <vscale x 8 x i32> zeroinitializer))
 ; CHECK-NEXT:    ret <vscale x 16 x i1> [[TMP1]]
 ;
   %1 = tail call <vscale x 16 x i1> @llvm.aarch64.sve.ptrue.nxv16i1(i32 31)
@@ -74,8 +71,7 @@ define <vscale x 16 x i1> @dupq_b_h() #0 {
 define <vscale x 16 x i1> @dupq_b_b() #0 {
 ; CHECK-LABEL: define <vscale x 16 x i1> @dupq_b_b(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.ptrue.nxv16i1(i32 31)
-; CHECK-NEXT:    ret <vscale x 16 x i1> [[TMP1]]
+; CHECK-NEXT:    ret <vscale x 16 x i1> shufflevector (<vscale x 16 x i1> insertelement (<vscale x 16 x i1> poison, i1 true, i64 0), <vscale x 16 x i1> poison, <vscale x 16 x i32> zeroinitializer)
 ;
   %1 = tail call <vscale x 16 x i1> @llvm.aarch64.sve.ptrue.nxv16i1(i32 31)
   %2 = tail call <vscale x 16 x i8> @llvm.vector.insert.nxv16i8.v16i8(<vscale x 16 x i8> undef,
@@ -106,8 +102,7 @@ define <vscale x 8 x i1> @dupq_h_0() #0 {
 define <vscale x 8 x i1> @dupq_h_d() #0 {
 ; CHECK-LABEL: define <vscale x 8 x i1> @dupq_h_d(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP3:%.*]] = call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv2i1(<vscale x 2 x i1> [[TMP3]])
+; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv2i1(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer))
 ; CHECK-NEXT:    [[TMP2:%.*]] = call <vscale x 8 x i1> @llvm.aarch64.sve.convert.from.svbool.nxv8i1(<vscale x 16 x i1> [[TMP1]])
 ; CHECK-NEXT:    ret <vscale x 8 x i1> [[TMP2]]
 ;
@@ -123,8 +118,7 @@ define <vscale x 8 x i1> @dupq_h_d() #0 {
 define <vscale x 8 x i1> @dupq_h_w() #0 {
 ; CHECK-LABEL: define <vscale x 8 x i1> @dupq_h_w(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP3:%.*]] = call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> [[TMP3]])
+; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv4i1(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer))
 ; CHECK-NEXT:    [[TMP2:%.*]] = call <vscale x 8 x i1> @llvm.aarch64.sve.convert.from.svbool.nxv8i1(<vscale x 16 x i1> [[TMP1]])
 ; CHECK-NEXT:    ret <vscale x 8 x i1> [[TMP2]]
 ;
@@ -140,8 +134,7 @@ define <vscale x 8 x i1> @dupq_h_w() #0 {
 define <vscale x 8 x i1> @dupq_h_h() #0 {
 ; CHECK-LABEL: define <vscale x 8 x i1> @dupq_h_h(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 8 x i1> @llvm.aarch64.sve.ptrue.nxv8i1(i32 31)
-; CHECK-NEXT:    ret <vscale x 8 x i1> [[TMP1]]
+; CHECK-NEXT:    ret <vscale x 8 x i1> shufflevector (<vscale x 8 x i1> insertelement (<vscale x 8 x i1> poison, i1 true, i64 0), <vscale x 8 x i1> poison, <vscale x 8 x i32> zeroinitializer)
 ;
   %1 = tail call <vscale x 8 x i1> @llvm.aarch64.sve.ptrue.nxv8i1(i32 31)
   %2 = tail call <vscale x 8 x i16> @llvm.vector.insert.nxv8i16.v8i16(<vscale x 8 x i16> undef,
@@ -171,8 +164,7 @@ define <vscale x 4 x i1> @dupq_w_0() #0 {
 define <vscale x 4 x i1> @dupq_w_d() #0 {
 ; CHECK-LABEL: define <vscale x 4 x i1> @dupq_w_d(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP3:%.*]] = call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv2i1(<vscale x 2 x i1> [[TMP3]])
+; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 16 x i1> @llvm.aarch64.sve.convert.to.svbool.nxv2i1(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer))
 ; CHECK-NEXT:    [[TMP2:%.*]] = call <vscale x 4 x i1> @llvm.aarch64.sve.convert.from.svbool.nxv4i1(<vscale x 16 x i1> [[TMP1]])
 ; CHECK-NEXT:    ret <vscale x 4 x i1> [[TMP2]]
 ;
@@ -188,8 +180,7 @@ define <vscale x 4 x i1> @dupq_w_d() #0 {
 define <vscale x 4 x i1> @dupq_w_w() #0 {
 ; CHECK-LABEL: define <vscale x 4 x i1> @dupq_w_w(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
-; CHECK-NEXT:    ret <vscale x 4 x i1> [[TMP1]]
+; CHECK-NEXT:    ret <vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer)
 ;
   %1 = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
   %2 = tail call <vscale x 4 x i32> @llvm.vector.insert.nxv4i32.v4i32(<vscale x 4 x i32> undef,
@@ -219,8 +210,7 @@ define <vscale x 2 x i1> @dupq_d_0() #0 {
 define <vscale x 2 x i1> @dupq_d_d() #0 {
 ; CHECK-LABEL: define <vscale x 2 x i1> @dupq_d_d(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP1:%.*]] = call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
-; CHECK-NEXT:    ret <vscale x 2 x i1> [[TMP1]]
+; CHECK-NEXT:    ret <vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer)
 ;
   %1 = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
   %2 = tail call <vscale x 2 x i64> @llvm.vector.insert.nxv2i64.v2i64(<vscale x 2 x i64> undef,
@@ -236,10 +226,9 @@ define <vscale x 2 x i1> @dupq_d_d() #0 {
 define <vscale x 2 x i1> @dupq_neg1() #0 {
 ; CHECK-LABEL: define <vscale x 2 x i1> @dupq_neg1(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 2 x i64> @llvm.vector.insert.nxv2i64.v2i64(<vscale x 2 x i64> undef, <2 x i64> <i64 1, i64 0>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 2 x i64> @llvm.aarch64.sve.dupq.lane.nxv2i64(<vscale x 2 x i64> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> [[TMP4]], <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer), <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 2 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
@@ -254,10 +243,9 @@ define <vscale x 2 x i1> @dupq_neg1() #0 {
 define <vscale x 4 x i1> @dupq_neg2() #0 {
 ; CHECK-LABEL: define <vscale x 4 x i1> @dupq_neg2(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 4 x i32> @llvm.vector.insert.nxv4i32.v4i32(<vscale x 4 x i32> undef, <4 x i32> <i32 1, i32 0, i32 0, i32 1>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 4 x i32> @llvm.aarch64.sve.dupq.lane.nxv4i32(<vscale x 4 x i32> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> [[TMP4]], <vscale x 4 x i32> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer), <vscale x 4 x i32> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 4 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
@@ -272,10 +260,9 @@ define <vscale x 4 x i1> @dupq_neg2() #0 {
 define <vscale x 4 x i1> @dupq_neg3() #0 {
 ; CHECK-LABEL: define <vscale x 4 x i1> @dupq_neg3(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 4 x i32> @llvm.vector.insert.nxv4i32.v4i32(<vscale x 4 x i32> undef, <4 x i32> <i32 0, i32 1, i32 0, i32 1>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 4 x i32> @llvm.aarch64.sve.dupq.lane.nxv4i32(<vscale x 4 x i32> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> [[TMP4]], <vscale x 4 x i32> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer), <vscale x 4 x i32> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 4 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
@@ -290,10 +277,9 @@ define <vscale x 4 x i1> @dupq_neg3() #0 {
 define <vscale x 4 x i1> @dupq_neg4() #0 {
 ; CHECK-LABEL: define <vscale x 4 x i1> @dupq_neg4(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 4 x i32> @llvm.vector.insert.nxv4i32.v4i32(<vscale x 4 x i32> undef, <4 x i32> <i32 1, i32 1, i32 0, i32 0>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 4 x i32> @llvm.aarch64.sve.dupq.lane.nxv4i32(<vscale x 4 x i32> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> [[TMP4]], <vscale x 4 x i32> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer), <vscale x 4 x i32> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 4 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
@@ -308,10 +294,9 @@ define <vscale x 4 x i1> @dupq_neg4() #0 {
 define <vscale x 4 x i1> @dupq_neg5() #0 {
 ; CHECK-LABEL: define <vscale x 4 x i1> @dupq_neg5(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 4 x i32> @llvm.vector.insert.nxv4i32.v4i32(<vscale x 4 x i32> undef, <4 x i32> <i32 0, i32 0, i32 0, i32 1>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 4 x i32> @llvm.aarch64.sve.dupq.lane.nxv4i32(<vscale x 4 x i32> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> [[TMP4]], <vscale x 4 x i32> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer), <vscale x 4 x i32> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 4 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
@@ -326,12 +311,11 @@ define <vscale x 4 x i1> @dupq_neg5() #0 {
 define <vscale x 4 x i1> @dupq_neg6(i1 %a) #0 {
 ; CHECK-LABEL: define <vscale x 4 x i1> @dupq_neg6(
 ; CHECK-SAME: i1 [[A:%.*]]) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP6:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = zext i1 [[A]] to i32
 ; CHECK-NEXT:    [[TMP2:%.*]] = insertelement <4 x i32> <i32 1, i32 1, i32 1, i32 poison>, i32 [[TMP1]], i64 3
 ; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 4 x i32> @llvm.vector.insert.nxv4i32.v4i32(<vscale x 4 x i32> undef, <4 x i32> [[TMP2]], i64 0)
 ; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 4 x i32> @llvm.aarch64.sve.dupq.lane.nxv4i32(<vscale x 4 x i32> [[TMP3]], i64 0)
-; CHECK-NEXT:    [[TMP5:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> [[TMP6]], <vscale x 4 x i32> [[TMP4]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP5:%.*]] = tail call <vscale x 4 x i1> @llvm.aarch64.sve.cmpne.wide.nxv4i32(<vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i64 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer), <vscale x 4 x i32> [[TMP4]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 4 x i1> [[TMP5]]
 ;
   %1 = tail call <vscale x 4 x i1> @llvm.aarch64.sve.ptrue.nxv4i1(i32 31)
@@ -347,10 +331,9 @@ define <vscale x 4 x i1> @dupq_neg6(i1 %a) #0 {
 define <vscale x 2 x i1> @dupq_neg7() #0 {
 ; CHECK-LABEL: define <vscale x 2 x i1> @dupq_neg7(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 2 x i64> @llvm.vector.insert.nxv2i64.v2i64(<vscale x 2 x i64> undef, <2 x i64> <i64 1, i64 1>, i64 2)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 2 x i64> @llvm.aarch64.sve.dupq.lane.nxv2i64(<vscale x 2 x i64> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> [[TMP4]], <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer), <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 2 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
@@ -365,10 +348,9 @@ define <vscale x 2 x i1> @dupq_neg7() #0 {
 define <vscale x 2 x i1> @dupq_neg8() #0 {
 ; CHECK-LABEL: define <vscale x 2 x i1> @dupq_neg8(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 2 x i64> @llvm.vector.insert.nxv2i64.v2i64(<vscale x 2 x i64> undef, <2 x i64> <i64 1, i64 1>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 2 x i64> @llvm.aarch64.sve.dupq.lane.nxv2i64(<vscale x 2 x i64> [[TMP1]], i64 1)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> [[TMP4]], <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer), <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 2 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
@@ -383,10 +365,9 @@ define <vscale x 2 x i1> @dupq_neg8() #0 {
 define <vscale x 2 x i1> @dupq_neg9(<vscale x 2 x i64> %x) #0 {
 ; CHECK-LABEL: define <vscale x 2 x i1> @dupq_neg9(
 ; CHECK-SAME: <vscale x 2 x i64> [[X:%.*]]) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 2 x i64> @llvm.vector.insert.nxv2i64.v2i64(<vscale x 2 x i64> [[X]], <2 x i64> <i64 1, i64 1>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 2 x i64> @llvm.aarch64.sve.dupq.lane.nxv2i64(<vscale x 2 x i64> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> [[TMP4]], <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer), <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 2 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
@@ -401,10 +382,9 @@ define <vscale x 2 x i1> @dupq_neg9(<vscale x 2 x i64> %x) #0 {
 define <vscale x 2 x i1> @dupq_neg10() #0 {
 ; CHECK-LABEL: define <vscale x 2 x i1> @dupq_neg10(
 ; CHECK-SAME: ) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 2 x i64> @llvm.vector.insert.nxv2i64.v2i64(<vscale x 2 x i64> undef, <2 x i64> <i64 1, i64 1>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 2 x i64> @llvm.aarch64.sve.dupq.lane.nxv2i64(<vscale x 2 x i64> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> [[TMP4]], <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> shufflevector (<vscale x 2 x i64> insertelement (<vscale x 2 x i64> poison, i64 1, i64 0), <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer))
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer), <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> shufflevector (<vscale x 2 x i64> insertelement (<vscale x 2 x i64> poison, i64 1, i64 0), <vscale x 2 x i64> poison, <vscale x 2 x i32> zeroinitializer))
 ; CHECK-NEXT:    ret <vscale x 2 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
@@ -453,10 +433,9 @@ define <vscale x 2 x i1> @dupq_neg12() #0 {
 define <vscale x 2 x i1> @dupq_neg13(<vscale x 2 x i64> %x) #0 {
 ; CHECK-LABEL: define <vscale x 2 x i1> @dupq_neg13(
 ; CHECK-SAME: <vscale x 2 x i64> [[X:%.*]]) #[[ATTR0]] {
-; CHECK-NEXT:    [[TMP4:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
 ; CHECK-NEXT:    [[TMP1:%.*]] = tail call <vscale x 2 x i64> @llvm.vector.insert.nxv2i64.v2i64(<vscale x 2 x i64> undef, <2 x i64> <i64 1, i64 1>, i64 0)
 ; CHECK-NEXT:    [[TMP2:%.*]] = tail call <vscale x 2 x i64> @llvm.aarch64.sve.dupq.lane.nxv2i64(<vscale x 2 x i64> [[TMP1]], i64 0)
-; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> [[TMP4]], <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> [[X]])
+; CHECK-NEXT:    [[TMP3:%.*]] = tail call <vscale x 2 x i1> @llvm.aarch64.sve.cmpne.nxv2i64(<vscale x 2 x i1> shufflevector (<vscale x 2 x i1> insertelement (<vscale x 2 x i1> poison, i1 true, i64 0), <vscale x 2 x i1> poison, <vscale x 2 x i32> zeroinitializer), <vscale x 2 x i64> [[TMP2]], <vscale x 2 x i64> [[X]])
 ; CHECK-NEXT:    ret <vscale x 2 x i1> [[TMP3]]
 ;
   %1 = tail call <vscale x 2 x i1> @llvm.aarch64.sve.ptrue.nxv2i1(i32 31)
