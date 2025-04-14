@@ -17,9 +17,7 @@
 
 // CHECK: Module name: DependsOnModule
 // CHECK: Module map file: {{.*}}DependsOnModule.framework{{[/\\]}}Modules{{[/\\]}}module.modulemap
-// facebook begin T32246672
-// CHECK: Imports module '{{.*}}': {{.*}}Module{{.*}}.pcm
-// facebook end T32246672
+// CHECK: Imports module 'Module': {{.*}}Module{{.*}}.pcm
 
 // CHECK: Language options:
 // CHECK:   C99: Yes
