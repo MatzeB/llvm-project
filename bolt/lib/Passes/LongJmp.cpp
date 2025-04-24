@@ -900,7 +900,7 @@ void LongJmpPass::relaxLocalBranches(BinaryFunction &BF) {
 
 void LongJmpPass::relaxCalls(BinaryContext &BC) {
   // Map every function to its direct callees. Note that this is different from
-  // a typical call graph as we completely ignore indirect calls.
+  // a typical call graph as here we completely ignore indirect calls.
   uint64_t EstimatedSize = 0;
   // Conservatively estimate emitted function size.
   auto estimateFunctionSize = [&](const BinaryFunction &BF) -> uint64_t {
@@ -934,7 +934,7 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
         BinaryFunction *Callee = BC.getFunctionForSymbol(TargetSymbol);
         if (!Callee) {
-          /* Ignore internall calls */
+          // Ignore internal calls that use basic block labels as a destination.
           continue;
         }
 
@@ -988,9 +988,6 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
     exit(1);
   }
 
-  if (Clusters.size() == 1)
-    return;
-
   // Populate one of the clusters with PLT functions based on the proximity of
   // the PLT section to avoid unneeded thunk redirection.
   // FIXME: this part is extremely fragile as it depends on the placement
@@ -1024,13 +1021,33 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
     return ThunkBF;
   };
 
+  auto createLongThunk = [&](BinaryFunction &Callee) {
+    BinaryFunction *ThunkBF =
+        BC.createThunkBinaryFunction("__BThunk__" + Callee.getOneName().str());
+    InstructionListType Instructions;
+    BC.MIB->createLongTailCall(Instructions, Callee.getSymbol(), BC.Ctx.get());
+    ThunkBF->addBasicBlock()->addInstructions(Instructions);
+    ThunkBF->setCodeSectionName(SectionName);
+
+    return ThunkBF;
+  };
+
   DenseMap<BinaryFunction *, BinaryFunction *> Thunks;
-  for (FunctionCluster &FC : Clusters) {
+  for (unsigned ClusterNum = 0; ClusterNum < Clusters.size(); ++ClusterNum) {
+    FunctionCluster &FC = Clusters[ClusterNum];
     SmallVector<BinaryFunction *, 16> Callees(FC.Callees.begin(),
                                               FC.Callees.end());
     llvm::sort(Callees, compareBinaryFunctionByIndex);
-    for (BinaryFunction *Callee : Callees)
-      Thunks[Callee] = createSmallThunk(*Callee);
+    FunctionCluster *AdjacentCluster =
+        Clusters.size() == 2 ? &Clusters[1 - ClusterNum] : nullptr;
+    // Create short thunks for callees in adjacent cluster and long thunks
+    // for callees outside.
+    for (BinaryFunction *Callee : Callees) {
+      if (AdjacentCluster && AdjacentCluster->Functions.count(Callee))
+        Thunks[Callee] = createSmallThunk(*Callee);
+      else if (!Thunks.count(Callee))
+        Thunks[Callee] = createLongThunk(*Callee);
+    }
   }
 
   BC.outs() << "BOLT-INFO: " << Thunks.size() << " thunks created\n";
@@ -1051,7 +1068,8 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
           BinaryFunction *Callee = BC.getFunctionForSymbol(TargetSymbol);
           if (!Callee) {
-            /* Ignore internal calls */
+            // Ignore internal calls that use basic block labels as a
+            // destination.
             continue;
           }
 
