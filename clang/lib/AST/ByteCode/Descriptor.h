@@ -168,6 +168,7 @@ public:
   const bool IsArray = false;
   /// Flag indicating if this is a dummy descriptor.
   bool IsDummy = false;
+  bool IsConstexprUnknown = false;
 
   /// Storage management methods.
   const BlockCtorFn CtorFn = nullptr;
@@ -183,7 +184,7 @@ public:
              bool IsConst, bool IsTemporary, bool IsMutable);
 
   /// Allocates a descriptor for an array of primitives of unknown size.
-  Descriptor(const DeclTy &D, PrimType Type, MetadataSize MDSize,
+  Descriptor(const DeclTy &D, PrimType Type, MetadataSize MDSize, bool IsConst,
              bool IsTemporary, UnknownSize);
 
   /// Allocates a descriptor for an array of composites.
@@ -264,7 +265,7 @@ public:
   bool isUnknownSizeArray() const { return Size == UnknownSizeMark; }
 
   /// Checks if the descriptor is of a primitive.
-  bool isPrimitive() const { return !IsArray && !ElemRecord && !IsDummy; }
+  bool isPrimitive() const { return !IsArray && !ElemRecord && PrimT; }
 
   /// Checks if the descriptor is of an array.
   bool isArray() const { return IsArray; }
