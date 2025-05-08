@@ -666,6 +666,7 @@ static void addPGOAndCoverageFlags(const ToolChain &TC, Compilation &C,
         Twine("--instrument-cold-function-only-path=") + Path));
     CmdArgs.push_back("-mllvm");
     CmdArgs.push_back("--pgo-function-entry-coverage");
+    CmdArgs.push_back("-fprofile-instrument=sample-coldcov");
   }
 
   Arg *PGOGenArg = nullptr;

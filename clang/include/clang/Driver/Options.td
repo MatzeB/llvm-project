@@ -7337,9 +7337,9 @@ def fpatchable_function_entry_offset_EQ
       HelpText<"Generate M NOPs before function entry">,
       MarshallingInfoInt<CodeGenOpts<"PatchableFunctionEntryOffset">>;
 def fprofile_instrument_EQ : Joined<["-"], "fprofile-instrument=">,
-    HelpText<"Enable PGO instrumentation">, Values<"none,clang,llvm,csllvm">,
+    HelpText<"Enable PGO instrumentation">, Values<"none,clang,llvm,csllvm,sample-coldcov">,
     NormalizedValuesScope<"CodeGenOptions">,
-    NormalizedValues<["ProfileNone", "ProfileClangInstr", "ProfileIRInstr", "ProfileCSIRInstr"]>,
+    NormalizedValues<["ProfileNone", "ProfileClangInstr", "ProfileIRInstr", "ProfileCSIRInstr", "ProfileIRSampleColdCov"]>,
     MarshallingInfoEnum<CodeGenOpts<"ProfileInstr">, "ProfileNone">;
 def fprofile_instrument_path_EQ : Joined<["-"], "fprofile-instrument-path=">,
     HelpText<"Generate instrumented code to collect execution counts into "
