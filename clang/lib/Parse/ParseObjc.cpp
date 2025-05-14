@@ -23,6 +23,7 @@
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaObjC.h"
+#include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 
@@ -1066,8 +1067,6 @@ Decl *Parser::ParseObjCMethodPrototype(tok::ObjCKeywordKind MethodImplKind,
 IdentifierInfo *Parser::ParseObjCSelectorPiece(SourceLocation &SelectorLoc) {
 
   switch (Tok.getKind()) {
-  default:
-    return nullptr;
   case tok::colon:
     // Empty selector piece uses the location of the ':'.
     SelectorLoc = Tok.getLocation();
@@ -1093,77 +1092,13 @@ IdentifierInfo *Parser::ParseObjCSelectorPiece(SourceLocation &SelectorLoc) {
     return nullptr;
   }
 
-  case tok::identifier:
-  case tok::kw_asm:
-  case tok::kw_auto:
-  case tok::kw_bool:
-  case tok::kw_break:
-  case tok::kw_case:
-  case tok::kw_catch:
-  case tok::kw_char:
-  case tok::kw_class:
-  case tok::kw_const:
-  case tok::kw_const_cast:
-  case tok::kw_continue:
-  case tok::kw_default:
-  case tok::kw_delete:
-  case tok::kw_do:
-  case tok::kw_double:
-  case tok::kw_dynamic_cast:
-  case tok::kw_else:
-  case tok::kw_enum:
-  case tok::kw_explicit:
-  case tok::kw_export:
-  case tok::kw_extern:
-  case tok::kw_false:
-  case tok::kw_float:
-  case tok::kw_for:
-  case tok::kw_friend:
-  case tok::kw_goto:
-  case tok::kw_if:
-  case tok::kw_inline:
-  case tok::kw_int:
-  case tok::kw_long:
-  case tok::kw_mutable:
-  case tok::kw_namespace:
-  case tok::kw_new:
-  case tok::kw_operator:
-  case tok::kw_private:
-  case tok::kw_protected:
-  case tok::kw_public:
-  case tok::kw_register:
-  case tok::kw_reinterpret_cast:
-  case tok::kw_restrict:
-  case tok::kw_return:
-  case tok::kw_short:
-  case tok::kw_signed:
-  case tok::kw_sizeof:
-  case tok::kw_static:
-  case tok::kw_static_cast:
-  case tok::kw_struct:
-  case tok::kw_switch:
-  case tok::kw_template:
-  case tok::kw_this:
-  case tok::kw_throw:
-  case tok::kw_true:
-  case tok::kw_try:
-  case tok::kw_typedef:
-  case tok::kw_typeid:
-  case tok::kw_typename:
-  case tok::kw_typeof:
-  case tok::kw_union:
-  case tok::kw_unsigned:
-  case tok::kw_using:
-  case tok::kw_virtual:
-  case tok::kw_void:
-  case tok::kw_volatile:
-  case tok::kw_wchar_t:
-  case tok::kw_while:
-  case tok::kw__Bool:
-  case tok::kw__Complex:
-  case tok::kw___alignof:
-  case tok::kw___auto_type:
+  case tok::kw___attribute:
+    return nullptr;
+
+  default:
     IdentifierInfo *II = Tok.getIdentifierInfo();
+    if (!II)
+      return nullptr;
     SelectorLoc = ConsumeToken();
     return II;
   }
@@ -1176,7 +1111,8 @@ bool Parser::isTokIdentifier_in() const {
   // valid tokens following an 'in'; such as an identifier, unary operators,
   // '[' etc.
   return (getLangOpts().ObjC && Tok.is(tok::identifier) &&
-          Tok.getIdentifierInfo() == ObjCTypeQuals[objc_in]);
+          Tok.getIdentifierInfo() ==
+              ObjCTypeQuals[llvm::to_underlying(ObjCTypeQual::in)]);
 }
 
 /// ParseObjCTypeQualifierList - This routine parses the objective-c's type
@@ -1215,34 +1151,47 @@ void Parser::ParseObjCTypeQualifierList(ObjCDeclSpec &DS,
       return;
 
     const IdentifierInfo *II = Tok.getIdentifierInfo();
-    for (unsigned i = 0; i != objc_NumQuals; ++i) {
-      if (II != ObjCTypeQuals[i] ||
-          NextToken().is(tok::less) ||
-          NextToken().is(tok::coloncolon))
+    for (unsigned i = 0; i != llvm::to_underlying(ObjCTypeQual::NumQuals);
+         ++i) {
+      ObjCTypeQual TQ = static_cast<ObjCTypeQual>(i);
+      if (II != ObjCTypeQuals[llvm::to_underlying(TQ)] ||
+          NextToken().is(tok::less) || NextToken().is(tok::coloncolon))
         continue;
 
       ObjCDeclSpec::ObjCDeclQualifier Qual;
       NullabilityKind Nullability;
-      switch (i) {
+      switch (TQ) {
       default: llvm_unreachable("Unknown decl qualifier");
-      case objc_in:     Qual = ObjCDeclSpec::DQ_In; break;
-      case objc_out:    Qual = ObjCDeclSpec::DQ_Out; break;
-      case objc_inout:  Qual = ObjCDeclSpec::DQ_Inout; break;
-      case objc_oneway: Qual = ObjCDeclSpec::DQ_Oneway; break;
-      case objc_bycopy: Qual = ObjCDeclSpec::DQ_Bycopy; break;
-      case objc_byref:  Qual = ObjCDeclSpec::DQ_Byref; break;
+      case ObjCTypeQual::in:
+        Qual = ObjCDeclSpec::DQ_In;
+        break;
+      case ObjCTypeQual::out:
+        Qual = ObjCDeclSpec::DQ_Out;
+        break;
+      case ObjCTypeQual::inout:
+        Qual = ObjCDeclSpec::DQ_Inout;
+        break;
+      case ObjCTypeQual::oneway:
+        Qual = ObjCDeclSpec::DQ_Oneway;
+        break;
+      case ObjCTypeQual::bycopy:
+        Qual = ObjCDeclSpec::DQ_Bycopy;
+        break;
+      case ObjCTypeQual::byref:
+        Qual = ObjCDeclSpec::DQ_Byref;
+        break;
 
-      case objc_nonnull:
+      case ObjCTypeQual::nonnull:
         Qual = ObjCDeclSpec::DQ_CSNullability;
         Nullability = NullabilityKind::NonNull;
         break;
 
-      case objc_nullable:
+      case ObjCTypeQual::nullable:
         Qual = ObjCDeclSpec::DQ_CSNullability;
         Nullability = NullabilityKind::Nullable;
         break;
 
-      case objc_null_unspecified:
+      case ObjCTypeQual::null_unspecified:
         Qual = ObjCDeclSpec::DQ_CSNullability;
         Nullability = NullabilityKind::Unspecified;
         break;
@@ -1972,7 +1921,7 @@ void Parser::ParseObjCClassInstanceVariables(ObjCContainerDecl *interfaceDecl,
 
     // Check for extraneous top-level semicolon.
     if (Tok.is(tok::semi)) {
-      ConsumeExtraSemi(InstanceVariableList);
+      ConsumeExtraSemi(ExtraSemiKind::InstanceVariableList);
       continue;
     }
 
