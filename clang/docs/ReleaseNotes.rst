@@ -496,6 +496,8 @@ New Compiler Flags
 - ``-fpointer-tbaa`` enables emission of distinct type-based alias
   analysis tags for incompatible pointers.
 
+- New option ``-Wnrvo`` added and disabled by default to warn about missed NRVO opportunites.
+
 Deprecated Compiler Flags
 -------------------------
 
