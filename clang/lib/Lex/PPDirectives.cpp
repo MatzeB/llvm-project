@@ -148,8 +148,7 @@ static bool isFeatureTestMacro(StringRef MacroName) {
       "__STDCPP_WANT_MATH_SPEC_FUNCS__",
       "__STDC_FORMAT_MACROS",
   };
-  return std::binary_search(std::begin(ReservedMacro), std::end(ReservedMacro),
-                            MacroName);
+  return llvm::binary_search(ReservedMacro, MacroName);
 }
 
 static bool isLanguageDefinedBuiltin(const SourceManager &SourceMgr,
@@ -253,8 +252,8 @@ static bool warnByDefaultOnWrongCase(StringRef Include) {
     .Cases("assert.h", "complex.h", "ctype.h", "errno.h", "fenv.h", true)
     .Cases("float.h", "inttypes.h", "iso646.h", "limits.h", "locale.h", true)
     .Cases("math.h", "setjmp.h", "signal.h", "stdalign.h", "stdarg.h", true)
-    .Cases("stdatomic.h", "stdbool.h", "stdckdint.h", "stddef.h", true)
-    .Cases("stdint.h", "stdio.h", "stdlib.h", "stdnoreturn.h", true)
+    .Cases("stdatomic.h", "stdbool.h", "stdckdint.h", "stdcountof.h", true)
+    .Cases("stddef.h", "stdint.h", "stdio.h", "stdlib.h", "stdnoreturn.h", true)
     .Cases("string.h", "tgmath.h", "threads.h", "time.h", "uchar.h", true)
     .Cases("wchar.h", "wctype.h", true)
 
