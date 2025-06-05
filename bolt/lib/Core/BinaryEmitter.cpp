@@ -272,14 +272,6 @@ void BinaryEmitter::emitFunctions() {
 
       if (Emitted)
         Function->setEmitted(/*KeepCFG=*/opts::PrintCacheMetrics);
-
-      // Emit thunks.
-      if (BC.getThunkLocation() != Function)
-        continue;
-
-      for (BinaryFunction *Thunk : BC.getThunkBinaryFunctions()) {
-        emitFunction(*Thunk, Thunk->getLayout().getMainFragment());
-      }
     }
   };
 
@@ -290,11 +282,7 @@ void BinaryEmitter::emitFunctions() {
   }
 
   // Emit functions in sorted order.
-  std::vector<BinaryFunction *> SortedFunctions = BC.getSortedFunctions();
-  emit(SortedFunctions);
-
-  // Emit functions added by BOLT.
-  emit(BC.getInjectedBinaryFunctions());
+  emit(BC.getOutputFunctions());
 
   // Mark the end of hot text.
   if (opts::HotText) {

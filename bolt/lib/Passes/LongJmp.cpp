@@ -917,14 +917,14 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
     return Size;
   };
 
-  std::unordered_map<BinaryFunction *, std::set<BinaryFunction *>> CallMap;
-  for (BinaryFunction &BF : llvm::make_second_range(BC.getBinaryFunctions())) {
-    if (!BC.shouldEmit(BF))
+  DenseMap<BinaryFunction *, std::set<BinaryFunction *>> CallMap;
+  for (BinaryFunction *BF : BC.getOutputFunctions()) {
+    if (!BC.shouldEmit(*BF) || BF->isPatch())
       continue;
 
-    EstimatedSize += estimateFunctionSize(BF);
+    EstimatedSize += estimateFunctionSize(*BF);
 
-    for (const BinaryBasicBlock &BB : BF) {
+    for (const BinaryBasicBlock &BB : *BF) {
       for (const MCInst &Inst : BB) {
         if (!BC.MIB->isCall(Inst) || BC.MIB->isIndirectCall(Inst) ||
             BC.MIB->isIndirectBranch(Inst))
@@ -938,7 +938,7 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
           continue;
         }
 
-        CallMap[&BF].insert(Callee);
+        CallMap[BF].insert(Callee);
       }
     }
   }
@@ -948,15 +948,18 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
   // Build clusters in the order the functions will appear in the output.
   std::vector<FunctionCluster> Clusters;
-  Clusters.emplace_back(FunctionCluster());
-
-  for (BinaryFunction *BF : BC.getSortedFunctions()) {
-    if (!BC.shouldEmit(*BF))
+  for (size_t Index = 0, NumFuncs = BC.getOutputFunctions().size();
+       Index < NumFuncs; ++Index) {
+    const size_t BFIndex =
+        opts::HotFunctionsAtEnd ? NumFuncs - Index - 1 : Index;
+    BinaryFunction *BF = BC.getOutputFunctions()[BFIndex];
+    if (!BC.shouldEmit(*BF) || BF->isPatch())
       continue;
 
     const uint64_t BFSize = estimateFunctionSize(*BF);
     if (Clusters.empty() || Clusters.back().Size + BFSize > MaxClusterSize) {
       Clusters.emplace_back(FunctionCluster());
+      Clusters.back().FirstFunctionIndex = BFIndex;
     }
 
     FunctionCluster &FC = Clusters.back();
@@ -966,26 +969,29 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
       FC.Callees.erase(It);
     }
     FC.Size += BFSize;
-    FC.LastBF = BF;
+    FC.LastFunctionIndex = BFIndex;
 
     for (BinaryFunction *Callee : CallMap[BF])
       if (!FC.Functions.count(Callee))
         FC.Callees.insert(Callee);
   }
 
+  if (opts::HotFunctionsAtEnd) {
+    std::reverse(Clusters.begin(), Clusters.end());
+    llvm::for_each(Clusters, [](FunctionCluster &FC) {
+      std::swap(FC.LastFunctionIndex, FC.FirstFunctionIndex);
+    });
+  }
+
   // Print cluster stats.
   dbgs() << "Built " << Clusters.size() << " clusters\n";
-  uint64_t Index = 0;
+  uint64_t ClusterIndex = 0;
   for (const FunctionCluster &FC : Clusters) {
-    dbgs() << "  Cluster: " << Index++ << '\n';
+    dbgs() << "  Cluster: " << ClusterIndex++ << '\n';
     dbgs() << "    " << FC.Functions.size() << " functions\n";
     dbgs() << "    " << FC.Callees.size() << " callees\n";
     dbgs() << "    " << FC.Size << " bytes\n";
-  }
-
-  if (Clusters.size() > 2) {
-    BC.errs() << "Large code model is unsupported\n";
-    exit(1);
+    dbgs() << "    " << FC.LastFunctionIndex << " is last function\n";
   }
 
   // Populate one of the clusters with PLT functions based on the proximity of
@@ -994,10 +1000,10 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
   //        of PLT section and its proximity to old or new .text.
   // FIXME: a slightly better approach will be to always use thunks for PLT and
   //        eliminate redirection later using final addresses in address maps.
-  const size_t PLTClusterNum = opts::UseOldText ? 1 : 0;
+  const size_t PLTClusterNum = opts::UseOldText ? Clusters.size() - 1 : 0;
+  auto &PLTCluster = Clusters[PLTClusterNum];
   for (BinaryFunction &BF : llvm::make_second_range(BC.getBinaryFunctions())) {
     if (BF.isPLTFunction()) {
-      auto &PLTCluster = Clusters[PLTClusterNum];
       PLTCluster.Functions.insert(&BF);
       auto It = PLTCluster.Callees.find(&BF);
       if (It != PLTCluster.Callees.end())
@@ -1005,52 +1011,87 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
     }
   }
 
-  // FIXME: section name to use for thunks.
-  std::string SectionName =
-      Clusters[0].LastBF->getCodeSectionName().str().str();
-
   // Build thunk functions.
-  auto createSmallThunk = [&](BinaryFunction &Callee) {
-    BinaryFunction *ThunkBF =
-        BC.createThunkBinaryFunction("__BThunk__" + Callee.getOneName().str());
+  size_t NumThunks = 0;
+  auto createShortThunk = [&](BinaryFunction &Callee) {
+    ++NumThunks;
+    BinaryFunction *ThunkBF = BC.createThunkBinaryFunction(
+        "__AArch64Thunk_" + Callee.getOneName().str());
     MCInst Inst;
     BC.MIB->createTailCall(Inst, Callee.getSymbol(), BC.Ctx.get());
     ThunkBF->addBasicBlock()->addInstruction(Inst);
-    ThunkBF->setCodeSectionName(SectionName);
 
     return ThunkBF;
   };
 
   auto createLongThunk = [&](BinaryFunction &Callee) {
-    BinaryFunction *ThunkBF =
-        BC.createThunkBinaryFunction("__BThunk__" + Callee.getOneName().str());
+    ++NumThunks;
+    BinaryFunction *ThunkBF = BC.createThunkBinaryFunction(
+        "__AArch64ADRPThunk_" + Callee.getOneName().str());
     InstructionListType Instructions;
     BC.MIB->createLongTailCall(Instructions, Callee.getSymbol(), BC.Ctx.get());
     ThunkBF->addBasicBlock()->addInstructions(Instructions);
-    ThunkBF->setCodeSectionName(SectionName);
 
     return ThunkBF;
   };
 
-  DenseMap<BinaryFunction *, BinaryFunction *> Thunks;
   for (unsigned ClusterNum = 0; ClusterNum < Clusters.size(); ++ClusterNum) {
     FunctionCluster &FC = Clusters[ClusterNum];
     SmallVector<BinaryFunction *, 16> Callees(FC.Callees.begin(),
                                               FC.Callees.end());
     llvm::sort(Callees, compareBinaryFunctionByIndex);
-    FunctionCluster *AdjacentCluster =
-        Clusters.size() == 2 ? &Clusters[1 - ClusterNum] : nullptr;
-    // Create short thunks for callees in adjacent cluster and long thunks
+
+    // Return index of adjacent cluster containing the function.
+    auto getAdjClusterWithFunction =
+        [&](const BinaryFunction *BF) -> std::optional<unsigned> {
+      if (ClusterNum > 0 && Clusters[ClusterNum - 1].Functions.count(BF))
+        return ClusterNum - 1;
+      if (ClusterNum + 1 < Clusters.size() &&
+          Clusters[ClusterNum + 1].Functions.count(BF))
+        return ClusterNum + 1;
+      return std::nullopt;
+    };
+
+    const FunctionCluster *PrevCluster =
+        ClusterNum ? &Clusters[ClusterNum - 1] : nullptr;
+
+    // Create short thunks for callees in adjacent clusters and long thunks
     // for callees outside.
     for (BinaryFunction *Callee : Callees) {
-      if (AdjacentCluster && AdjacentCluster->Functions.count(Callee))
-        Thunks[Callee] = createSmallThunk(*Callee);
-      else if (!Thunks.count(Callee))
-        Thunks[Callee] = createLongThunk(*Callee);
+      if (FC.Thunks.count(Callee))
+        continue;
+
+      BinaryFunction *Thunk = 0;
+      std::optional<unsigned> AdjCluster = getAdjClusterWithFunction(Callee);
+      if (AdjCluster) {
+        Thunk = createShortThunk(*Callee);
+      } else {
+        // Previous cluster may already have a long thunk that can be reused.
+        if (PrevCluster) {
+          auto It = PrevCluster->Thunks.find(Callee);
+          // Reuse only if previous cluster hosts this thunk.
+          if (It != PrevCluster->Thunks.end() &&
+              llvm::is_contained(PrevCluster->ThunkList, It->first)) {
+            FC.Thunks[Callee] = It->first;
+            continue;
+          }
+        }
+        Thunk = createLongThunk(*Callee);
+      }
+
+      // The cluster that will host this thunk. If the current cluster is the
+      // last one, try to use the previous one. Matters when we want to have hot
+      // functions at higher addresses under HotFunctionsAtEnd.
+      FunctionCluster *ThunkCluster = &Clusters[ClusterNum];
+      if ((AdjCluster && *AdjCluster == ClusterNum - 1) ||
+          (ClusterNum && ClusterNum == Clusters.size() - 1))
+        ThunkCluster = &Clusters[ClusterNum - 1];
+      ThunkCluster->ThunkList.push_back(Thunk);
+      FC.Thunks[Callee] = Thunk;
     }
   }
 
-  BC.outs() << "BOLT-INFO: " << Thunks.size() << " thunks created\n";
+  BC.outs() << "BOLT-INFO: " << NumThunks << " thunks created\n";
 
   // Replace callees with thunks.
   for (FunctionCluster &FC : Clusters) {
@@ -1078,14 +1119,32 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
             continue;
 
           // Use thunk as the call destination.
-          BC.MIB->replaceBranchTarget(Inst, Thunks[Callee]->getSymbol(),
+          BC.MIB->replaceBranchTarget(Inst, FC.Thunks[Callee]->getSymbol(),
                                       BC.Ctx.get());
         }
       }
     }
   }
 
-  BC.setThunkLocation(Clusters[0].LastBF);
+  // Add thunks to the function list and assign a section name matching the
+  // function they follow.
+  std::vector<BinaryFunction *> &OutputFunctions = BC.getOutputFunctions();
+  for (const FunctionCluster &FC : llvm::reverse(Clusters)) {
+    std::string SectionName = BC.getOutputFunctions()[FC.LastFunctionIndex]
+                                  ->getCodeSectionName()
+                                  .str()
+                                  .str();
+    for (BinaryFunction *Thunk : FC.ThunkList) {
+      Thunk->setCodeSectionName(SectionName);
+    }
+
+    OutputFunctions.insert(
+        std::next(OutputFunctions.begin(), FC.LastFunctionIndex + 1),
+        FC.ThunkList.begin(), FC.ThunkList.end());
+  }
+
+  LLVM_DEBUG(dbgs() << "\nFunction layout with thunks:\n";
+             for (const auto *BF : OutputFunctions) { dbgs() << *BF << '\n'; });
 }
 
 Error LongJmpPass::runOnFunctions(BinaryContext &BC) {
@@ -1122,7 +1181,7 @@ Error LongJmpPass::runOnFunctions(BinaryContext &BC) {
   }
 
   BC.outs() << "BOLT-INFO: Starting stub-insertion pass\n";
-  std::vector<BinaryFunction *> Sorted = BC.getSortedFunctions();
+  std::vector<BinaryFunction *> &Sorted = BC.getOutputFunctions();
   bool Modified;
   uint32_t Iterations = 0;
   do {

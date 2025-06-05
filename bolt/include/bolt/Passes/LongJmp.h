@@ -77,16 +77,27 @@ class LongJmpPass : public BinaryFunctionPass {
   void relaxLocalBranches(BinaryFunction &BF);
 
   struct FunctionCluster {
+    // All functions in this cluster.
     DenseSet<BinaryFunction *> Functions;
 
     // Functions that this cluster of functions is calling. Note that it
     // excludes all functions in the cluster itself.
     DenseSet<BinaryFunction *> Callees;
 
+    // Estimated size of the cluster in bytes.
     uint64_t Size{0};
 
-    // Last function in the cluster.
-    BinaryFunction *LastBF{nullptr};
+    // The index of the last function in the cluster. Used as an insertion point
+    // for adding thunks to the output function list.
+    size_t FirstFunctionIndex = -1;
+    size_t LastFunctionIndex = -1;
+
+    // Thunks located at the end of this cluster.
+    std::vector<BinaryFunction *> ThunkList;
+
+    // Thunks used by this cluster. Some could be in a ThunkList of the
+    // preceding cluster.
+    DenseMap<BinaryFunction *, BinaryFunction *> Thunks;
   };
 
   /// Maximum size of the function cluster. Note that it's less than 128MB
