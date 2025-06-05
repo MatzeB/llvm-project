@@ -164,6 +164,8 @@ BinaryContext::~BinaryContext() {
     delete Section;
   for (BinaryFunction *InjectedFunction : InjectedBinaryFunctions)
     delete InjectedFunction;
+  for (BinaryFunction *ThunkFunction : ThunkBinaryFunctions)
+    delete ThunkFunction;
   for (std::pair<const uint64_t, JumpTable *> JTI : JumpTables)
     delete JTI.second;
   clearBinaryData();
@@ -1695,13 +1697,23 @@ unsigned BinaryContext::addDebugFilenameToUnit(const uint32_t DestCUID,
                                DestCUID, DstUnit->getVersion()));
 }
 
-std::vector<BinaryFunction *> BinaryContext::getSortedFunctions() {
-  std::vector<BinaryFunction *> SortedFunctions(BinaryFunctions.size());
+std::vector<BinaryFunction *> &BinaryContext::getOutputFunctions() {
+  assert((!HasRelocations || HasFinalizedFunctionOrder) &&
+         "Output function order not finalized");
+
+  if (!OutputFunctions.empty())
+    return OutputFunctions;
+
+  OutputFunctions.reserve(BinaryFunctions.size() +
+                          InjectedBinaryFunctions.size());
   llvm::transform(llvm::make_second_range(BinaryFunctions),
-                  SortedFunctions.begin(),
+                  std::back_inserter(OutputFunctions),
                   [](BinaryFunction &BF) { return &BF; });
 
-  llvm::stable_sort(SortedFunctions,
+  llvm::erase_if(OutputFunctions,
+                 [this](BinaryFunction *BF) { return !shouldEmit(*BF); });
+
+  llvm::stable_sort(OutputFunctions,
                     [](const BinaryFunction *A, const BinaryFunction *B) {
                       // Place hot text movers at the start.
                       if (A->isHotTextMover() && !B->isHotTextMover())
@@ -1716,7 +1728,10 @@ std::vector<BinaryFunction *> BinaryContext::getSortedFunctions() {
                       else
                         return A->hasValidIndex();
                     });
-  return SortedFunctions;
+
+  llvm::copy(InjectedBinaryFunctions, std::back_inserter(OutputFunctions));
+
+  return OutputFunctions;
 }
 
 std::vector<BinaryFunction *> BinaryContext::getAllBinaryFunctions() {
@@ -2586,7 +2601,9 @@ BinaryContext::createInstructionPatch(uint64_t Address,
 
 BinaryFunction *
 BinaryContext::createThunkBinaryFunction(const std::string &Name) {
-  ThunkBinaryFunctions.push_back(new BinaryFunction(Name, *this, true));
+  static NameResolver NR;
+  ThunkBinaryFunctions.push_back(
+      new BinaryFunction(NR.uniquify(Name), *this, true));
   BinaryFunction *BF = ThunkBinaryFunctions.back();
   setSymbolToFunctionMap(BF->getSymbol(), BF);
   BF->CurrentState = BinaryFunction::State::CFG;
