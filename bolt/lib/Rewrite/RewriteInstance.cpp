@@ -3785,7 +3785,7 @@ void RewriteInstance::emitAndLink() {
 
   if (opts::PrintCacheMetrics) {
     BC->outs() << "BOLT-INFO: cache metrics after emitting functions:\n";
-    CacheMetrics::printAll(BC->outs(), BC->getSortedFunctions());
+    CacheMetrics::printAll(BC->outs(), BC->getAllBinaryFunctions());
   }
 }
 
