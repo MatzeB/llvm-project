@@ -206,7 +206,7 @@ private:
   }
 
   void initializeAuxiliaryVariables() {
-    for (BinaryFunction *BF : BC.getSortedFunctions()) {
+    for (BinaryFunction *BF : BC.getOutputFunctions()) {
       if (!shouldConsiderForCallGraph(*BF))
         continue;
 
@@ -234,7 +234,7 @@ private:
   void buildCallGraph() {
     Callers.resize(TotalNumBlocks);
     Callees.resize(TotalNumBlocks);
-    for (const BinaryFunction *SrcFunction : BC.getSortedFunctions()) {
+    for (const BinaryFunction *SrcFunction : BC.getOutputFunctions()) {
       if (!shouldConsiderForCallGraph(*SrcFunction))
         continue;
 
@@ -337,7 +337,7 @@ private:
     const BinaryBasicBlock *ThisBB = &(ThisBF->front());
     const size_t ThisGI = GlobalIndices[ThisBB];
 
-    for (const BinaryFunction *DstBF : BC.getSortedFunctions()) {
+    for (const BinaryFunction *DstBF : BC.getOutputFunctions()) {
       if (!shouldConsiderForCallGraph(*DstBF))
         continue;
 
