@@ -2356,6 +2356,7 @@ public:
       releaseCFG();
       CurrentState = State::Emitted;
     }
+    clearList(Relocations);
   }
 
   /// Process LSDA information for the function.
