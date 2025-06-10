@@ -5,7 +5,8 @@
 # RUN: llvm-strip --strip-unneeded %t.o
 # RUN: %clang %cflags %t.o -o %t.exe -nostdlib -Wl,-q
 # RUN: llvm-bolt %t.exe -o %t.bolt --relax-exp --lite=0
-# RUN: llvm-bolt %t.exe -o %t.bolt --relax-exp --lite=1 --data %t.fdata
+# RUN: llvm-bolt %t.exe -o %t.bolt --relax-exp --lite=1 --data %t.fdata \
+# RUN:   --print-normalized 2>&1 | FileCheck %s --check-prefix=CHECK-VENEER
 # RUN: llvm-bolt %t.exe -o %t.bolt --relax-exp --hot-functions-at-end --lite=0 \
 # RUN:   --data %t.fdata
 # RUN: llvm-objdump -d %t.bolt | FileCheck %s
@@ -42,6 +43,12 @@ hot:
   ret
   .size hot, .-hot
 
+## Check that BOLT sees the call to foo, not to its veneer.
+# CHECK-VENEER-LABEL: Binary Function "hot"
+# CHECK-VENEER: bl
+# CHECK-VENEER-SAME: {{[[:space:]]foo[[:space:]]}}
+
+## Check that BOLT-introduced veneers have proper names.
 # CHECK-LABEL: <hot>:
 # CHECK-NEXT: bl {{.*}} <__AArch64ADRPThunk_foo>
 # CHECK-NEXT: bl {{.*}} <__AArch64Thunk_bar>
