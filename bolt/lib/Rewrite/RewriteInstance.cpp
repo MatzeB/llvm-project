@@ -3190,6 +3190,11 @@ void RewriteInstance::selectFunctionsToProcess() {
     if (mustSkip(Function))
       return false;
 
+    // Include veneer functions as we want to replace veneer calls with
+    // direct ones.
+    if (BC->isAArch64() && Function.getOneName().starts_with("__AArch64"))
+      return true;
+
     // If the list is not empty, only process functions from the list.
     if (!opts::ForceFunctionNames.empty() || !ForceFunctionsNR.empty()) {
       // Regex check (-funcs and -funcs-file options).
