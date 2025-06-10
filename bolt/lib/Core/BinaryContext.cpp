@@ -154,8 +154,6 @@ BinaryContext::~BinaryContext() {
     delete Section;
   for (BinaryFunction *InjectedFunction : InjectedBinaryFunctions)
     delete InjectedFunction;
-  for (BinaryFunction *ThunkFunction : ThunkBinaryFunctions)
-    delete ThunkFunction;
   for (std::pair<const uint64_t, JumpTable *> JTI : JumpTables)
     delete JTI.second;
   clearBinaryData();
@@ -2477,12 +2475,7 @@ BinaryContext::createInstructionPatch(uint64_t Address,
 BinaryFunction *
 BinaryContext::createThunkBinaryFunction(const std::string &Name) {
   static NameResolver NR;
-  ThunkBinaryFunctions.push_back(
-      new BinaryFunction(NR.uniquify(Name), *this, true));
-  BinaryFunction *BF = ThunkBinaryFunctions.back();
-  setSymbolToFunctionMap(BF->getSymbol(), BF);
-  BF->CurrentState = BinaryFunction::State::CFG;
-  return BF;
+  return createInjectedBinaryFunction(NR.uniquify(Name));
 }
 
 std::pair<size_t, size_t>
