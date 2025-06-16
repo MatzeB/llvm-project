@@ -2608,7 +2608,7 @@ void LinkerDriver::compileBitcodeFiles(bool skipLinkedOutput) {
 
   for (InputFile *file : lto->compile()) {
     auto *obj = cast<ObjFile<ELFT>>(file);
-    obj->parse(/*isLTOOutput=*/true);
+    obj->parse(/*ignoreComdats=*/true);
 
     // Parse '@' in symbol names for non-relocatable output.
     if (!config->relocatable)

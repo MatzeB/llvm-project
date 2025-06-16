@@ -631,10 +631,8 @@ uint32_t ObjFile<ELFT>::getSectionIndex(const Elf_Sym &sym) const {
       this);
 }
 
-// facebook begin T66645141
-template <class ELFT> void ObjFile<ELFT>::parse(bool isLTOOutput) {
+template <class ELFT> void ObjFile<ELFT>::parse(bool ignoreComdats) {
   object::ELFFile<ELFT> obj = this->getObj();
-  // facebook end T66645141
   // Read a section table. justSymbols is usually false.
   if (this->justSymbols) {
     initializeJustSymbols();
@@ -718,18 +716,10 @@ template <class ELFT> void ObjFile<ELFT>::parse(bool isLTOOutput) {
     if (flag && flag != GRP_COMDAT)
       fatal(toString(this) + ": unsupported SHT_GROUP format");
 
-    // facebook begin T66645141,T92808916
-    // If this is an lto output file, ignore already processed comdat groups.
-    // Else, check all comdat groups.
-    bool keepGroup =
-        (flag & GRP_COMDAT) == 0 ||
-        (isLTOOutput ? symtab.ltoOutputComdatGroups
-                        .try_emplace(CachedHashStringRef(signature), this)
-                        .second
-                    : symtab.comdatGroups
-                        .try_emplace(CachedHashStringRef(signature), this)
-                        .second);
-    // facebook end T66645141,T92808916
+    bool keepGroup = !flag || ignoreComdats ||
+                     symtab.comdatGroups
+                          .try_emplace(CachedHashStringRef(signature), this)
+                          .second;
     if (keepGroup) {
       if (!config->resolveGroups)
         this->sections[i] = createInputSection(
