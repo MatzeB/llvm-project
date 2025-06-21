@@ -22,6 +22,7 @@
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/CodeGen/GlobalISel/GIMatchTableExecutorImpl.h"
+#include "llvm/CodeGen/GlobalISel/GISelValueTracking.h"
 #include "llvm/CodeGen/GlobalISel/GenericMachineInstrs.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/MIPatternMatch.h"
@@ -2196,8 +2197,14 @@ bool AArch64InstructionSelector::preISelLower(MachineInstr &I) {
     }
     return Changed;
   }
-  case TargetOpcode::G_PTR_ADD:
+  case TargetOpcode::G_PTR_ADD: {
+    // If Checked Pointer Arithmetic (FEAT_CPA) is present, preserve the pointer
+    // arithmetic semantics instead of falling back to regular arithmetic.
+    const auto &TL = STI.getTargetLowering();
+    if (TL->shouldPreservePtrArith(MF.getFunction(), EVT()))
+      return false;
     return convertPtrAddToAdd(I, MRI);
+  }
   case TargetOpcode::G_LOAD: {
     // For scalar loads of pointers, we try to convert the dest type from p0
     // to s64 so that our imported patterns can match. Like with the G_PTR_ADD
@@ -6630,7 +6637,7 @@ bool AArch64InstructionSelector::selectIntrinsicWithSideEffects(
     Register SizeUse = I.getOperand(4).getReg();
 
     // MOPSMemorySetTaggingPseudo has two defs; the intrinsic call has only one.
-    // Therefore an additional virtual register is requried for the updated size
+    // Therefore an additional virtual register is required for the updated size
     // operand. This value is not accessible via the semantics of the intrinsic.
     Register SizeDef = MRI.createGenericVirtualRegister(LLT::scalar(64));
 
@@ -7418,7 +7425,7 @@ AArch64InstructionSelector::selectAddrModeXRO(MachineOperand &Root,
     unsigned Scale = Log2_32(SizeInBytes);
     int64_t ImmOff = ValAndVReg->Value.getSExtValue();
 
-    // Skip immediates that can be selected in the load/store addresing
+    // Skip immediates that can be selected in the load/store addressing
     // mode.
     if (ImmOff % SizeInBytes == 0 && ImmOff >= 0 &&
         ImmOff < (0x1000 << Scale))

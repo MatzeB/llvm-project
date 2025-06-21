@@ -224,17 +224,14 @@ class BinaryContext {
   /// Store all functions in the binary, sorted by original address.
   std::map<uint64_t, BinaryFunction> BinaryFunctions;
 
+  /// Functions to be included in the output in the sorted order.
+  std::vector<BinaryFunction *> OutputFunctions;
+
   /// A mutex that is used to control parallel accesses to BinaryFunctions
   mutable llvm::sys::RWMutex BinaryFunctionsMutex;
 
   /// Functions injected by BOLT
   std::vector<BinaryFunction *> InjectedBinaryFunctions;
-
-  /// Thunk functions.
-  std::vector<BinaryFunction *> ThunkBinaryFunctions;
-
-  /// Function that precedes thunks in the binary.
-  const BinaryFunction *ThunkLocation{nullptr};
 
   /// Jump tables for all functions mapped by address.
   std::map<uint64_t, JumpTable *> JumpTables;
@@ -560,14 +557,6 @@ public:
   }
 
   BinaryFunction *createThunkBinaryFunction(const std::string &Name);
-
-  std::vector<BinaryFunction *> &getThunkBinaryFunctions() {
-    return ThunkBinaryFunctions;
-  }
-
-  const BinaryFunction *getThunkLocation() const { return ThunkLocation; }
-
-  void setThunkLocation(const BinaryFunction *BF) { ThunkLocation = BF; }
 
   /// Return vector with all functions, i.e. include functions from the input
   /// binary and functions created by BOLT.
@@ -1366,8 +1355,9 @@ public:
   unsigned addDebugFilenameToUnit(const uint32_t DestCUID,
                                   const uint32_t SrcCUID, unsigned FileIndex);
 
-  /// Return functions in output layout order
-  std::vector<BinaryFunction *> getSortedFunctions();
+  /// Return a vector of functions in the order ready for code emission.
+  /// The vector may include functions added/injected by BOLT.
+  std::vector<BinaryFunction *> &getOutputFunctions();
 
   /// Do the best effort to calculate the size of the function by emitting
   /// its code, and relaxing branch instructions. By default, branch
