@@ -797,8 +797,17 @@ static DiscardPolicy getDiscard(opt::InputArgList &args) {
 // We need to parse the arguments to take the last of --discard-section=S or
 // --no-discard-section=S.  This ensures we have a proper override
 // mechanism.
+//
+// WARNING: --discard-section is a hack. Discarding sections carelessly
+// (without thinking) can lead to runtime crashes. We don't want to encourage
+// widespread use of this functionality. When --emit-relocs is used, we restrict
+// discarding to a small vetted set of sections to minimize risk.
 static std::unordered_set<llvm::StringRef>
 getDiscardSections(opt::InputArgList &Args) {
+  static const DenseSet<llvm::StringRef> allowedSections = {
+    ".nvFatBinSegment", ".nv_fatbin",     ".stapsdt.base",
+    "__nv_module_id",   "__nv_relfatbin",
+  };
   std::unordered_set<llvm::StringRef> discardSections;
   bool warnOnRelocatable = false;
   for (auto *A : Args) {
@@ -814,7 +823,8 @@ getDiscardSections(opt::InputArgList &Args) {
       llvm::StringRef val = A->getValue();
       // Discard DWARF sections even when --emit-relocs is used T87639747
       if (!config->emitRelocs || val.find(".debug_") == 0 ||
-          val.find(".rela.debug_") == 0)
+          val.find(".rela.debug_") == 0 ||
+          allowedSections.find(val) != allowedSections.end())
         discardSections.insert(val);
       else
         warn("--emit-relocs  may not be used with --discard-section unless "
@@ -3185,9 +3195,19 @@ template <class ELFT> void LinkerDriver::link(opt::InputArgList &args) {
     }
     // facebook begin T46459577
     if (!config->discardSections.empty()) {
-      llvm::erase_if(ctx.inputSections, [](InputSectionBase *s) {
+      DenseSet<InputSectionBase *> toDelete;
+      for (InputSectionBase *s : ctx.inputSections) {
         if (config->discardSections.find(s->name) !=
-            config->discardSections.end())
+            config->discardSections.end()) {
+          toDelete.insert(s);
+          if (s->relSecIdx != 0 && (s->file->getSections()[s->relSecIdx])){
+            auto *relSec = s->file->getSections()[s->relSecIdx];
+            toDelete.insert(relSec);
+          }
+        }
+      }
+      llvm::erase_if(ctx.inputSections, [&toDelete](InputSectionBase *s) {
+        if (toDelete.find(s) != toDelete.end())
           return true;
         return false;
       });

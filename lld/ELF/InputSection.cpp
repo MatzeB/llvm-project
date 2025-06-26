@@ -484,6 +484,12 @@ void InputSection::copyRelocations(uint8_t *buf,
       }
       SectionBase *section = d->section;
       assert(section->isLive());
+      // facebook begin T221560075
+      if (!section->getOutputSection()) {
+        p->setSymbolAndType(0, 0, false);
+        continue;
+      }
+      // facebook end T221560075
 
       int64_t addend = rel.addend;
       const uint8_t *bufLoc = sec->content().begin() + rel.offset;
