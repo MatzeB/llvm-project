@@ -899,6 +899,8 @@ void LongJmpPass::relaxLocalBranches(BinaryFunction &BF) {
 }
 
 void LongJmpPass::relaxCalls(BinaryContext &BC) {
+  std::vector<BinaryFunction *> OutputFunctions = BC.getOutputFunctions();
+
   // Map every function to its direct callees. Note that this is different from
   // a typical call graph as here we completely ignore indirect calls.
   uint64_t EstimatedSize = 0;
@@ -918,7 +920,7 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
   };
 
   DenseMap<BinaryFunction *, std::set<BinaryFunction *>> CallMap;
-  for (BinaryFunction *BF : BC.getOutputFunctions()) {
+  for (BinaryFunction *BF : OutputFunctions) {
     if (!BC.shouldEmit(*BF) || BF->isPatch())
       continue;
 
@@ -948,11 +950,11 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
   // Build clusters in the order the functions will appear in the output.
   std::vector<FunctionCluster> Clusters;
-  for (size_t Index = 0, NumFuncs = BC.getOutputFunctions().size();
-       Index < NumFuncs; ++Index) {
+  for (size_t Index = 0, NumFuncs = OutputFunctions.size(); Index < NumFuncs;
+       ++Index) {
     const size_t BFIndex =
         opts::HotFunctionsAtEnd ? NumFuncs - Index - 1 : Index;
-    BinaryFunction *BF = BC.getOutputFunctions()[BFIndex];
+    BinaryFunction *BF = OutputFunctions[BFIndex];
     if (!BC.shouldEmit(*BF) || BF->isPatch())
       continue;
 
@@ -1128,12 +1130,9 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
   // Add thunks to the function list and assign a section name matching the
   // function they follow.
-  std::vector<BinaryFunction *> &OutputFunctions = BC.getOutputFunctions();
   for (const FunctionCluster &FC : llvm::reverse(Clusters)) {
-    std::string SectionName = BC.getOutputFunctions()[FC.LastFunctionIndex]
-                                  ->getCodeSectionName()
-                                  .str()
-                                  .str();
+    std::string SectionName =
+        OutputFunctions[FC.LastFunctionIndex]->getCodeSectionName().str().str();
     for (BinaryFunction *Thunk : FC.ThunkList) {
       Thunk->setCodeSectionName(SectionName);
     }
@@ -1142,6 +1141,7 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
         std::next(OutputFunctions.begin(), FC.LastFunctionIndex + 1),
         FC.ThunkList.begin(), FC.ThunkList.end());
   }
+  BC.updateOutputFunctions(OutputFunctions);
 
   LLVM_DEBUG(dbgs() << "\nFunction layout with thunks:\n";
              for (const auto *BF : OutputFunctions) { dbgs() << *BF << '\n'; });
@@ -1177,7 +1177,7 @@ Error LongJmpPass::runOnFunctions(BinaryContext &BC) {
   }
 
   BC.outs() << "BOLT-INFO: Starting stub-insertion pass\n";
-  std::vector<BinaryFunction *> &Sorted = BC.getOutputFunctions();
+  std::vector<BinaryFunction *> Sorted = BC.getOutputFunctions();
   bool Modified;
   uint32_t Iterations = 0;
   do {
