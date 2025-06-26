@@ -1695,7 +1695,7 @@ unsigned BinaryContext::addDebugFilenameToUnit(const uint32_t DestCUID,
                                DestCUID, DstUnit->getVersion()));
 }
 
-std::vector<BinaryFunction *> &BinaryContext::getOutputFunctions() {
+const std::vector<BinaryFunction *> &BinaryContext::getOutputFunctions() {
   assert((!HasRelocations || HasFinalizedFunctionOrder) &&
          "Output function order not finalized");
 
@@ -1730,6 +1730,11 @@ std::vector<BinaryFunction *> &BinaryContext::getOutputFunctions() {
   llvm::copy(InjectedBinaryFunctions, std::back_inserter(OutputFunctions));
 
   return OutputFunctions;
+}
+
+void BinaryContext::updateOutputFunctions(
+    std::vector<BinaryFunction *> &Functions) {
+  OutputFunctions.swap(Functions);
 }
 
 std::vector<BinaryFunction *> BinaryContext::getAllBinaryFunctions() {
@@ -2561,6 +2566,10 @@ BinaryContext::createInjectedBinaryFunction(const std::string &Name,
   BinaryFunction *BF = InjectedBinaryFunctions.back();
   setSymbolToFunctionMap(BF->getSymbol(), BF);
   BF->CurrentState = BinaryFunction::State::CFG;
+
+  if (!OutputFunctions.empty())
+    OutputFunctions.push_back(BF);
+
   return BF;
 }
 

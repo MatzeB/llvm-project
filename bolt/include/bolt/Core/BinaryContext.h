@@ -1379,8 +1379,11 @@ public:
                                   const uint32_t SrcCUID, unsigned FileIndex);
 
   /// Return a vector of functions in the order ready for code emission.
-  /// The vector may include functions added/injected by BOLT.
-  std::vector<BinaryFunction *> &getOutputFunctions();
+  /// The vector will include functions added/injected by BOLT.
+  const std::vector<BinaryFunction *> &getOutputFunctions();
+
+  /// Update function list for the output.
+  void updateOutputFunctions(std::vector<BinaryFunction *> &Functions);
 
   /// Do the best effort to calculate the size of the function by emitting
   /// its code, and relaxing branch instructions. By default, branch
