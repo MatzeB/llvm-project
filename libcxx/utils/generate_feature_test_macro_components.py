@@ -314,6 +314,16 @@ feature_test_macros = [
             "headers": ["algorithm"],
         },
         {
+            "name": "__cpp_lib_common_reference",
+            "values": {"c++20": 202302},
+            "headers": ["type_traits"],
+        },
+        {
+            "name": "__cpp_lib_common_reference_wrapper",
+            "values": {"c++20": 202302},
+            "headers": ["functional"],
+        },
+        {
             "name": "__cpp_lib_complex_udls",
             "values": {"c++14": 201309},
             "headers": ["complex"],
@@ -1115,7 +1125,6 @@ feature_test_macros = [
             "name": "__cpp_lib_ranges_join_with",
             "values": {"c++23": 202202},
             "headers": ["ranges"],
-            "unimplemented": True,
         },
         {
             "name": "__cpp_lib_ranges_repeat",
