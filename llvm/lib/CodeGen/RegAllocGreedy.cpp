@@ -45,6 +45,7 @@
 #include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachinePassManager.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineSizeOpts.h"
 #include "llvm/CodeGen/RegAllocEvictionAdvisor.h"
 #include "llvm/CodeGen/RegAllocGreedyPass.h"
 #include "llvm/CodeGen/RegAllocPriorityAdvisor.h"
@@ -654,6 +655,10 @@ void RAGreedy::evictInterference(const LiveInterval &VirtReg,
 /// Returns true if the given \p PhysReg is a callee saved register and has not
 /// been used for allocation yet.
 bool RegAllocEvictionAdvisor::isUnusedCalleeSavedReg(MCRegister PhysReg) const {
+  if (shouldOptimizeForCompressedSize(MF)) {
+    return false;
+  }
+
   MCRegister CSR = RegClassInfo.getLastCalleeSavedAlias(PhysReg);
   if (!CSR)
     return false;
@@ -2356,6 +2361,11 @@ void RAGreedy::aboutToRemoveInterval(const LiveInterval &LI) {
 }
 
 void RAGreedy::initializeCSRCost() {
+  if (shouldOptimizeForCompressedSize(*MF)) {
+    CSRCost = BlockFrequency(0);
+    return;
+  }
+
   // We use the command-line option if it is explicitly set, otherwise use the
   // larger one out of the command-line option and the value reported by TRI.
   CSRCost = BlockFrequency(

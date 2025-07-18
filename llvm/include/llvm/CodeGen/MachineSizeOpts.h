@@ -43,6 +43,12 @@ shouldOptimizeForSize(const MachineBasicBlock *MBB, ProfileSummaryInfo *PSI,
                       MBFIWrapper *MBFIWrapper,
                       PGSOQueryType QueryType = PGSOQueryType::Other);
 
+inline bool
+shouldOptimizeForCompressedSize(const MachineFunction &) {
+  // TODO: add some actual policy...
+  return true;
+}
+
 } // end namespace llvm
 
 #endif // LLVM_CODEGEN_MACHINESIZEOPTS_H

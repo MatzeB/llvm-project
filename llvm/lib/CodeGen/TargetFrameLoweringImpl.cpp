@@ -14,6 +14,7 @@
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MachineSizeOpts.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -134,15 +135,18 @@ void TargetFrameLowering::determineCalleeSaves(MachineFunction &MF,
   if (MF.getFunction().hasFnAttribute(Attribute::NoReturn) &&
         MF.getFunction().hasFnAttribute(Attribute::NoUnwind) &&
         !MF.getFunction().hasFnAttribute(Attribute::UWTable) &&
-        enableCalleeSaveSkip(MF))
+        enableCalleeSaveSkip(MF) &&
+        !shouldOptimizeForCompressedSize(MF))
     return;
 
   // Functions which call __builtin_unwind_init get all their registers saved.
-  bool CallsUnwindInit = MF.callsUnwindInit();
+  // Also save all registers for compressed code size as it leads to uniform
+  // prologue/epilogue code.
+  bool SaveAll = MF.callsUnwindInit() || shouldOptimizeForCompressedSize(MF);
   const MachineRegisterInfo &MRI = MF.getRegInfo();
   for (unsigned i = 0; CSRegs[i]; ++i) {
     unsigned Reg = CSRegs[i];
-    if (CallsUnwindInit || MRI.isPhysRegModified(Reg))
+    if (SaveAll || MRI.isPhysRegModified(Reg))
       SavedRegs.set(Reg);
   }
 }

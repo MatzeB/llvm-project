@@ -66,6 +66,7 @@
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachinePostDominators.h"
+#include "llvm/CodeGen/MachineSizeOpts.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/CodeGen/TargetFrameLowering.h"
@@ -1012,6 +1013,11 @@ PreservedAnalyses ShrinkWrapPass::run(MachineFunction &MF,
 
 bool ShrinkWrapImpl::isShrinkWrapEnabled(const MachineFunction &MF) {
   const TargetFrameLowering *TFI = MF.getSubtarget().getFrameLowering();
+
+  // We prefer uniform looking prologues/epilogues when compiling for
+  // compressed code size.
+  if (shouldOptimizeForCompressedSize(MF))
+    return false;
 
   switch (EnableShrinkWrapOpt) {
   case cl::BOU_UNSET:
