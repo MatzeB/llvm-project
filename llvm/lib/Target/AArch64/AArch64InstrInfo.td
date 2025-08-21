@@ -742,6 +742,12 @@ def topbitsallzero64: PatLeaf<(i64 GPR64:$src), [{
     return VT && VT->maskedValueIsZero(Reg, APInt::getHighBitsSet(64, 63)); }];
 }
 
+let HasOneUse = 1 in {
+def and_oneuse: PatFrag<(ops node:$src0, node:$src1), (and node:$src0, node:$src1)>;
+def or_oneuse: PatFrag<(ops node:$src0, node:$src1), (and node:$src0, node:$src1)>;
+def xor_oneuse: PatFrag<(ops node:$src0, node:$src1), (xor node:$src0, node:$src1)>;
+}
+
 // Node definitions.
 // Compare-and-branch
 def AArch64CB : SDNode<"AArch64ISD::CB", SDT_AArch64cb, [SDNPHasChain]>;
@@ -1779,7 +1785,7 @@ def : SHA3_pattern<EOR3, int_aarch64_crypto_eor3u, v4i32>;
 def : SHA3_pattern<EOR3, int_aarch64_crypto_eor3u, v2i64>;
 
 class EOR3_pattern<ValueType VecTy>
-  : Pat<(xor (xor (VecTy V128:$Vn), (VecTy V128:$Vm)), (VecTy V128:$Va)),
+  : Pat<(xor (xor_oneuse (VecTy V128:$Vn), (VecTy V128:$Vm)), (VecTy V128:$Va)),
         (EOR3 (VecTy V128:$Vn), (VecTy V128:$Vm), (VecTy V128:$Va))>;
 
 def : EOR3_pattern<v16i8>;
@@ -1788,7 +1794,7 @@ def : EOR3_pattern<v4i32>;
 def : EOR3_pattern<v2i64>;
 
 class BCAX_pattern<ValueType VecTy>
-  : Pat<(xor (VecTy V128:$Vn), (and (VecTy V128:$Vm), (vnot (VecTy V128:$Va)))),
+  : Pat<(xor (VecTy V128:$Vn), (and_oneuse (VecTy V128:$Vm), (vnot (VecTy V128:$Va)))),
         (BCAX (VecTy V128:$Vn), (VecTy V128:$Vm), (VecTy V128:$Va))>;
 
 def : BCAX_pattern<v16i8>;
@@ -1817,7 +1823,7 @@ def : Pat<(v2i64 (int_aarch64_crypto_rax1 (v2i64 V128:$Vn), (v2i64 V128:$Vm))),
 def : Pat<(v2i64 (int_aarch64_crypto_xar (v2i64 V128:$Vn), (v2i64 V128:$Vm), (i64 timm0_63:$imm))),
           (XAR (v2i64 V128:$Vn), (v2i64 V128:$Vm), (timm0_63:$imm))>;
 
-def : Pat<(xor  (v2i64 V128:$Vn), (or (AArch64vlshr (v2i64 V128:$Vm), (i32 63)), (AArch64vshl (v2i64 V128:$Vm), (i32 1)))),
+def : Pat<(xor  (v2i64 V128:$Vn), (or_oneuse (AArch64vlshr (v2i64 V128:$Vm), (i32 63)), (AArch64vshl (v2i64 V128:$Vm), (i32 1)))),
           (RAX1 (v2i64 V128:$Vn), (v2i64 V128:$Vm))>;
 
 } // HasSHA3
