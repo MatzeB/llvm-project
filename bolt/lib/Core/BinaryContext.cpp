@@ -2559,7 +2559,7 @@ BinaryContext::calculateEmittedSize(BinaryFunction &BF, bool FixBranches) {
   // Clean-up the effect of the code emission.
   for (const MCSymbol &Symbol : Assembler.symbols()) {
     MCSymbol *MutableSymbol = const_cast<MCSymbol *>(&Symbol);
-    MutableSymbol->setUndefined();
+    MutableSymbol->setFragment(nullptr);
     MutableSymbol->setIsRegistered(false);
   }
 
