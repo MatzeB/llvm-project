@@ -58,6 +58,12 @@ static cl::opt<bool>
                     cl::desc("If the total count of the profile is smaller "
                              "than threshold, it will be trimmed."));
 
+static cl::opt<bool> MarkAllContextPreinlined(
+    "mark-all-context-preinlined",
+    cl::desc("Mark all function samples as preinlined(set "
+             "ContextShouldBeInlined attribute)."),
+    cl::init(false));
+
 static cl::opt<bool> CSProfMergeColdContext(
     "csprof-merge-cold-context", cl::init(true),
     cl::desc("If the total count of context profile is smaller than "
@@ -518,10 +524,19 @@ void ProfileGenerator::generateProfile() {
   postProcessProfiles();
 }
 
+void ProfileGeneratorBase::markAllContextPreinlined(
+    SampleProfileMap &ProfileMap) {
+  for (auto &I : ProfileMap)
+    I.second.setContextAttribute(ContextShouldBeInlined);
+  FunctionSamples::ProfileIsPreInlined = true;
+}
+
 void ProfileGenerator::postProcessProfiles() {
   computeSummaryAndThreshold(ProfileMap);
   trimColdProfiles(ProfileMap, ColdCountThreshold);
   filterAmbiguousProfile(ProfileMap);
+  if (MarkAllContextPreinlined)
+    markAllContextPreinlined(ProfileMap);
   calculateAndShowDensity(ProfileMap);
 }
 
@@ -1137,6 +1152,8 @@ void CSProfileGenerator::postProcessProfiles() {
     FunctionSamples::ProfileIsCS = false;
   }
   filterAmbiguousProfile(ProfileMap);
+  if (MarkAllContextPreinlined)
+    markAllContextPreinlined(ProfileMap);
   ProfileGeneratorBase::calculateAndShowDensity(ProfileMap);
 }
 
