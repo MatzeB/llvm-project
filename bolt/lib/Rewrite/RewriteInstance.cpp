@@ -2942,8 +2942,7 @@ void RewriteInstance::handleRelocation(const SectionRef &RelocatedSection,
         ReferencedSymbol = nullptr;
         ExtractedValue = Address;
       } else if (RefFunctionOffset) {
-        if (ContainingBF && ContainingBF != ReferencedBF &&
-            !ReferencedBF->isInConstantIsland(Address)) {
+        if (ContainingBF && ContainingBF != ReferencedBF) {
           ReferencedSymbol =
               ReferencedBF->addEntryPointAtOffset(RefFunctionOffset);
         } else {
