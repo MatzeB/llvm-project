@@ -236,17 +236,7 @@ std::string addExtraHint(uint8_t *loc, const Relocation &rel) {
                          dyn_cast_or_null<Defined>(rel.sym)->section
                      ? dyn_cast_or_null<Defined>(rel.sym)->section
                      : nullptr);
-  hint += R"DOC(
-      ( •_•)                               (•_• )
-      ( ง )ง  --LOOK HERE FOR MORE INFO-- ୧( ୧ )
-       /︶\                                 /︶\
-  Error: Relocation overflow has occured.
-  For potential solutions please see: fburl.com/fbcode_build_size
-  If steps in above link do not apply.
-  Check if the problem has been reported in https://fb.workplace.com/groups/linker.support
-  ------
-  )DOC";
-
+  hint += "Error: Relocation overflow has occured\n";
   return hint;
 }
 // facebook end T96340746
