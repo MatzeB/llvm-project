@@ -1149,6 +1149,10 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
 Error LongJmpPass::runOnFunctions(BinaryContext &BC) {
 
+  assert((opts::CompactCodeModel || opts::ExperimentalRelaxation ||
+          opts::SplitStrategy != opts::SplitFunctionsStrategy::CDSplit) &&
+         "LongJmp cannot work with functions split in more than two fragments");
+
   if (opts::CompactCodeModel || opts::ExperimentalRelaxation) {
     BC.outs()
         << "BOLT-INFO: relaxing branches for compact code model (<128MB)\n";
