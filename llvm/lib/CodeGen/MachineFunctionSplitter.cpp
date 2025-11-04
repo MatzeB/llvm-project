@@ -129,6 +129,9 @@ static bool isColdBlock(const MachineBasicBlock &MBB,
 }
 
 bool MachineFunctionSplitter::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(MF.getFunction()))
+    return false;
+
   // We target functions with profile data. Static information in the form
   // of exception handling code may be split to cold if user passes the
   // mfs-split-ehcode flag.
