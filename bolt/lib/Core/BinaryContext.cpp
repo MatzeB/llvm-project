@@ -1015,9 +1015,7 @@ bool BinaryContext::hasValidCodePadding(const BinaryFunction &BF) {
   auto skipZeros = [&]() {
     const uint64_t StartOffset = Offset;
     uint64_t CurrentOffset = Offset;
-    for (; CurrentOffset < BF.getMaxSize() &&
-           (!isAArch64() || CurrentOffset < StartOffset + 4);
-         ++CurrentOffset)
+    for (; CurrentOffset < BF.getMaxSize(); ++CurrentOffset)
       if ((*FunctionData)[CurrentOffset] != 0)
         break;
 
