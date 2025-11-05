@@ -1044,12 +1044,8 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
   return BranchType;
 }
 
-MCSymbol *BinaryFunction::getOrCreateLocalLabel(uint64_t Address,
-                                                bool CreatePastEnd) {
+MCSymbol *BinaryFunction::getOrCreateLocalLabel(uint64_t Address) {
   const uint64_t Offset = Address - getAddress();
-
-  if ((Offset == getSize()) && CreatePastEnd)
-    return getFunctionEndLabel();
 
   auto LI = Labels.find(Offset);
   if (LI != Labels.end())
@@ -1060,6 +1056,9 @@ MCSymbol *BinaryFunction::getOrCreateLocalLabel(uint64_t Address,
     if (MCSymbol *IslandSym = getOrCreateIslandAccess(Address))
       return IslandSym;
   }
+
+  if (Offset == getSize())
+    return getFunctionEndLabel();
 
   MCSymbol *Label = BC.Ctx->createNamedTempSymbol();
   Labels[Offset] = Label;
@@ -1436,10 +1435,9 @@ Error BinaryFunction::disassemble() {
                 !(BC.isAArch64() &&
                   BC.handleAArch64Veneer(TargetAddress, /*MatchOnly*/ true))) {
               // Result of __builtin_unreachable().
-              LLVM_DEBUG(dbgs() << "BOLT-DEBUG: jump past end detected at 0x"
-                                << Twine::utohexstr(AbsoluteInstrAddr)
-                                << " in function " << *this
-                                << " : replacing with nop.\n");
+              errs() << "BOLT-WARNING: jump past end detected at 0x"
+                     << Twine::utohexstr(AbsoluteInstrAddr) << " in function "
+                     << *this << " : replacing with nop.\n";
               BC.MIB->createNoop(Instruction);
               if (IsCondBranch) {
                 // Register branch offset for profile validation.
@@ -1708,11 +1706,12 @@ bool BinaryFunction::scanExternalRefs() {
       if (!TargetFunction || ignoreFunctionRef(*TargetFunction))
         continue;
 
-      const uint64_t FunctionOffset =
-          TargetAddress - TargetFunction->getAddress();
+      // Get a reference symbol for the function when address is a valid code
+      // reference.
       BranchTargetSymbol =
-          FunctionOffset ? TargetFunction->addEntryPointAtOffset(FunctionOffset)
-                         : TargetFunction->getSymbol();
+          BC.handleExternalBranchTarget(TargetAddress, *TargetFunction);
+      if (!BranchTargetSymbol)
+        continue;
     }
 
     // Can't find more references. Not creating relocations since we are not
@@ -2004,7 +2003,7 @@ void BinaryFunction::postProcessJumpTables() {
       if (IsBuiltinUnreachable) {
         BinaryFunction *TargetBF = BC.getBinaryFunctionAtAddress(EntryAddress);
         MCSymbol *Label = TargetBF ? TargetBF->getSymbol()
-                                   : getOrCreateLocalLabel(EntryAddress, true);
+                                   : getOrCreateLocalLabel(EntryAddress);
         JT.Entries.push_back(Label);
         continue;
       }
@@ -2015,7 +2014,7 @@ void BinaryFunction::postProcessJumpTables() {
           BC.getBinaryFunctionContainingAddress(EntryAddress);
       MCSymbol *Label;
       if (HasOneParent && TargetBF == this) {
-        Label = getOrCreateLocalLabel(EntryAddress, true);
+        Label = getOrCreateLocalLabel(EntryAddress);
       } else {
         const uint64_t Offset = EntryAddress - TargetBF->getAddress();
         Label = Offset ? TargetBF->addEntryPointAtOffset(Offset)
@@ -3884,7 +3883,7 @@ uint64_t BinaryFunction::getEntryIDForSymbol(const MCSymbol *Symbol) const {
     if (FunctionSymbol == Symbol)
       return 0;
 
-  // Check all secondary entries available as either basic blocks or lables.
+  // Check all secondary entries available as either basic blocks or labels.
   uint64_t NumEntries = 1;
   for (const BinaryBasicBlock *BB : BasicBlocks) {
     MCSymbol *EntrySymbol = getSecondaryEntryPointSymbol(*BB);
