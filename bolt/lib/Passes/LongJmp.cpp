@@ -985,6 +985,9 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
     });
   }
 
+  if (Clusters.empty())
+    return;
+
   // Print cluster stats.
   dbgs() << "Built " << Clusters.size() << " clusters\n";
   uint64_t ClusterIndex = 0;
