@@ -919,7 +919,7 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
     return Size;
   };
 
-  DenseMap<BinaryFunction *, std::set<BinaryFunction *>> CallMap;
+  DenseMap<BinaryFunction *, std::set<const MCSymbol *>> CallMap;
   for (BinaryFunction *BF : OutputFunctions) {
     if (!BC.shouldEmit(*BF) || BF->isPatch())
       continue;
@@ -934,13 +934,11 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
         const MCSymbol *TargetSymbol = BC.MIB->getTargetSymbol(Inst);
         assert(TargetSymbol);
 
-        BinaryFunction *Callee = BC.getFunctionForSymbol(TargetSymbol);
-        if (!Callee) {
-          // Ignore internal calls that use basic block labels as a destination.
+        // Ignore internal calls that use basic block labels as a destination.
+        if (!BC.getFunctionForSymbol(TargetSymbol))
           continue;
-        }
 
-        CallMap[BF].insert(Callee);
+        CallMap[BF].insert(TargetSymbol);
       }
     }
   }
@@ -966,16 +964,33 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
     FunctionCluster &FC = Clusters.back();
     FC.Functions.insert(BF);
-    auto It = FC.Callees.find(BF);
-    if (It != FC.Callees.end()) {
-      FC.Callees.erase(It);
+
+    // When a function is added to the cluster, we have to remove all of its
+    // symbols from the cluster callee list. These include alternative symbols
+    // (e.g. after ICF) and secondary entry point symbols.
+    for (const MCSymbol *Symbol : BF->getSymbols()) {
+      auto It = FC.Callees.find(Symbol);
+      if (It != FC.Callees.end())
+        FC.Callees.erase(It);
     }
+    BF->forEachEntryPoint(
+        [&FC](uint64_t Offset, const MCSymbol *EntrySymbol) -> bool {
+          auto It = FC.Callees.find(EntrySymbol);
+          if (It != FC.Callees.end())
+            FC.Callees.erase(It);
+          return true;
+        });
+
+    // Update cluster callee list with added function callees.
+    for (const MCSymbol *CalleeSymbol : CallMap[BF]) {
+      BinaryFunction *Callee = BC.getFunctionForSymbol(CalleeSymbol);
+      if (!FC.Functions.count(Callee)) {
+        FC.Callees.insert(CalleeSymbol);
+      }
+    }
+
     FC.Size += BFSize;
     FC.LastFunctionIndex = BFIndex;
-
-    for (BinaryFunction *Callee : CallMap[BF])
-      if (!FC.Functions.count(Callee))
-        FC.Callees.insert(Callee);
   }
 
   if (opts::HotFunctionsAtEnd) {
@@ -1010,7 +1025,7 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
   for (BinaryFunction &BF : llvm::make_second_range(BC.getBinaryFunctions())) {
     if (BF.isPLTFunction()) {
       PLTCluster.Functions.insert(&BF);
-      auto It = PLTCluster.Callees.find(&BF);
+      auto It = PLTCluster.Callees.find(BF.getSymbol());
       if (It != PLTCluster.Callees.end())
         PLTCluster.Callees.erase(It);
     }
@@ -1018,23 +1033,23 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
   // Build thunk functions.
   size_t NumThunks = 0;
-  auto createShortThunk = [&](BinaryFunction &Callee) {
+  auto createShortThunk = [&](const MCSymbol *TargetSymbol) {
     ++NumThunks;
     BinaryFunction *ThunkBF = BC.createThunkBinaryFunction(
-        "__AArch64Thunk_" + Callee.getOneName().str());
+        "__AArch64Thunk_" + TargetSymbol->getName().str());
     MCInst Inst;
-    BC.MIB->createTailCall(Inst, Callee.getSymbol(), BC.Ctx.get());
+    BC.MIB->createTailCall(Inst, TargetSymbol, BC.Ctx.get());
     ThunkBF->addBasicBlock()->addInstruction(Inst);
 
     return ThunkBF;
   };
 
-  auto createLongThunk = [&](BinaryFunction &Callee) {
+  auto createLongThunk = [&](const MCSymbol *TargetSymbol) {
     ++NumThunks;
     BinaryFunction *ThunkBF = BC.createThunkBinaryFunction(
-        "__AArch64ADRPThunk_" + Callee.getOneName().str());
+        "__AArch64ADRPThunk_" + TargetSymbol->getName().str());
     InstructionListType Instructions;
-    BC.MIB->createLongTailCall(Instructions, Callee.getSymbol(), BC.Ctx.get());
+    BC.MIB->createLongTailCall(Instructions, TargetSymbol, BC.Ctx.get());
     ThunkBF->addBasicBlock()->addInstructions(Instructions);
 
     return ThunkBF;
@@ -1042,9 +1057,24 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
   for (unsigned ClusterNum = 0; ClusterNum < Clusters.size(); ++ClusterNum) {
     FunctionCluster &FC = Clusters[ClusterNum];
-    SmallVector<BinaryFunction *, 16> Callees(FC.Callees.begin(),
+    SmallVector<const MCSymbol *, 16> Callees(FC.Callees.begin(),
                                               FC.Callees.end());
-    llvm::sort(Callees, compareBinaryFunctionByIndex);
+
+    // Generate thunks in deterministic order.
+    llvm::sort(Callees, [&BC](const MCSymbol *A, const MCSymbol *B) {
+      uint64_t EntryA;
+      uint64_t EntryB;
+      BinaryFunction *BFA = BC.getFunctionForSymbol(A, &EntryA);
+      BinaryFunction *BFB = BC.getFunctionForSymbol(B, &EntryB);
+      if (BFA == BFB) {
+        if (EntryA != EntryB)
+          return EntryA < EntryB;
+
+        // Use lexicographical order for ICF'ed symbols.
+        return A->getName() < B->getName();
+      }
+      return compareBinaryFunctionByIndex(BFA, BFB);
+    });
 
     // Return index of adjacent cluster containing the function.
     auto getAdjClusterWithFunction =
@@ -1062,26 +1092,27 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
 
     // Create short thunks for callees in adjacent clusters and long thunks
     // for callees outside.
-    for (BinaryFunction *Callee : Callees) {
+    for (const MCSymbol *Callee : Callees) {
       if (FC.Thunks.count(Callee))
         continue;
 
       BinaryFunction *Thunk = 0;
-      std::optional<unsigned> AdjCluster = getAdjClusterWithFunction(Callee);
+      std::optional<unsigned> AdjCluster =
+          getAdjClusterWithFunction(BC.getFunctionForSymbol(Callee));
       if (AdjCluster) {
-        Thunk = createShortThunk(*Callee);
+        Thunk = createShortThunk(Callee);
       } else {
         // Previous cluster may already have a long thunk that can be reused.
         if (PrevCluster) {
           auto It = PrevCluster->Thunks.find(Callee);
           // Reuse only if previous cluster hosts this thunk.
           if (It != PrevCluster->Thunks.end() &&
-              llvm::is_contained(PrevCluster->ThunkList, It->first)) {
-            FC.Thunks[Callee] = It->first;
+              llvm::is_contained(PrevCluster->ThunkList, It->second)) {
+            FC.Thunks[Callee] = It->second;
             continue;
           }
         }
-        Thunk = createLongThunk(*Callee);
+        Thunk = createLongThunk(Callee);
       }
 
       // The cluster that will host this thunk. If the current cluster is the
@@ -1092,7 +1123,17 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
           (ClusterNum && ClusterNum == Clusters.size() - 1))
         ThunkCluster = &Clusters[ClusterNum - 1];
       ThunkCluster->ThunkList.push_back(Thunk);
-      FC.Thunks[Callee] = Thunk;
+
+      // Register thunks for all symbols associated with the function.
+      uint64_t EntryID = 0;
+      const BinaryFunction *BF = BC.getFunctionForSymbol(Callee, &EntryID);
+      if (EntryID != 0) {
+        FC.Thunks[Callee] = Thunk;
+      } else {
+        for (const MCSymbol *Symbol : BF->getSymbols()) {
+          FC.Thunks[Symbol] = Thunk;
+        }
+      }
     }
   }
 
@@ -1112,20 +1153,10 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
           const MCSymbol *TargetSymbol = BC.MIB->getTargetSymbol(Inst);
           assert(TargetSymbol);
 
-          BinaryFunction *Callee = BC.getFunctionForSymbol(TargetSymbol);
-          if (!Callee) {
-            // Ignore internal calls that use basic block labels as a
-            // destination.
-            continue;
-          }
-
-          // Check if the callee is in the same cluster.
-          if (!FC.Callees.count(Callee))
-            continue;
-
-          // Use thunk as the call destination.
-          BC.MIB->replaceBranchTarget(Inst, FC.Thunks[Callee]->getSymbol(),
-                                      BC.Ctx.get());
+          auto It = FC.Thunks.find(TargetSymbol);
+          if (It != FC.Thunks.end())
+            BC.MIB->replaceBranchTarget(Inst, It->second->getSymbol(),
+                                        BC.Ctx.get());
         }
       }
     }
