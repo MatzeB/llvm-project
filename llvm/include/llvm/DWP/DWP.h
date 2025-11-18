@@ -21,6 +21,12 @@ enum OnCuIndexOverflow {
   Continue,
 };
 
+enum Dwarf64StrOffsetsPromotion {
+  Disabled, ///< Don't do any conversion of .debug_str_offsets tables.
+  Enabled,  ///< Convert any .debug_str_offsets tables to DWARF64 if needed.
+  Always,   ///< Always emit .debug_str_offsets talbes as DWARF64 for testing.
+};
+
 struct UnitIndexEntry {
   DWARFUnitIndex::Entry::SectionContribution Contributions[8];
   std::string Name;
@@ -67,7 +73,10 @@ struct CompileUnitIdentifiers {
 };
 
 Error write(MCStreamer &Out, ArrayRef<std::string> Inputs,
-            OnCuIndexOverflow OverflowOptValue);
+            OnCuIndexOverflow OverflowOptValue,
+            Dwarf64StrOffsetsPromotion StrOffsetsOptValue);
+
+typedef std::vector<std::pair<DWARFSectionKind, uint32_t>> SectionLengths;
 
 unsigned getContributionIndex(DWARFSectionKind Kind, uint32_t IndexVersion);
 
@@ -83,7 +92,7 @@ Error handleSection(
     std::vector<StringRef> &CurTypesSection,
     std::vector<StringRef> &CurInfoSection, StringRef &AbbrevSection,
     StringRef &CurCUIndexSection, StringRef &CurTUIndexSection,
-    std::vector<std::pair<DWARFSectionKind, uint32_t>> &SectionLength);
+    SectionLengths &SectionLength);
 
 Expected<InfoSectionUnitHeader> parseInfoSectionUnitHeader(StringRef Info);
 
