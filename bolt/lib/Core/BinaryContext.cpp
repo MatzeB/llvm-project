@@ -1921,19 +1921,24 @@ void BinaryContext::preprocessDebugInfo() {
       std::optional<MD5::MD5Result> Checksum;
       if (LineTable->Prologue.ContentTypes.HasMD5)
         Checksum = LineTable->Prologue.FileNames[0].Checksum;
-      std::optional<const char *> Name =
+      const char *Name =
           dwarf::toString(CU->getUnitDIE().find(dwarf::DW_AT_name), nullptr);
       if (std::optional<uint64_t> DWOID = CU->getDWOId()) {
         auto Iter = DWOCUs.find(*DWOID);
         if (Iter == DWOCUs.end()) {
-          this->errs() << "BOLT-ERROR: DWO CU was not found for " << Name
-                       << '\n';
+          const char *DWOName =
+              dwarf::toString(CU->getUnitDIE().find(dwarf::DW_AT_dwo_name),
+                              "<missing DW_AT_dwo_name>");
+          this->errs() << "BOLT-ERROR: DWO CU was not found for DW_AT_name = "
+                       << (Name ? Name : "<no name>") << "; DWO_id = 0x"
+                       << Twine::utohexstr(*DWOID)
+                       << "; DW_AT_dwo_name = " << DWOName << '\n';
           exit(1);
         }
         Name = dwarf::toString(
             Iter->second->getUnitDIE().find(dwarf::DW_AT_name), nullptr);
       }
-      BinaryLineTable.setRootFile(CU->getCompilationDir(), *Name, Checksum,
+      BinaryLineTable.setRootFile(CU->getCompilationDir(), Name, Checksum,
                                   std::nullopt);
     }
 
