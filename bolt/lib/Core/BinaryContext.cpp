@@ -1900,6 +1900,9 @@ void BinaryContext::preprocessDebugInfo() {
 
   preprocessDWODebugInfo();
 
+  // Check if required DWO files are missing.
+  uint64_t NumMissingDWOs = 0;
+
   // Populate MCContext with DWARF files from all units.
   StringRef GlobalPrefix = AsmInfo->getPrivateGlobalPrefix();
   for (const std::unique_ptr<DWARFUnit> &CU : DwCtx->compile_units()) {
@@ -1929,11 +1932,10 @@ void BinaryContext::preprocessDebugInfo() {
           const char *DWOName =
               dwarf::toString(CU->getUnitDIE().find(dwarf::DW_AT_dwo_name),
                               "<missing DW_AT_dwo_name>");
-          this->errs() << "BOLT-ERROR: DWO CU was not found for DW_AT_name = "
-                       << (Name ? Name : "<no name>") << "; DWO_id = 0x"
-                       << Twine::utohexstr(*DWOID)
-                       << "; DW_AT_dwo_name = " << DWOName << '\n';
-          exit(1);
+          this->errs() << "BOLT-ERROR: unable to load " << DWOName
+                       << " for DWO_id " << Twine::utohexstr(*DWOID) << '\n';
+          NumMissingDWOs++;
+          continue;
         }
         Name = dwarf::toString(
             Iter->second->getUnitDIE().find(dwarf::DW_AT_name), nullptr);
@@ -1972,6 +1974,14 @@ void BinaryContext::preprocessDebugInfo() {
       cantFail(getDwarfFile(Dir, FileName, 0, Checksum, std::nullopt, CUID,
                             DwarfVersion));
     }
+  }
+
+  if (NumMissingDWOs) {
+    this->errs() << "BOLT-ERROR: " << NumMissingDWOs
+                 << " required DWO file(s) not found. Unable to update debug"
+                    " info. Use --comp-dir-override to locate the file(s) or"
+                    " --update-debug-sections=0 to remove debug info\n";
+    exit(1);
   }
 }
 
