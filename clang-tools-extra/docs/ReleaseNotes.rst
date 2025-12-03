@@ -386,6 +386,11 @@ Changes in existing checks
   <clang-tidy/checks/google/build-namespaces>` check by replacing the local
   option `HeaderFileExtensions` by the global option of the same name.
 
+- Improved :doc:`cppcoreguidelines-pro-type-member-init
+  <clang-tidy/checks/cppcoreguidelines/pro-type-member-init>` check to
+  correctly ignore ``std::array`` and other array-like containers when
+  `IgnoreArrays` option is set to `true`.
+
 - Improved :doc:`google-explicit-constructor
   <clang-tidy/checks/google/explicit-constructor>` check to better handle
   C++20 `explicit(bool)`.
