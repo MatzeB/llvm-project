@@ -288,6 +288,7 @@ public:
 
   // Return false if it's a dummy inline site
   bool hasInlineSite() const { return !isRoot() && !Parent->isRoot(); }
+  bool isTopLevelFunc() const { return !isRoot() && Parent->isRoot(); }
 };
 
 /// Instances of this class represent the pseudo probes inserted into a compile
