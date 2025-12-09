@@ -389,6 +389,10 @@ private:
   /// placed on a huge page.
   bool IsHotTextMover{false};
 
+  /// Indicates whether branch validation has already been performed,
+  /// to avoid redundant processing.
+  bool NeedBranchValidation{true};
+
   /// Name for the section this function code should reside in.
   std::string CodeSectionName;
 
@@ -2327,6 +2331,11 @@ public:
   /// Verify that starting at \p Offset function contents are filled with
   /// zero-value bytes.
   bool isZeroPaddingAt(uint64_t Offset) const;
+
+  /// Validate if the target of any internal direct branch/call is a valid
+  /// executable instruction.
+  /// Return true if all the targets are valid, false otherwise.
+  bool validateInternalBranches();
 
   /// Check that entry points have an associated instruction at their
   /// offsets after disassembly.
