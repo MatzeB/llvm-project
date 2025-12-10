@@ -4000,22 +4000,40 @@ public:
   template<typename Coll>
   data_type getData(const Coll &Decls) {
     unsigned Start = DeclIDs.size();
-    for (NamedDecl *D : Decls) {
+    auto AddDecl = [this](NamedDecl *D) {
       NamedDecl *DeclForLocalLookup =
           getDeclForLocalLookup(Writer.getLangOpts(), D);
 
       if (Writer.getDoneWritingDeclsAndTypes() &&
           !Writer.wasDeclEmitted(DeclForLocalLookup))
-        continue;
+        return;
 
       // Try to avoid writing internal decls to reduced BMI.
       // See comments in ASTWriter::WriteDeclContextLexicalBlock for details.
       if (Writer.isGeneratingReducedBMI() &&
           !DeclForLocalLookup->isFromExplicitGlobalModule() &&
           IsInternalDeclFromFileContext(DeclForLocalLookup))
-        continue;
+        return;
 
       DeclIDs.push_back(Writer.GetDeclRef(DeclForLocalLookup));
+    };
+    for (NamedDecl *D : Decls) {
+      if (ASTReader *Chain = Writer.getChain();
+          Chain && isa<NamespaceDecl>(D) && D->isFromASTFile() &&
+          D == Chain->getKeyDeclaration(D)) {
+        // In ASTReader, we stored only the key declaration of a namespace decl
+        // for this TU rather than storing all of the key declarations from each
+        // imported module. If we have an external namespace decl, this is that
+        // key declaration and we need to re-expand it to write out all of the
+        // key declarations from each imported module again.
+        //
+        // See comment 'ASTReader::FindExternalVisibleDeclsByName' for details.
+        Chain->forEachImportedKeyDecl(D, [&AddDecl](const Decl *D) {
+          AddDecl(cast<NamedDecl>(const_cast<Decl *>(D)));
+        });
+      } else {
+        AddDecl(D);
+      }
     }
     return std::make_pair(Start, DeclIDs.size());
   }
@@ -4376,9 +4394,7 @@ uint64_t ASTWriter::WriteDeclContextVisibleBlock(ASTContext &Context,
     }
 
     llvm::sort(LookupResults, llvm::less_first());
-    for (auto &NameAndResult : LookupResults) {
-      DeclarationName Name = NameAndResult.first;
-      DeclContext::lookup_result Result = NameAndResult.second;
+    for (auto &[Name, Result] : LookupResults) {
       if (Name.getNameKind() == DeclarationName::CXXConstructorName ||
           Name.getNameKind() == DeclarationName::CXXConversionFunctionName) {
         // We have to work around a name lookup bug here where negative lookup
