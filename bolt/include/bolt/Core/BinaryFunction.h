@@ -389,6 +389,10 @@ private:
   /// placed on a huge page.
   bool IsHotTextMover{false};
 
+  /// Indicates whether branch validation has already been performed,
+  /// to avoid redundant processing.
+  bool NeedBranchValidation{true};
+
   /// Name for the section this function code should reside in.
   std::string CodeSectionName;
 
@@ -735,11 +739,12 @@ private:
     Symbols.push_back(BC.Ctx->getOrCreateSymbol(Name));
   }
 
-  /// This constructor is used to create an injected function
+  /// This constructor is used to create an injected function, i.e. a function
+  /// that didn't originate in the input file.
   BinaryFunction(const std::string &Name, BinaryContext &BC, bool IsSimple)
       : Address(0), Size(0), BC(BC), IsSimple(IsSimple),
-        CodeSectionName(buildCodeSectionName(Name, BC)),
-        ColdCodeSectionName(buildColdCodeSectionName(Name, BC)),
+        CodeSectionName(BC.getInjectedCodeSectionName()),
+        ColdCodeSectionName(BC.getInjectedColdCodeSectionName()),
         FunctionNumber(++Count) {
     Symbols.push_back(BC.Ctx->getOrCreateSymbol(Name));
     IsInjected = true;
@@ -2328,6 +2333,11 @@ public:
   /// zero-value bytes.
   bool isZeroPaddingAt(uint64_t Offset) const;
 
+  /// Validate if the target of any internal direct branch/call is a valid
+  /// executable instruction.
+  /// Return true if all the targets are valid, false otherwise.
+  bool validateInternalBranches();
+
   /// Check that entry points have an associated instruction at their
   /// offsets after disassembly.
   void postProcessEntryPoints();
@@ -2364,10 +2374,9 @@ public:
   bool postProcessIndirectBranches(MCPlusBuilder::AllocatorIdTy AllocId);
 
   /// Validate that all data references to function offsets are claimed by
-  /// recognized jump tables. Register externally referenced blocks as entry
-  /// points. Returns true if there are no unclaimed externally referenced
-  /// offsets.
-  bool validateExternallyReferencedOffsets();
+  /// recognized jump tables. Returns true if there are no unclaimed externally
+  /// referenced offsets.
+  bool validateInternalRefDataRelocations();
 
   /// Return all call site profile info for this function.
   IndirectCallSiteProfile &getAllCallSites() { return AllCallSites; }
