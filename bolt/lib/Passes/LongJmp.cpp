@@ -27,14 +27,18 @@ extern cl::opt<unsigned> AlignFunctions;
 extern cl::opt<bool> UseOldText;
 extern cl::opt<bool> HotFunctionsAtEnd;
 
+static cl::opt<bool> GroupStubs("group-stubs",
+                                cl::desc("share stubs across functions"),
+                                cl::init(true), cl::cat(BoltOptCategory));
+
 static cl::opt<bool>
     ExperimentalRelaxation("relax-exp",
                            cl::desc("run experimental relaxation pass"),
                            cl::init(false), cl::cat(BoltOptCategory));
 
-static cl::opt<bool> GroupStubs("group-stubs",
-                                cl::desc("share stubs across functions"),
-                                cl::init(true), cl::cat(BoltOptCategory));
+static cl::opt<bool> RelaxPLT("relax-plt",
+                              cl::desc("indicate PLT proximity to hot text"),
+                              cl::init(true), cl::cat(BoltOptCategory));
 }
 
 namespace llvm {
@@ -1032,20 +1036,19 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
     dbgs() << "    " << FC.LastFunctionIndex << " is last function\n";
   }
 
-  // Populate one of the clusters with PLT functions based on the proximity of
-  // the PLT section to avoid unneeded thunk redirection.
-  // FIXME: this part is extremely fragile as it depends on the placement
-  //        of PLT section and its proximity to old or new .text.
-  // FIXME: a slightly better approach will be to always use thunks for PLT and
-  //        eliminate redirection later using final addresses in address maps.
-  const size_t PLTClusterNum = opts::UseOldText ? Clusters.size() - 1 : 0;
-  auto &PLTCluster = Clusters[PLTClusterNum];
-  for (BinaryFunction &BF : llvm::make_second_range(BC.getBinaryFunctions())) {
-    if (BF.isPLTFunction()) {
-      PLTCluster.Functions.insert(&BF);
-      auto It = PLTCluster.Callees.find(BF.getSymbol());
-      if (It != PLTCluster.Callees.end())
-        PLTCluster.Callees.erase(It);
+  if (opts::RelaxPLT) {
+    // Populate one of the clusters with PLT functions based on the proximity of
+    // the PLT section to avoid unneeded thunk redirection.
+    const size_t PLTClusterNum = opts::UseOldText ? Clusters.size() - 1 : 0;
+    auto &PLTCluster = Clusters[PLTClusterNum];
+    for (BinaryFunction &BF :
+         llvm::make_second_range(BC.getBinaryFunctions())) {
+      if (BF.isPLTFunction()) {
+        PLTCluster.Functions.insert(&BF);
+        auto It = PLTCluster.Callees.find(BF.getSymbol());
+        if (It != PLTCluster.Callees.end())
+          PLTCluster.Callees.erase(It);
+      }
     }
   }
 
