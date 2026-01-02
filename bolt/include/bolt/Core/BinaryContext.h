@@ -65,6 +65,9 @@ namespace bolt {
 
 class BinaryFunction;
 
+using BinaryFunctionListType = std::vector<BinaryFunction *>;
+using ConstBinaryFunctionListType = std::vector<const BinaryFunction *>;
+
 /// Information on loadable part of the file.
 struct SegmentInfo {
   uint64_t Address;           /// Address of the segment in memory.
@@ -228,14 +231,14 @@ class BinaryContext {
   /// Store all functions in the binary, sorted by original address.
   std::map<uint64_t, BinaryFunction> BinaryFunctions;
 
-  /// Functions to be included in the output in the sorted order.
-  std::vector<BinaryFunction *> OutputFunctions;
+  /// Functions to be considered for the output in a sorted order.
+  BinaryFunctionListType OutputFunctions;
 
-  /// A mutex that is used to control parallel accesses to BinaryFunctions
+  /// A mutex that is used to control parallel accesses to BinaryFunctions.
   mutable llvm::sys::RWMutex BinaryFunctionsMutex;
 
-  /// Functions injected by BOLT
-  std::vector<BinaryFunction *> InjectedBinaryFunctions;
+  /// Functions injected by BOLT.
+  BinaryFunctionListType InjectedBinaryFunctions;
 
   /// Jump tables for all functions mapped by address.
   std::map<uint64_t, JumpTable *> JumpTables;
@@ -554,6 +557,16 @@ public:
     return BinaryFunctions;
   }
 
+  /// Return functions meant for the output in a sorted order.
+  const BinaryFunctionListType &getOutputBinaryFunctions() const {
+    return OutputFunctions;
+  }
+
+  /// Update output function list.
+  void updateOutputBinaryFunctions(BinaryFunctionListType &&Functions) {
+    OutputFunctions.swap(Functions);
+  }
+
   /// Create BOLT-injected function
   BinaryFunction *createInjectedBinaryFunction(const std::string &Name,
                                                bool IsSimple = true);
@@ -570,15 +583,16 @@ public:
                          const InstructionListType &Instructions,
                          const Twine &Name = "");
 
-  std::vector<BinaryFunction *> &getInjectedBinaryFunctions() {
+  /// Create a binary function with a base \p Name.
+  BinaryFunction *createThunkBinaryFunction(const std::string &Name);
+
+  BinaryFunctionListType &getInjectedBinaryFunctions() {
     return InjectedBinaryFunctions;
   }
 
-  BinaryFunction *createThunkBinaryFunction(const std::string &Name);
-
   /// Return vector with all functions, i.e. include functions from the input
   /// binary and functions created by BOLT.
-  std::vector<BinaryFunction *> getAllBinaryFunctions();
+  BinaryFunctionListType getAllBinaryFunctions();
 
   /// Construct a jump table for \p Function at \p Address or return an existing
   /// one at that location.
@@ -1389,13 +1403,6 @@ public:
   unsigned addDebugFilenameToUnit(const uint32_t DestCUID,
                                   const uint32_t SrcCUID, unsigned FileIndex);
 
-  /// Return a vector of functions in the order ready for code emission.
-  /// The vector will include functions added/injected by BOLT.
-  const std::vector<BinaryFunction *> &getOutputFunctions();
-
-  /// Update function list for the output.
-  void updateOutputFunctions(std::vector<BinaryFunction *> &Functions);
-
   /// Do the best effort to calculate the size of the function by emitting
   /// its code, and relaxing branch instructions. By default, branch
   /// instructions are updated to match the layout. Pass \p FixBranches set to
@@ -1415,10 +1422,6 @@ public:
   uint64_t
   computeInstructionSize(const MCInst &Inst,
                          const MCCodeEmitter *Emitter = nullptr) const {
-    // FIXME: hack for faster size computation on aarch64.
-    if (isAArch64())
-      return MIB->isPseudo(Inst) ? 0 : 4;
-
     if (std::optional<uint32_t> Size = MIB->getSize(Inst))
       return *Size;
 

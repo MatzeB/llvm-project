@@ -385,10 +385,6 @@ private:
   /// True if the function should not have an associated symbol table entry.
   bool IsAnonymous{false};
 
-  /// True if the function is used for remapping hot text and shall not be
-  /// placed on a huge page.
-  bool IsHotTextMover{false};
-
   /// Indicates whether branch validation has already been performed,
   /// to avoid redundant processing.
   bool NeedBranchValidation{true};
@@ -1455,8 +1451,6 @@ public:
   /// Return true if the function uses ORC format for stack unwinding.
   bool hasORC() const { return HasORC; }
 
-  bool isHotTextMover() const { return IsHotTextMover; }
-
   const JumpTable *getJumpTable(const MCInst &Inst) const {
     const uint64_t Address = BC.MIB->getJumpTable(Inst);
     return getJumpTableContainingAddress(Address);
@@ -1855,8 +1849,6 @@ public:
 
   /// Mark function that should not be emitted.
   void setIgnored();
-
-  void setHotTextMover(bool V) { IsHotTextMover = V; }
 
   void setHasIndirectTargetToSplitFragment(bool V) {
     HasIndirectTargetToSplitFragment = V;
@@ -2590,6 +2582,10 @@ public:
 
   /// Return true if the function is an AArch64 linker inserted veneer
   bool isAArch64Veneer() const;
+
+  /// Return true if the function signature matches veneer or it was established
+  /// to be a veneer.
+  bool isPossibleVeneer() const;
 
   virtual ~BinaryFunction();
 };

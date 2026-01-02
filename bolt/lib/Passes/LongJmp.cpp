@@ -27,14 +27,18 @@ extern cl::opt<unsigned> AlignFunctions;
 extern cl::opt<bool> UseOldText;
 extern cl::opt<bool> HotFunctionsAtEnd;
 
+static cl::opt<bool> GroupStubs("group-stubs",
+                                cl::desc("share stubs across functions"),
+                                cl::init(true), cl::cat(BoltOptCategory));
+
 static cl::opt<bool>
     ExperimentalRelaxation("relax-exp",
                            cl::desc("run experimental relaxation pass"),
                            cl::init(false), cl::cat(BoltOptCategory));
 
-static cl::opt<bool> GroupStubs("group-stubs",
-                                cl::desc("share stubs across functions"),
-                                cl::init(true), cl::cat(BoltOptCategory));
+static cl::opt<bool> RelaxPLT("relax-plt",
+                              cl::desc("indicate PLT proximity to hot text"),
+                              cl::init(true), cl::cat(BoltOptCategory));
 }
 
 namespace llvm {
@@ -309,7 +313,7 @@ void LongJmpPass::tentativeBBLayout(const BinaryFunction &Func) {
 }
 
 uint64_t LongJmpPass::tentativeLayoutRelocColdPart(
-    const BinaryContext &BC, std::vector<BinaryFunction *> &SortedFunctions,
+    const BinaryContext &BC, BinaryFunctionListType &SortedFunctions,
     uint64_t DotAddress) {
   DotAddress = alignTo(DotAddress, llvm::Align(opts::AlignFunctions));
   for (BinaryFunction *Func : SortedFunctions) {
@@ -330,9 +334,10 @@ uint64_t LongJmpPass::tentativeLayoutRelocColdPart(
   return DotAddress;
 }
 
-uint64_t LongJmpPass::tentativeLayoutRelocMode(
-    const BinaryContext &BC, std::vector<BinaryFunction *> &SortedFunctions,
-    uint64_t DotAddress) {
+uint64_t
+LongJmpPass::tentativeLayoutRelocMode(const BinaryContext &BC,
+                                      BinaryFunctionListType &SortedFunctions,
+                                      uint64_t DotAddress) {
   // Compute hot cold frontier
   int64_t LastHotIndex = -1u;
   uint32_t CurrentIndex = 0;
@@ -403,8 +408,8 @@ uint64_t LongJmpPass::tentativeLayoutRelocMode(
   return DotAddress;
 }
 
-void LongJmpPass::tentativeLayout(
-    const BinaryContext &BC, std::vector<BinaryFunction *> &SortedFunctions) {
+void LongJmpPass::tentativeLayout(const BinaryContext &BC,
+                                  BinaryFunctionListType &SortedFunctions) {
   uint64_t DotAddress = BC.LayoutStartAddress;
 
   if (!BC.HasRelocations) {
@@ -474,8 +479,8 @@ uint64_t LongJmpPass::getSymbolAddress(const BinaryContext &BC,
 }
 
 Error LongJmpPass::relaxStub(BinaryBasicBlock &StubBB, bool &Modified) {
-  const BinaryFunction &Func = *StubBB.getFunction();
-  const BinaryContext &BC = Func.getBinaryContext();
+  BinaryFunction &Func = *StubBB.getFunction();
+  BinaryContext &BC = Func.getBinaryContext();
   const int Bits = StubBits[&StubBB];
   // Already working with the largest range?
   if (Bits == static_cast<int>(BC.AsmInfo->getCodePointerSize() * 8))
@@ -488,11 +493,57 @@ Error LongJmpPass::relaxStub(BinaryBasicBlock &StubBB, bool &Modified) {
       ~((1ULL << (RangeSingleInstr - 1)) - 1);
 
   const MCSymbol *RealTargetSym = BC.MIB->getTargetSymbol(*StubBB.begin());
-  const BinaryBasicBlock *TgtBB = Func.getBasicBlockForLabel(RealTargetSym);
+  BinaryBasicBlock *TgtBB = Func.getBasicBlockForLabel(RealTargetSym);
+  BinaryFunction *TargetFunction = BC.getFunctionForSymbol(RealTargetSym);
   uint64_t TgtAddress = getSymbolAddress(BC, RealTargetSym, TgtBB);
   uint64_t DotAddress = BBAddresses[&StubBB];
   uint64_t PCRelTgtAddress = DotAddress > TgtAddress ? DotAddress - TgtAddress
                                                      : TgtAddress - DotAddress;
+
+  auto applyBTIFixup = [&](BinaryFunction *TargetFunction,
+                           BinaryBasicBlock *RealTgtBB) {
+    // TODO: add support for editing each type, and remove errors.
+    if (!TargetFunction && !RealTgtBB) {
+      BC.errs() << "BOLT-ERROR: Cannot add BTI to function with symbol "
+                << RealTargetSym->getName() << "\n";
+      exit(1);
+    }
+    if (TargetFunction && TargetFunction->isIgnored()) {
+      // Includes PLT functions.
+      BC.errs() << "BOLT-ERROR: Cannot add BTI landing pad to ignored function "
+                << TargetFunction->getPrintName() << "\n";
+      exit(1);
+    }
+    if (TargetFunction && !TargetFunction->hasCFG()) {
+      if (TargetFunction->hasInstructions()) {
+        auto FirstII = TargetFunction->instrs().begin();
+        MCInst FirstInst = FirstII->second;
+        if (BC.MIB->isCallCoveredByBTI(*StubBB.getLastNonPseudoInstr(),
+                                       FirstInst))
+          return;
+      }
+      BC.errs()
+          << "BOLT-ERROR: Cannot add BTI landing pad to function without CFG: "
+          << TargetFunction->getPrintName() << "\n";
+      exit(1);
+    }
+    if (!RealTgtBB)
+      // !RealTgtBB -> TargetFunction is not a nullptr
+      RealTgtBB = &*TargetFunction->begin();
+    if (RealTgtBB) {
+      if (!RealTgtBB->hasParent()) {
+        BC.errs() << "BOLT-ERROR: Cannot add BTI to block with no parent "
+                     "function. Targeted symbol: "
+                  << RealTargetSym->getName() << "\n";
+        exit(1);
+      }
+      // The BR is the last inst of the StubBB.
+      BC.MIB->insertBTI(*RealTgtBB, *StubBB.getLastNonPseudoInstr());
+      return;
+    }
+    BC.errs() << "BOLT-ERROR: unhandled case when applying BTI fixup\n";
+    exit(1);
+  };
   // If it fits in one instruction, do not relax
   if (!(PCRelTgtAddress & SingleInstrMask))
     return Error::success();
@@ -507,6 +558,8 @@ Error LongJmpPass::relaxStub(BinaryBasicBlock &StubBB, bool &Modified) {
                       << " RealTargetSym = " << RealTargetSym->getName()
                       << "\n");
     relaxStubToShortJmp(StubBB, RealTargetSym);
+    if (BC.usesBTI())
+      applyBTIFixup(TargetFunction, TgtBB);
     StubBits[&StubBB] = RangeShortJmp;
     Modified = true;
     return Error::success();
@@ -522,6 +575,8 @@ Error LongJmpPass::relaxStub(BinaryBasicBlock &StubBB, bool &Modified) {
                     << Twine::utohexstr(PCRelTgtAddress)
                     << " RealTargetSym = " << RealTargetSym->getName() << "\n");
   relaxStubToLongJmp(StubBB, RealTargetSym);
+  if (BC.usesBTI())
+    applyBTIFixup(TargetFunction, TgtBB);
   StubBits[&StubBB] = static_cast<int>(BC.AsmInfo->getCodePointerSize() * 8);
   Modified = true;
   return Error::success();
@@ -899,26 +954,31 @@ void LongJmpPass::relaxLocalBranches(BinaryFunction &BF) {
 }
 
 void LongJmpPass::relaxCalls(BinaryContext &BC) {
-  std::vector<BinaryFunction *> OutputFunctions = BC.getOutputFunctions();
+  // Operate on a copy of binary functions. We are going to manually insert new
+  // thunks and update the list.
+  BinaryFunctionListType OutputFunctions = BC.getOutputBinaryFunctions();
 
-  // Map every function to its direct callees. Note that this is different from
-  // a typical call graph as here we completely ignore indirect calls.
-  uint64_t EstimatedSize = 0;
-  // Conservatively estimate emitted function size.
+  // Conservatively estimate emitted function size. Assume the worst case
+  // alignment.
   auto estimateFunctionSize = [&](const BinaryFunction &BF) -> uint64_t {
+    // Conservative estimation of the aligned function size.
     if (!BC.shouldEmit(BF))
       return 0;
     uint64_t Size = BF.estimateSize();
     if (BF.hasValidIndex())
       Size += BF.getAlignment();
+
     if (BF.hasIslandsInfo()) {
-      Size += BF.estimateConstantIslandSize();
       Size += BF.getConstantIslandAlignment();
+      Size += BF.estimateConstantIslandSize();
     }
 
     return Size;
   };
 
+  // Map every function to its direct callees. Note that this is different from
+  // the regular call graph as here we completely ignore indirect calls.
+  uint64_t EstimatedSize = 0;
   DenseMap<BinaryFunction *, std::set<const MCSymbol *>> CallMap;
   for (BinaryFunction *BF : OutputFunctions) {
     if (!BC.shouldEmit(*BF) || BF->isPatch())
@@ -1014,20 +1074,19 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
     dbgs() << "    " << FC.LastFunctionIndex << " is last function\n";
   }
 
-  // Populate one of the clusters with PLT functions based on the proximity of
-  // the PLT section to avoid unneeded thunk redirection.
-  // FIXME: this part is extremely fragile as it depends on the placement
-  //        of PLT section and its proximity to old or new .text.
-  // FIXME: a slightly better approach will be to always use thunks for PLT and
-  //        eliminate redirection later using final addresses in address maps.
-  const size_t PLTClusterNum = opts::UseOldText ? Clusters.size() - 1 : 0;
-  auto &PLTCluster = Clusters[PLTClusterNum];
-  for (BinaryFunction &BF : llvm::make_second_range(BC.getBinaryFunctions())) {
-    if (BF.isPLTFunction()) {
-      PLTCluster.Functions.insert(&BF);
-      auto It = PLTCluster.Callees.find(BF.getSymbol());
-      if (It != PLTCluster.Callees.end())
-        PLTCluster.Callees.erase(It);
+  if (opts::RelaxPLT) {
+    // Populate one of the clusters with PLT functions based on the proximity of
+    // the PLT section to avoid unneeded thunk redirection.
+    const size_t PLTClusterNum = opts::UseOldText ? Clusters.size() - 1 : 0;
+    auto &PLTCluster = Clusters[PLTClusterNum];
+    for (BinaryFunction &BF :
+         llvm::make_second_range(BC.getBinaryFunctions())) {
+      if (BF.isPLTFunction()) {
+        PLTCluster.Functions.insert(&BF);
+        auto It = PLTCluster.Callees.find(BF.getSymbol());
+        if (It != PLTCluster.Callees.end())
+          PLTCluster.Callees.erase(It);
+      }
     }
   }
 
@@ -1175,10 +1234,11 @@ void LongJmpPass::relaxCalls(BinaryContext &BC) {
         std::next(OutputFunctions.begin(), FC.LastFunctionIndex + 1),
         FC.ThunkList.begin(), FC.ThunkList.end());
   }
-  BC.updateOutputFunctions(OutputFunctions);
 
   LLVM_DEBUG(dbgs() << "\nFunction layout with thunks:\n";
              for (const auto *BF : OutputFunctions) { dbgs() << *BF << '\n'; });
+
+  BC.updateOutputBinaryFunctions(std::move(OutputFunctions));
 }
 
 Error LongJmpPass::runOnFunctions(BinaryContext &BC) {
@@ -1191,7 +1251,7 @@ Error LongJmpPass::runOnFunctions(BinaryContext &BC) {
     BC.outs()
         << "BOLT-INFO: relaxing branches for compact code model (<128MB)\n";
 
-  // TODO: set correct code model based on the total size of split-code.
+    // TODO: set correct code model based on the total size of split-code.
     ParallelUtilities::WorkFuncTy WorkFun = [&](BinaryFunction &BF) {
       relaxLocalBranches(BF);
     };
@@ -1215,7 +1275,7 @@ Error LongJmpPass::runOnFunctions(BinaryContext &BC) {
   }
 
   BC.outs() << "BOLT-INFO: Starting stub-insertion pass\n";
-  std::vector<BinaryFunction *> Sorted = BC.getOutputFunctions();
+  BinaryFunctionListType Sorted = BC.getOutputBinaryFunctions();
   bool Modified;
   uint32_t Iterations = 0;
   do {

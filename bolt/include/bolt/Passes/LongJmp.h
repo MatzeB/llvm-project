@@ -76,6 +76,10 @@ class LongJmpPass : public BinaryFunctionPass {
   /// 128MB of each other.
   void relaxLocalBranches(BinaryFunction &BF);
 
+  /// A group of functions that are located within the longest direct
+  /// branch/call instruction distance. Functions withing the cluster do not
+  /// require a thunk for calls with the same cluster. The cluster may include
+  /// a set of thunks for covering calls to functions outside.
   struct FunctionCluster {
     /// All functions in this cluster.
     DenseSet<BinaryFunction *> Functions;
@@ -89,11 +93,14 @@ class LongJmpPass : public BinaryFunctionPass {
 
     /// The index of the last function in the cluster. Used as an insertion
     /// point for adding thunks to the output function list.
-    size_t FirstFunctionIndex = -1;
     size_t LastFunctionIndex = -1;
 
+    /// When placing hot code at the end of the binary, track the first function
+    /// for insertion purposes.
+    size_t FirstFunctionIndex = -1;
+
     /// Thunks located at the end of this cluster.
-    std::vector<BinaryFunction *> ThunkList;
+    BinaryFunctionListType ThunkList;
 
     /// Thunks used by this cluster. Some could be in a ThunkList of the
     /// preceding cluster.
@@ -102,13 +109,12 @@ class LongJmpPass : public BinaryFunctionPass {
     DenseMap<const MCSymbol *, BinaryFunction *> Thunks;
   };
 
-  /// Maximum size of the function cluster. Note that it's less than 128MB
-  /// as the size of the cluster plus thunk island should be less than 128MB.
+  /// Maximum size of combined regular functions in the cluster. Note that it's
+  /// less than 128MB, because the size of the cluster plus its thunks should be
+  /// less than 128MB.
   static constexpr uint64_t MaxClusterSize = 125 * 1024 * 1024;
 
-  /// Relax calls for medium code model where code is < 256MB.
-  /// A thunk island will be introduced between two clusters of functions to
-  /// enable calls over 128MB.
+  /// Relax calls using function cluster approach.
   void relaxCalls(BinaryContext &BC);
 
   ///                 -- Layout estimation methods --
@@ -117,15 +123,13 @@ class LongJmpPass : public BinaryFunctionPass {
   /// purposes, we need to do a size worst-case estimation. Real layout is done
   /// by RewriteInstance::mapFileSections()
   void tentativeLayout(const BinaryContext &BC,
-                       std::vector<BinaryFunction *> &SortedFunctions);
-  uint64_t
-  tentativeLayoutRelocMode(const BinaryContext &BC,
-                           std::vector<BinaryFunction *> &SortedFunctions,
-                           uint64_t DotAddress);
-  uint64_t
-  tentativeLayoutRelocColdPart(const BinaryContext &BC,
-                               std::vector<BinaryFunction *> &SortedFunctions,
-                               uint64_t DotAddress);
+                       BinaryFunctionListType &SortedFunctions);
+  uint64_t tentativeLayoutRelocMode(const BinaryContext &BC,
+                                    BinaryFunctionListType &SortedFunctions,
+                                    uint64_t DotAddress);
+  uint64_t tentativeLayoutRelocColdPart(const BinaryContext &BC,
+                                        BinaryFunctionListType &SortedFunctions,
+                                        uint64_t DotAddress);
   void tentativeBBLayout(const BinaryFunction &Func);
 
   /// Update stubs addresses with their exact address after a round of stub

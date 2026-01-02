@@ -826,7 +826,7 @@ void BinaryContext::populateJumpTables() {
 }
 
 void BinaryContext::skipMarkedFragments() {
-  std::vector<BinaryFunction *> FragmentQueue;
+  BinaryFunctionListType FragmentQueue;
   // Copy the functions to FragmentQueue.
   FragmentQueue.assign(FragmentsToSkip.begin(), FragmentsToSkip.end());
   auto addToWorklist = [&](BinaryFunction *Function) -> void {
@@ -1715,50 +1715,8 @@ unsigned BinaryContext::addDebugFilenameToUnit(const uint32_t DestCUID,
                                DestCUID, DstUnit->getVersion()));
 }
 
-const std::vector<BinaryFunction *> &BinaryContext::getOutputFunctions() {
-  assert((!HasRelocations || HasFinalizedFunctionOrder) &&
-         "Output function order not finalized");
-
-  if (!OutputFunctions.empty())
-    return OutputFunctions;
-
-  OutputFunctions.reserve(BinaryFunctions.size() +
-                          InjectedBinaryFunctions.size());
-  llvm::transform(llvm::make_second_range(BinaryFunctions),
-                  std::back_inserter(OutputFunctions),
-                  [](BinaryFunction &BF) { return &BF; });
-
-  llvm::erase_if(OutputFunctions,
-                 [this](BinaryFunction *BF) { return !shouldEmit(*BF); });
-
-  llvm::stable_sort(OutputFunctions,
-                    [](const BinaryFunction *A, const BinaryFunction *B) {
-                      // Place hot text movers at the start.
-                      if (A->isHotTextMover() && !B->isHotTextMover())
-                        return true;
-                      if (!A->isHotTextMover() && B->isHotTextMover())
-                        return false;
-                      if (A->hasValidIndex() && B->hasValidIndex()) {
-                        return A->getIndex() < B->getIndex();
-                      }
-                      if (opts::HotFunctionsAtEnd)
-                        return B->hasValidIndex();
-                      else
-                        return A->hasValidIndex();
-                    });
-
-  llvm::copy(InjectedBinaryFunctions, std::back_inserter(OutputFunctions));
-
-  return OutputFunctions;
-}
-
-void BinaryContext::updateOutputFunctions(
-    std::vector<BinaryFunction *> &Functions) {
-  OutputFunctions.swap(Functions);
-}
-
-std::vector<BinaryFunction *> BinaryContext::getAllBinaryFunctions() {
-  std::vector<BinaryFunction *> AllFunctions;
+BinaryFunctionListType BinaryContext::getAllBinaryFunctions() {
+  BinaryFunctionListType AllFunctions;
   AllFunctions.reserve(BinaryFunctions.size() + InjectedBinaryFunctions.size());
   llvm::transform(llvm::make_second_range(BinaryFunctions),
                   std::back_inserter(AllFunctions),
@@ -1953,7 +1911,7 @@ void BinaryContext::preprocessDebugInfo() {
               dwarf::toString(CU->getUnitDIE().find(dwarf::DW_AT_dwo_name),
                               "<missing DW_AT_dwo_name>");
           this->errs() << "BOLT-ERROR: unable to load " << DWOName
-                       << " for DWO_id " << Twine::utohexstr(*DWOID) << '\n';
+                       << " for DWO_id 0x" << Twine::utohexstr(*DWOID) << '\n';
           NumMissingDWOs++;
           continue;
         }

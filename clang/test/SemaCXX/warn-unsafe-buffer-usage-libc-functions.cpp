@@ -1,10 +1,10 @@
-// RUN: %clang_cc1 -std=c++20 -Wno-all -Wunsafe-buffer-usage \
+// RUN: %clang_cc1 -std=c++20 -Wno-all -Wunsafe-buffer-usage -Wno-gcc-compat\
 // RUN:            -verify %s
-// RUN: %clang_cc1 -std=c++20 -Wno-all -Wunsafe-buffer-usage \
+// RUN: %clang_cc1 -std=c++20 -Wno-all -Wunsafe-buffer-usage -Wno-gcc-compat\
 // RUN:            -verify %s -x objective-c++
-// RUN: %clang_cc1 -std=c++20 -Wno-all -Wunsafe-buffer-usage-in-libc-call \
+// RUN: %clang_cc1 -std=c++20 -Wno-all -Wunsafe-buffer-usage-in-libc-call -Wno-gcc-compat\
 // RUN:            -verify %s
-// RUN: %clang_cc1 -std=c++20 -Wno-all -Wunsafe-buffer-usage-in-libc-call \
+// RUN: %clang_cc1 -std=c++20 -Wno-all -Wunsafe-buffer-usage-in-libc-call -Wno-gcc-compat\
 // RUN:            -verify %s -DTEST_STD_NS
 
 typedef struct {} FILE;
@@ -156,6 +156,8 @@ void safe_examples(std::string s1, int *p) {
   snprintf(a, 10, "%s%d%s%p%s", __PRETTY_FUNCTION__, *p, "hello", s1.c_str());                // no warn
   snprintf(&c, 1, "%s%d%s%p%s", __PRETTY_FUNCTION__, *p, "hello", s1.c_str());                // no warn
   snprintf(nullptr, 0, "%s%d%s%p%s", __PRETTY_FUNCTION__, *p, "hello", s1.c_str());           // no warn
+
+  strlen(s1.c_str());
 }
 
 void test_sarg_precision(std::string Str, std::string_view Sv, std::wstring_view WSv,
@@ -247,4 +249,40 @@ void test(StrBuff& str)
   LibC.strcpy();
   LibC.strcpy(buff);
   LibC.memcpy(buff, buff, 64);
+}
+
+void dontCrashForInvalidFormatString() {
+  snprintf((char*)0, 0, "%");
+  snprintf((char*)0, 0, "\0");
+}
+
+
+// Also warn about unsafe printf/scanf-like functions:
+void myprintf(const char *, ...) __attribute__((__format__ (__printf__, 1, 2)));
+void myprintf_2(const char *, int, const char *) __attribute__((__format__ (__printf__, 1, 3)));
+void myprintf_3(const char *, const char *, int, const char *) __attribute__((__format__ (__printf__, 2, 4)));
+void myscanf(const char *, ...) __attribute__((__format__ (__scanf__, 1, 2)));
+
+void test_myprintf(char * Str, std::string StdStr) {
+  myprintf("hello", Str);
+  myprintf("hello %s", StdStr.c_str());
+  myprintf("hello %s", Str);  // expected-warning{{function 'myprintf' is unsafe}} \
+			         expected-note{{string argument is not guaranteed to be null-terminated}}
+
+  myprintf_2("hello", 0, Str);
+  myprintf_2("hello %s", 0, StdStr.c_str());
+  myprintf_2("hello %s", 0, Str);  // expected-warning{{function 'myprintf_2' is unsafe}} \
+			              expected-note{{string argument is not guaranteed to be null-terminated}}
+
+  myprintf_3("irrelevant", "hello", 0, Str);
+  myprintf_3("irrelevant", "hello %s", 0, StdStr.c_str());
+  myprintf_3("irrelevant", "hello %s", 0, Str);  // expected-warning{{function 'myprintf_3' is unsafe}} \
+			               expected-note{{string argument is not guaranteed to be null-terminated}}
+  
+  myscanf("hello %s");
+  myscanf("hello %s", Str); // expected-warning{{function 'myscanf' is unsafe}}
+
+  int X;
+
+  myscanf("hello %d", &X); // expected-warning{{function 'myscanf' is unsafe}}
 }
