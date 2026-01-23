@@ -486,9 +486,9 @@ private:
 
   static StringRef getExternalSymbol() { return "** External Symbol **"; }
 
-  // Returns the canonial name of the given PGOName. In a canonical name, all
-  // suffixes that begins with "." except ".__uniq." are stripped.
-  // FIXME: Unify this with `FunctionSamples::getCanonicalFnName`.
+  // Returns the canonical name of the given PGOName. This shares the same
+  // logic of FunctionSamples::getCanonicalFnName() but only strips ".llvm."
+  // and ".part", and leaves out ".__uniq.".
   static StringRef getCanonicalName(StringRef PGOName);
 
   // Add the function into the symbol table, by creating the following
@@ -691,7 +691,7 @@ void InstrProfSymtab::finalizeSymtab() {
   if (Sorted)
     return;
   llvm::sort(MD5NameMap, less_first());
-  llvm::sort(MD5FuncMap, less_first());
+  llvm::stable_sort(MD5FuncMap, less_first());
   llvm::sort(AddrToMD5Map, less_first());
   AddrToMD5Map.erase(llvm::unique(AddrToMD5Map), AddrToMD5Map.end());
   Sorted = true;
