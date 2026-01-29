@@ -1919,7 +1919,7 @@ bool VectorCombine::scalarizeLoadExtract(LoadInst *LI, VectorType *VecTy,
     return false;
 
   DenseMap<ExtractElementInst *, ScalarizationResult> NeedFreeze;
-  auto FailureGuard = make_scope_exit([&]() {
+  llvm::scope_exit FailureGuard([&]() {
     // If the transform is aborted, discard the ScalarizationResults.
     for (auto &Pair : NeedFreeze)
       Pair.second.discard();
@@ -3204,7 +3204,7 @@ bool VectorCombine::foldShuffleOfIntrinsics(Instruction &I) {
 bool VectorCombine::foldPermuteOfIntrinsic(Instruction &I) {
   Value *V0;
   ArrayRef<int> Mask;
-  if (!match(&I, m_Shuffle(m_OneUse(m_Value(V0)), m_Undef(), m_Mask(Mask))))
+  if (!match(&I, m_Shuffle(m_Value(V0), m_Undef(), m_Mask(Mask))))
     return false;
 
   auto *II0 = dyn_cast<IntrinsicInst>(V0);
@@ -3226,8 +3226,10 @@ bool VectorCombine::foldPermuteOfIntrinsic(Instruction &I) {
     return false;
 
   // Cost analysis
+  InstructionCost IntrinsicCost =
+      TTI.getIntrinsicInstrCost(IntrinsicCostAttributes(IID, *II0), CostKind);
   InstructionCost OldCost =
-      TTI.getIntrinsicInstrCost(IntrinsicCostAttributes(IID, *II0), CostKind) +
+      IntrinsicCost +
       TTI.getShuffleCost(TargetTransformInfo::SK_PermuteSingleSrc, ShuffleDstTy,
                          IntrinsicSrcTy, Mask, CostKind, 0, nullptr, {V0}, &I);
 
@@ -3248,6 +3250,11 @@ bool VectorCombine::foldPermuteOfIntrinsic(Instruction &I) {
   }
   IntrinsicCostAttributes NewAttr(IID, ShuffleDstTy, NewArgsTy);
   NewCost += TTI.getIntrinsicInstrCost(NewAttr, CostKind);
+
+  // If the intrinsic has multiple uses, we need to account for the cost of
+  // keeping the original intrinsic around.
+  if (!II0->hasOneUse())
+    NewCost += IntrinsicCost;
 
   LLVM_DEBUG(dbgs() << "Found a permute of intrinsic: " << I << "\n  OldCost: "
                     << OldCost << " vs NewCost: " << NewCost << "\n");
