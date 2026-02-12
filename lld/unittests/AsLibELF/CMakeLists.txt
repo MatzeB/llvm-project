@@ -3,6 +3,9 @@
 # target application executable.
 
 add_lld_unittests(LLDAsLibELFTests
+  # facebook begin T96340746
+  RelocationDiagramTest.cpp
+  # facebook end T96340746
   ROCm.cpp
   SomeDrivers.cpp
 )

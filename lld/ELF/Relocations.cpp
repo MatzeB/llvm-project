@@ -45,6 +45,7 @@
 #include "InputFiles.h"
 #include "LinkerScript.h"
 #include "OutputSections.h"
+#include "RelocationDiagram.h" // facebook T96340746
 #include "SymbolTable.h"
 #include "Symbols.h"
 #include "SyntheticSections.h"
@@ -57,7 +58,7 @@
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/FormattedStream.h" // facebook T96340746
-#include "llvm/Support/ScopedPrinter.h" // facebook T96340746
+#include "llvm/Support/ScopedPrinter.h"   // facebook T96340746
 #include <algorithm>
 #include <mutex>
 
@@ -236,6 +237,42 @@ std::string addExtraHint(uint8_t *loc, const Relocation &rel) {
                          dyn_cast_or_null<Defined>(rel.sym)->section
                      ? dyn_cast_or_null<Defined>(rel.sym)->section
                      : nullptr);
+
+  // Generate memory layout diagram if we have both source and target sections
+  if (const InputSection *isec =
+          dyn_cast_or_null<InputSection>(errPlace.isec)) {
+    if (const OutputSection *srcOutSec = isec->getOutputSection()) {
+      uint64_t srcAddr = rel.offset + isec->outSecOff + srcOutSec->addr;
+
+      // Get target section info
+      StringRef targetSectionName = "";
+      uint64_t targetAddr = 0;
+      if (auto *d = dyn_cast_or_null<Defined>(rel.sym)) {
+        if (d->section) {
+          if (const OutputSection *targetOutSec =
+                  d->section->getOutputSection()) {
+            targetSectionName = targetOutSec->name;
+            targetAddr = rel.sym->getVA(ctx, 0);
+          }
+        }
+      } else if (rel.sym) {
+        targetAddr = rel.sym->getVA(ctx, 0);
+        if (rel.sym->getOutputSection())
+          targetSectionName = rel.sym->getOutputSection()->name;
+      }
+
+      if (!targetSectionName.empty() || targetAddr != 0) {
+        RelocationDiagram diagram;
+        for (const OutputSection *sec : ctx.outputSections) {
+          diagram.addSection(sec->name, sec->addr, sec->size);
+        }
+        raw_string_ostream diagramOS(hint);
+        diagram.generate(diagramOS, srcAddr, targetAddr, srcOutSec->name,
+                         targetSectionName, rel.addend);
+      }
+    }
+  }
+
   hint += "Error: Relocation overflow has occured\n";
   return hint;
 }

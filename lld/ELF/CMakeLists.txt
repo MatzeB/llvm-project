@@ -50,6 +50,9 @@ add_lld_library(lldELF
   MapFile.cpp
   MarkLive.cpp
   OutputSections.cpp
+  # facebook begin T96340746
+  RelocationDiagram.cpp
+  # facebook end T96340746
   Relocations.cpp
   ScriptLexer.cpp
   ScriptParser.cpp
