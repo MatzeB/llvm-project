@@ -165,18 +165,14 @@ template <class T> std::string numDecHex(T n) {
 std::string addExtraHint(uint8_t *loc, const Relocation &rel) {
   std::string hint;
   ErrorPlace errPlace = getErrorPlace(loc);
-  auto addSectionHint = [&](SectionBase *sec) {
-    auto isec = dyn_cast_or_null<InputSection>(sec);
-    if (!isec)
-      return;
-    const OutputSection *out = isec->getOutputSection();
-    if (!out)
-      return;
 
+  // Helper to get section index and count within output section
+  auto getSectionIndex =
+      [](const InputSection *isec,
+         const OutputSection *out) -> std::pair<size_t, size_t> {
     size_t idx = 0;
     size_t count = 0;
     bool found = false;
-
     for (SectionCommand *bc : out->commands) {
       auto *isd = dyn_cast<InputSectionDescription>(bc);
       if (!isd || isd->sections.empty())
@@ -189,60 +185,168 @@ std::string addExtraHint(uint8_t *loc, const Relocation &rel) {
         count++;
       }
     }
-
-    hint += "\n- output section: " + out->name.str() +
-            "\n  - addr: " + numDecHex(out->addr) +
-            "\n  - offset in ELF file: " + numDecHex(out->offset) +
-            "\n  - size: " + numDecHex(out->size);
-
-    hint += "\n- input section:  " + isec->name.str() +
-            "\n  - input section's offset from start of output section: " +
-            numDecHex(isec->outSecOff) +
-            "\n  - size: " + numDecHex(isec->getSize()) +
-            "\n  - idx in output section: " + Twine(idx).str() +
-            " out of: " + Twine(count).str() + " sections";
+    return {idx, count};
   };
 
-  hint += "\n\n- rel type: " + lld::toString(rel.type) +
-          "\n  - expr: " + Twine(rel.expr).str() +
-          "\n  - offset: " + numDecHex(rel.offset) +
-          "\n  - addend: " + numDecHex(rel.addend);
-  if (rel.sym) {
-    hint +=
-        "\n -- sym: " + lld::toString(*rel.sym) +
-        "\n  - sym.kind: " + Twine(rel.sym->kind()).str() +
-        "\n  - sym.getVA(0): " + numDecHex(rel.sym->getVA(0)) +
-        "\n  - sym.getVA(rel.addend): " + numDecHex(rel.sym->getVA(rel.addend));
-  }
-  if (const InputSection *isec =
+  // Helper to get object file name from input section
+  auto getObjectFileName = [](const InputSection *isec) -> std::string {
+    if (!isec || !isec->file)
+      return "<unknown>";
+    return isec->file->getName().str();
+  };
+
+  // Helper to format size with both raw and human-readable
+  auto formatSizeWithRaw = [](uint64_t size) -> std::string {
+    return numDecHex(size) + " (" + RelocationDiagram::formatSize(size) + ")";
+  };
+
+  // Helper to demangle section name suffix if it contains a mangled symbol
+  // e.g., ".gcc_except_table._ZN6caffe2..." -> "caffe2::..."
+  // Returns the demangled name or empty string if no demangling occurred
+  auto demangleSectionSuffix = [](StringRef name) -> std::string {
+    // Look for mangled C++ (_Z) or Rust (_R) symbol patterns
+    size_t pos = name.find("._Z");
+    if (pos == StringRef::npos)
+      pos = name.find("._R");
+    if (pos == StringRef::npos)
+      return "";
+
+    StringRef mangled = name.substr(pos + 1);
+
+    if (config->demangle) {
+      std::string demangled = demangle(mangled.str());
+      if (demangled != mangled)
+        return demangled;
+    }
+    return "";
+  };
+
+  // Helper to format section name with optional demangled suffix
+  auto formatSectionName =
+      [&demangleSectionSuffix](StringRef name) -> std::string {
+    std::string demangled = demangleSectionSuffix(name);
+    if (demangled.empty())
+      return name.str();
+    return name.str() + "\n\t\t                          (" + demangled + ")";
+  };
+
+  // Helper to format symbol name, showing placeholder for empty/unnamed symbols
+  auto formatSymbolName = [](const Symbol *sym) -> std::string {
+    if (!sym)
+      return "<null>";
+    std::string name = lld::toString(*sym);
+    if (name.empty()) {
+      // Determine what kind of unnamed symbol this is
+      if (auto *d = dyn_cast<Defined>(sym)) {
+        if (d->section)
+          return "<section symbol: " + d->section->name.str() + ">";
+        return "<local symbol>";
+      }
+      return "<unnamed>";
+    }
+    return name;
+  };
+
+  hint += "\n\n";
+  hint += "===================================================================="
+          "============\n";
+  hint += "                         RELOCATION OVERFLOW DETAILS\n";
+  hint += "===================================================================="
+          "============\n\n";
+
+  // Relocation info
+  hint += "RELOCATION:\n";
+  hint += "\ttype:   " + lld::toString(rel.type) + "\n";
+  hint += "\texpr:   " + Twine(rel.expr).str() + "\n";
+  hint += "\toffset: " + numDecHex(rel.offset) + "\n";
+  hint += "\taddend: " + numDecHex(rel.addend) + "\n";
+
+  // Source section (where the relocation is applied)
+  if (const InputSection *srcIsec =
           dyn_cast_or_null<InputSection>(errPlace.isec)) {
-    auto addrLoc =
-        rel.offset + isec->outSecOff + isec->getOutputSection()->addr;
-    hint += "\n -- addrLoc={rel.offset " + numDecHex(rel.offset) +
-            " + isec->outSecOff " + numDecHex(isec->outSecOff) +
-            " + isec->getOutputSection()->addr " +
-            numDecHex(isec->getOutputSection()->addr) +
-            "}: " + numDecHex(addrLoc);
-    if (rel.expr == R_PC && rel.sym && !rel.sym->isUndefWeak()) {
-      hint += "\n -- getRelocTargetVA={rel.sym->getVA(rel.addend) " +
-              numDecHex(rel.sym->getVA(rel.addend)) + " - addrLoc " +
-              numDecHex(addrLoc) +
-              "}: " + numDecHex(rel.sym->getVA(rel.addend) - addrLoc) +
-              " // addrLoc is PC";
+    const OutputSection *srcOut = srcIsec->getOutputSection();
+    if (srcOut) {
+      auto [srcIdx, srcCount] = getSectionIndex(srcIsec, srcOut);
+      uint64_t srcAddr = rel.offset + srcIsec->outSecOff + srcOut->addr;
+
+      hint += "\n";
+      hint += "SOURCE:\n";
+      hint += "\tobject file:    " + getObjectFileName(srcIsec) + "\n";
+      hint += "\tinput section:  " + formatSectionName(srcIsec->name) + "\n";
+      hint += "\t\toffset in output section: " + numDecHex(srcIsec->outSecOff) +
+              "\n";
+      hint += "\t\tsize:                     " +
+              formatSizeWithRaw(srcIsec->getSize()) + "\n";
+      hint += "\t\tindex in output section:  " + Twine(srcIdx).str() + " of " +
+              Twine(srcCount).str() + "\n";
+      hint += "\toutput section: " + srcOut->name.str() + "\n";
+      hint += "\t\taddress:         " + numDecHex(srcOut->addr) + "\n";
+      hint += "\t\toffset in file:  " + numDecHex(srcOut->offset) + "\n";
+      hint += "\t\tsize:            " + formatSizeWithRaw(srcOut->size) + "\n";
+      hint += "\taddress (PC): " + numDecHex(srcAddr) + "\n";
     }
   }
 
-  addSectionHint(errPlace.isec);
-  addSectionHint(dyn_cast_or_null<Defined>(rel.sym) &&
-                         dyn_cast_or_null<Defined>(rel.sym)->section
-                     ? dyn_cast_or_null<Defined>(rel.sym)->section
-                     : nullptr);
+  // Target section (what the relocation references)
+  if (rel.sym) {
+    hint += "\n";
+    hint += "TARGET:\n";
+    hint += "\tsymbol:      " + formatSymbolName(rel.sym) + "\n";
+    hint += "\tsymbol kind: " + Twine(rel.sym->kind()).str() + "\n";
+    hint += "\tsymbol VA:   " + numDecHex(rel.sym->getVA(0)) + "\n";
+    if (rel.addend != 0)
+      hint += "\tsymbol VA + addend: " +
+              numDecHex(rel.sym->getVA(rel.addend)) + "\n";
+
+    if (auto *d = dyn_cast<Defined>(rel.sym)) {
+      if (auto *targetIsec = dyn_cast_or_null<InputSection>(d->section)) {
+        const OutputSection *targetOut = targetIsec->getOutputSection();
+        if (targetOut) {
+          auto [targetIdx, targetCount] =
+              getSectionIndex(targetIsec, targetOut);
+          hint += "\tobject file:    " + getObjectFileName(targetIsec) + "\n";
+          hint +=
+              "\tinput section:  " + formatSectionName(targetIsec->name) + "\n";
+          hint += "\t\toffset in output section: " +
+                  numDecHex(targetIsec->outSecOff) + "\n";
+          hint += "\t\tsize:                     " +
+                  formatSizeWithRaw(targetIsec->getSize()) + "\n";
+          hint += "\t\tindex in output section:  " + Twine(targetIdx).str() +
+                  " of " + Twine(targetCount).str() + "\n";
+          hint += "\toutput section: " + targetOut->name.str() + "\n";
+          hint += "\t\taddress:         " + numDecHex(targetOut->addr) + "\n";
+          hint += "\t\toffset in file:  " + numDecHex(targetOut->offset) + "\n";
+          hint += "\t\tsize:            " + formatSizeWithRaw(targetOut->size) +
+                  "\n";
+        }
+      }
+    }
+  }
+
+  // Displacement calculation
+  if (const InputSection *srcIsec =
+          dyn_cast_or_null<InputSection>(errPlace.isec)) {
+    if (const OutputSection *srcOut = srcIsec->getOutputSection()) {
+      uint64_t srcAddr = rel.offset + srcIsec->outSecOff + srcOut->addr;
+      if (rel.expr == R_PC && rel.sym && !rel.sym->isUndefWeak()) {
+        int64_t displacement = rel.sym->getVA(rel.addend) - srcAddr;
+        hint += "\n";
+        hint += "DISPLACEMENT CALCULATION (PC-relative):\n";
+        hint += "\ttarget VA + addend: " +
+                numDecHex(rel.sym->getVA(rel.addend)) + "\n";
+        hint += "\tsource PC:          " + numDecHex(srcAddr) + "\n";
+        hint += "\tdisplacement:       " + numDecHex(displacement) + " (" +
+                RelocationDiagram::formatSize(std::abs(displacement)) + ")\n";
+        hint += "\tmax range:          +/- 2147483647 (2.00 GB)\n";
+      }
+    }
+  }
 
   // Generate memory layout diagram if we have both source and target sections
-  if (const InputSection *isec =
+  if (const InputSection *srcIsec =
           dyn_cast_or_null<InputSection>(errPlace.isec)) {
-    if (const OutputSection *srcOutSec = isec->getOutputSection()) {
-      uint64_t srcAddr = rel.offset + isec->outSecOff + srcOutSec->addr;
+    if (const OutputSection *srcOutSec = srcIsec->getOutputSection()) {
+      uint64_t srcAddr = rel.offset + srcIsec->outSecOff + srcOutSec->addr;
 
       // Get target section info
       StringRef targetSectionName = "";
@@ -252,18 +356,18 @@ std::string addExtraHint(uint8_t *loc, const Relocation &rel) {
           if (const OutputSection *targetOutSec =
                   d->section->getOutputSection()) {
             targetSectionName = targetOutSec->name;
-            targetAddr = rel.sym->getVA(ctx, 0);
+            targetAddr = rel.sym->getVA(0);
           }
         }
       } else if (rel.sym) {
-        targetAddr = rel.sym->getVA(ctx, 0);
+        targetAddr = rel.sym->getVA(0);
         if (rel.sym->getOutputSection())
           targetSectionName = rel.sym->getOutputSection()->name;
       }
 
       if (!targetSectionName.empty() || targetAddr != 0) {
         RelocationDiagram diagram;
-        for (const OutputSection *sec : ctx.outputSections) {
+        for (const OutputSection *sec : outputSections) {
           diagram.addSection(sec->name, sec->addr, sec->size);
         }
         raw_string_ostream diagramOS(hint);
@@ -273,7 +377,8 @@ std::string addExtraHint(uint8_t *loc, const Relocation &rel) {
     }
   }
 
-  hint += "Error: Relocation overflow has occured\n";
+  hint += "\n=================================================================="
+          "==============\n";
   return hint;
 }
 // facebook end T96340746
