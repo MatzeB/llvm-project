@@ -484,6 +484,13 @@ Error RewriteInstance::setProfile(StringRef Filename) {
 
 /// Return true if the function \p BF should be disassembled.
 static bool shouldDisassemble(const BinaryFunction &BF) {
+
+  const BinaryContext &BC = BF.getBinaryContext();
+  // Disassemble PLT functions for BTI binaries to check if they need landing
+  // pads when targeting them in LongJmp.
+  if (BC.usesBTI() && BF.isPLTFunction())
+    return true;
+
   if (BF.isPseudo())
     return false;
 
@@ -2412,6 +2419,20 @@ void RewriteInstance::adjustCommandLineOptions() {
     if (!opts::TerminalTrap.getNumOccurrences())
       opts::TerminalTrap = false;
   }
+
+  if (opts::CloneAtOrigin) {
+    if (opts::ForcePatch) {
+      BC->errs() << "BOLT-ERROR: --clone-at-origin is incompatible with "
+                    "--force-patch\n";
+      exit(1);
+    }
+
+    if (opts::UseOldText) {
+      BC->errs() << "BOLT-ERROR: --clone-at-origin is incompatible with "
+                    "--use-old-text\n";
+      exit(1);
+    }
+  }
 }
 
 namespace {
@@ -3136,10 +3157,11 @@ void RewriteInstance::handleRelocation(const SectionRef &RelocatedSection,
         ReferencedSymbol = nullptr;
         ExtractedValue = Address;
       } else if (RefFunctionOffset) {
-        if (ContainingBF && ContainingBF != ReferencedBF &&
-            !ReferencedBF->isInConstantIsland(Address)) {
+        if (ContainingBF && ContainingBF != ReferencedBF) {
           ReferencedSymbol =
-              ReferencedBF->addEntryPointAtOffset(RefFunctionOffset);
+              ReferencedBF->isInConstantIsland(Address)
+                  ? ReferencedBF->getOrCreateIslandAccess(Address)
+                  : ReferencedBF->addEntryPointAtOffset(RefFunctionOffset);
         } else {
           ReferencedSymbol = ReferencedBF->getOrCreateLocalLabel(Address);
 
@@ -5153,6 +5175,23 @@ void RewriteInstance::updateELFSymbolTable(
     return SymbolName;
   };
 
+  // Add a clone symbol at the original address for functions with clone at
+  // origin.
+  auto addCloneSymbol = [&](const ELFSymTy &BaseSym, uint64_t OrigAddr,
+                            uint64_t Size, const BinaryFunction &BF) {
+    ELFSymTy CloneSym = BaseSym;
+    SmallVector<char, 256> Buf;
+    CloneSym.st_name =
+        AddToStrTab(Twine(cantFail(BaseSym.getName(StringSection)))
+                        .concat(".clone.0")
+                        .toStringRef(Buf));
+    CloneSym.st_value = OrigAddr;
+    CloneSym.st_size = Size;
+    CloneSym.st_shndx =
+        getNewSectionIndex(BF.getOriginSection()->getSectionRef().getIndex());
+    Symbols.emplace_back(CloneSym);
+  };
+
   // Add extra symbols for the function.
   //
   // Note that addExtraSymbols() could be called multiple times for the same
@@ -5161,9 +5200,7 @@ void RewriteInstance::updateELFSymbolTable(
   auto addExtraSymbols = [&](const BinaryFunction &Function,
                              const ELFSymTy &FunctionSymbol) {
     if (Function.isFolded()) {
-      BinaryFunction *ICFParent = Function.getFoldedIntoFunction();
-      while (ICFParent->isFolded())
-        ICFParent = ICFParent->getFoldedIntoFunction();
+      const BinaryFunction *ICFParent = Function.getFoldedIntoFunction();
       ELFSymTy ICFSymbol = FunctionSymbol;
       SmallVector<char, 256> Buf;
       ICFSymbol.st_name =
@@ -5238,6 +5275,10 @@ void RewriteInstance::updateELFSymbolTable(
       Symbols.emplace_back(DataMarkSym);
       Symbols.emplace_back(CodeMarkSym);
     }
+    // Add clone symbol for function with clone at origin.
+    if (Function.hasCloneAtOrigin())
+      addCloneSymbol(FunctionSymbol, Function.getAddress(), Function.getSize(),
+                     Function);
   };
 
   // For regular (non-dynamic) symbol table, exclude symbols referring
@@ -5275,6 +5316,12 @@ void RewriteInstance::updateELFSymbolTable(
 
     const BinaryFunction *Function =
         BC->getBinaryFunctionAtAddress(Symbol.st_value);
+    // In relocation mode, if this is a folded function, use the parent function
+    // instead so that the symbol gets updated to the parent's output address.
+    // In non-relocation mode, folded functions are emitted at their original
+    // location, so we keep the original function reference.
+    if (BC->HasRelocations && Function && Function->isFolded())
+      Function = Function->getFoldedIntoFunction();
     // Ignore false function references, e.g. when the section address matches
     // the address of the function.
     if (Function && Symbol.getType() == ELF::STT_SECTION)
@@ -5363,7 +5410,7 @@ void RewriteInstance::updateELFSymbolTable(
         // Force secondary entry points to have zero size.
         NewSymbol.st_size = 0;
 
-        // Find fragment containing entrypoint
+        // Find fragment containing entry point.
         FunctionLayout::fragment_const_iterator FF = llvm::find_if(
             Function->getLayout().fragments(), [&](const FunctionFragment &FF) {
               uint64_t Lo = FF.getAddress();
@@ -5382,6 +5429,11 @@ void RewriteInstance::updateELFSymbolTable(
 
         NewSymbol.st_shndx =
             Function->getCodeSection(FF->getFragmentNum())->getIndex();
+
+        // Add clone symbol for secondary entry point if function has clone at
+        // origin.
+        if (Function->hasCloneAtOrigin())
+          addCloneSymbol(NewSymbol, Symbol.st_value, 0, *Function);
       } else {
         // Check if the symbol belongs to moved data object and update it.
         BinaryData *BD = opts::ReorderData.empty()
@@ -6075,6 +6127,11 @@ uint64_t RewriteInstance::getNewFunctionAddress(uint64_t OldAddress) {
   if (!Function)
     return 0;
 
+  // If this function was folded, its output address is 0 since it wasn't
+  // emitted. Get the parent function's address.
+  if (Function->isFolded())
+    Function = Function->getFoldedIntoFunction();
+
   return Function->getOutputAddress();
 }
 
@@ -6108,18 +6165,7 @@ uint64_t RewriteInstance::getNewFunctionOrDataAddress(uint64_t OldAddress) {
   return 0;
 }
 
-void RewriteInstance::rewriteFile() {
-  std::error_code EC;
-  Out = std::make_unique<ToolOutputFile>(opts::OutputFilename, EC,
-                                         sys::fs::OF_None);
-  check_error(EC, "cannot create output executable file");
-
-  raw_fd_ostream &OS = Out->os();
-
-  // Copy allocatable part of the input.
-  OS << InputFile->getData().substr(0, FirstNonAllocatableOffset);
-
-  auto Streamer = BC->createStreamer(OS);
+void RewriteInstance::rewriteFunctionsInPlace(raw_fd_ostream &OS) {
   // Make sure output stream has enough reserved space, otherwise
   // pwrite() will fail.
   uint64_t Offset = std::max(getFileOffsetForAddress(NextAvailableAddress),
@@ -6127,9 +6173,6 @@ void RewriteInstance::rewriteFile() {
   Offset = OS.seek(Offset);
   assert((Offset != (uint64_t)-1) && "Error resizing output file");
 
-  // Overwrite functions with fixed output address. This is mostly used by
-  // non-relocation mode, with one exception: injected functions are covered
-  // here in both modes.
   uint64_t CountOverwrittenFunctions = 0;
   uint64_t OverwrittenScore = 0;
   for (BinaryFunction *Function : BC->getAllBinaryFunctions()) {
@@ -6205,6 +6248,20 @@ void RewriteInstance::rewriteFile() {
                     "this binary\n";
     }
   }
+}
+
+void RewriteInstance::rewriteFile() {
+  std::error_code EC;
+  Out = std::make_unique<ToolOutputFile>(opts::OutputFilename, EC,
+                                         sys::fs::OF_None);
+  check_error(EC, "cannot create output executable file");
+
+  raw_fd_ostream &OS = Out->os();
+
+  // Copy allocatable part of the input.
+  OS << InputFile->getData().substr(0, FirstNonAllocatableOffset);
+
+  rewriteFunctionsInPlace(OS);
 
   if (BC->HasRelocations && opts::TrapOldCode) {
     uint64_t SavedPos = OS.tell();

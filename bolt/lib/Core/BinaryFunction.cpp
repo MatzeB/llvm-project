@@ -104,7 +104,7 @@ JumpTables("jump-tables",
   cl::ZeroOrMore,
   cl::cat(BoltOptCategory));
 
-static cl::opt<bool> NoScan(
+cl::opt<bool> NoScan(
     "no-scan",
     cl::desc(
         "do not scan cold functions for external references (may result in "
@@ -147,6 +147,11 @@ static cl::opt<bool> TrapOnAVX512(
     cl::init(false), cl::ZeroOrMore, cl::Hidden, cl::cat(BoltCategory));
 
 bool shouldPrint(const BinaryFunction &Function) {
+  // PLT stubs are disassembled for BTI binaries, therefore they should be
+  // printed.
+  if (Function.getBinaryContext().usesBTI() && Function.isPLTFunction())
+    return true;
+
   if (Function.isIgnored())
     return false;
 
@@ -451,6 +456,8 @@ void BinaryFunction::print(raw_ostream &OS, std::string Annotation) {
     OS << "\n  Personality : " << getPersonalityFunction()->getName();
   if (IsFragment)
     OS << "\n  IsFragment  : true";
+  if (HasCloneAtOrigin)
+    OS << "\n  HasCloneAtOrigin : true";
   if (isFolded())
     OS << "\n  FoldedInto  : " << *getFoldedIntoFunction();
   for (BinaryFunction *ParentFragment : ParentFragments)
@@ -3251,6 +3258,30 @@ void BinaryFunction::clearDisasmState() {
   clearList(TakenBranches);
 }
 
+void BinaryFunction::resetState() {
+  clearDisasmState();
+
+  // Clear CFG state too.
+  if (hasCFG()) {
+    releaseCFG();
+
+    for (BinaryBasicBlock *BB : BasicBlocks)
+      delete BB;
+    clearList(BasicBlocks);
+
+    for (BinaryBasicBlock *BB : DeletedBasicBlocks)
+      delete BB;
+    clearList(DeletedBasicBlocks);
+
+    Layout.clear();
+  }
+
+  IsSimple = false;
+  IsIgnored = true;
+
+  CurrentState = State::Empty;
+}
+
 void BinaryFunction::setTrapOnEntry() {
   clearDisasmState();
 
@@ -3285,24 +3316,7 @@ void BinaryFunction::setIgnored() {
   if (CurrentState == State::Empty)
     return;
 
-  clearDisasmState();
-
-  // Clear CFG state too.
-  if (hasCFG()) {
-    releaseCFG();
-
-    for (BinaryBasicBlock *BB : BasicBlocks)
-      delete BB;
-    clearList(BasicBlocks);
-
-    for (BinaryBasicBlock *BB : DeletedBasicBlocks)
-      delete BB;
-    clearList(DeletedBasicBlocks);
-
-    Layout.clear();
-  }
-
-  CurrentState = State::Empty;
+  resetState();
 
   // Fix external references in the original function body.
   if (BC.HasRelocations) {

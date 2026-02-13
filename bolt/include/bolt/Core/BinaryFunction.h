@@ -400,11 +400,16 @@ private:
   FragmentsSetTy ParentFragments;
 
   /// Indicate if the function body was folded into another function.
-  /// Used by ICF optimization.
+  /// Used by ICF optimization. Always points to the root parent function
+  /// (i.e., a function that is not itself folded).
   BinaryFunction *FoldedIntoFunction{nullptr};
 
   /// All fragments for a parent function.
   FragmentsSetTy Fragments;
+
+  /// True if we created an alias clone at this function's original location
+  /// after relocating optimized version of the function.
+  bool HasCloneAtOrigin{false};
 
   /// The profile data for the number of times the function was executed.
   uint64_t ExecutionCount{COUNT_NO_PROFILE};
@@ -771,6 +776,9 @@ private:
   /// disassembled state was later invalidated.
   void clearDisasmState();
 
+  /// Reset the function state into Empty state, i.e. pre-disassembly form.
+  void resetState();
+
   /// Release memory allocated for CFG and instructions.
   /// We still keep basic blocks for address translation/mapping purposes.
   void releaseCFG() {
@@ -865,7 +873,7 @@ public:
   /// Return relocation associated with a given \p Offset in the function,
   /// or nullptr if no such relocation exists.
   const Relocation *getRelocationAt(uint64_t Offset) const {
-    assert(CurrentState == State::Empty &&
+    assert(!isEmitted() &&
            "Relocations unavailable in the current function state.");
     auto RI = Relocations.find(Offset);
     return (RI == Relocations.end()) ? nullptr : &RI->second;
@@ -876,7 +884,7 @@ public:
   /// exists.
   const Relocation *getRelocationInRange(uint64_t StartOffset,
                                          uint64_t EndOffset) const {
-    assert(CurrentState == State::Empty &&
+    assert(!isEmitted() &&
            "Relocations unavailable in the current function state.");
     auto RI = Relocations.lower_bound(StartOffset);
     if (RI != Relocations.end() && RI->first < EndOffset)
@@ -1945,6 +1953,12 @@ public:
 
   /// Return true if the function is a secondary fragment of another function.
   bool isFragment() const { return IsFragment; }
+
+  /// Return true if this function has a clone at its original location.
+  bool hasCloneAtOrigin() const { return HasCloneAtOrigin; }
+
+  /// Mark that a clone exists at the original location.
+  void setHasCloneAtOrigin() { HasCloneAtOrigin = true; }
 
   /// Returns if this function is a child of \p Other function.
   bool isChildOf(const BinaryFunction &Other) const {
