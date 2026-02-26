@@ -54,9 +54,16 @@
 // performance and fast-path inlining.
 #  define _LIBCPP_ABI_STRING_OPTIMIZED_EXTERNAL_INSTANTIATION
 // Enable clang::trivial_abi on std::unique_ptr.
-#  define _LIBCPP_ABI_ENABLE_UNIQUE_PTR_TRIVIAL_ABI
+// begin facebook T257397958
+// Disabled for ABI compatibility with tp2 prebuilts compiled against
+// libc++ 17, which had these commented out (T240784603). Enabling changes
+// calling conventions for smart pointers.
+// #  define _LIBCPP_ABI_ENABLE_UNIQUE_PTR_TRIVIAL_ABI
+// end facebook T257397958
 // Enable clang::trivial_abi on std::shared_ptr and std::weak_ptr
-#  define _LIBCPP_ABI_ENABLE_SHARED_PTR_TRIVIAL_ABI
+// begin facebook T257397958
+// #  define _LIBCPP_ABI_ENABLE_SHARED_PTR_TRIVIAL_ABI
+// end facebook T257397958
 // std::random_device holds some state when it uses an implementation that gets
 // entropy from a file (see _LIBCPP_USING_DEV_RANDOM). When switching from this
 // implementation to another one on a platform that has already shipped
@@ -97,7 +104,13 @@
 // std::char_traits<char_type>::eq_int_type() cannot distinguish between WEOF
 // and WCHAR_MAX. This ABI setting determines whether we should instead track whether the fill
 // value has been initialized using a separate boolean, which changes the ABI.
-#  define _LIBCPP_ABI_IOS_ALLOW_ARBITRARY_FILL_VALUE
+// begin facebook T257397958
+// Disabled for ABI compatibility with tp2 prebuilts compiled against
+// libc++ 17 (which lacks this feature). Enabling adds a bool member to
+// basic_ios::__fill_ via _FillHelper struct (5 bytes vs 4), causing
+// UBSAN invalid-bool-load when mixed with libc++ 17 code.
+// #  define _LIBCPP_ABI_IOS_ALLOW_ARBITRARY_FILL_VALUE
+// end facebook T257397958
 // Make a std::pair of trivially copyable types trivially copyable.
 // While this technically doesn't change the layout of pair itself, other types may decide to programatically change
 // their representation based on whether something is trivially copyable.
