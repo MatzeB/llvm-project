@@ -94,10 +94,17 @@
 // pointers, which prevents people from relying on a non-portable implementation
 // detail. This is especially useful because enabling bounded iterators hardening
 // requires code not to make these assumptions.
-#  define _LIBCPP_ABI_USE_WRAP_ITER_IN_STD_ARRAY
-#  define _LIBCPP_ABI_USE_WRAP_ITER_IN_STD_STRING_VIEW
+// begin facebook T257397958
+// Not in libc++ 17; wraps iterators in __wrap_iter,
+// breaking code that passes iterators to APIs expecting raw pointers.
+//#  define _LIBCPP_ABI_USE_WRAP_ITER_IN_STD_ARRAY
+//#  define _LIBCPP_ABI_USE_WRAP_ITER_IN_STD_STRING_VIEW
+// end facebook T257397958
 // Dont' add an inline namespace for `std::filesystem`
-#  define _LIBCPP_ABI_NO_FILESYSTEM_INLINE_NAMESPACE
+// begin facebook T257397958
+// Not in libc++ 17; changes filesystem namespace layout.
+//#  define _LIBCPP_ABI_NO_FILESYSTEM_INLINE_NAMESPACE
+// end facebook T257397958
 // std::basic_ios uses WEOF to indicate that the fill value is
 // uninitialized. However, on platforms where the size of char_type is
 // equal to or greater than the size of int_type and char_type is unsigned,
@@ -114,7 +121,10 @@
 // Make a std::pair of trivially copyable types trivially copyable.
 // While this technically doesn't change the layout of pair itself, other types may decide to programatically change
 // their representation based on whether something is trivially copyable.
-#  define _LIBCPP_ABI_TRIVIALLY_COPYABLE_PAIR
+// begin facebook T257397958
+// Not in libc++ 17.
+//#  define _LIBCPP_ABI_TRIVIALLY_COPYABLE_PAIR
+// end facebook T257397958
 #elif _LIBCPP_ABI_VERSION == 1
 #  if !(defined(_LIBCPP_OBJECT_FORMAT_COFF) || defined(_LIBCPP_OBJECT_FORMAT_XCOFF))
 // Enable compiling copies of now inline methods into the dylib to support
