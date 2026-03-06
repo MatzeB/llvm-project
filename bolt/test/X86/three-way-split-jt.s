@@ -17,7 +17,7 @@
 # CHECK-DAG: BOLT-WARNING: Ignoring main
 # CHECK: BOLT-WARNING: skipped 3 functions due to cold fragments
 
-# CHECK: PIC Jump table JUMP_TABLE for function main, main.warm, main.cold
+# CHECK: PIC jump table JUMP_TABLE for function main, main.warm, main.cold
 # CHECK-NEXT:   0x0000 : __ENTRY_main@0x[[#]]
 # CHECK-NEXT:   0x0004 : __ENTRY_main@0x[[#]]
 # CHECK-NEXT:   0x0008 : __ENTRY_main.cold@0x[[#]]

@@ -874,9 +874,10 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
       Streamer.emitLabel(JTLabel);
     }
   emitEntry:
-    if (JT.Type == JumpTable::JTT_NORMAL) {
+    JumpTable::JumpTableType Type = JT.Type;
+    if (Type == JumpTable::JTT_NORMAL) {
       Streamer.emitSymbolValue(Entry, JT.OutputEntrySize);
-    } else { // JTT_PIC
+    } else if (Type == JumpTable::JTT_X86_64_PIC) {
       const MCSymbolRefExpr *JTExpr =
           MCSymbolRefExpr::create(JTLabel, Streamer.getContext());
       const MCSymbolRefExpr *E =
@@ -884,6 +885,51 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
       const MCBinaryExpr *Value =
           MCBinaryExpr::createSub(E, JTExpr, Streamer.getContext());
       Streamer.emitValue(Value, JT.EntrySize);
+    } else {
+      assert(JT.AArch64BaseSymbol &&
+             "AArch64 jump table format requires a valid base symbol");
+      MCContext &Ctx = Streamer.getContext();
+      const MCExpr *EntryExpr = MCSymbolRefExpr::create(Entry, Ctx);
+      const MCExpr *BaseExpr =
+          MCSymbolRefExpr::create(JT.AArch64BaseSymbol, Ctx);
+      const MCExpr *Delta = MCBinaryExpr::createSub(EntryExpr, BaseExpr, Ctx);
+      switch (Type) {
+      case JumpTable::JTT_AARCH64_I8_X4: {
+        const MCExpr *Shifted = MCBinaryExpr::createAShr(
+            Delta, MCConstantExpr::create(2, Ctx), Ctx);
+        Streamer.emitValue(Shifted, 1);
+        break;
+      }
+      case JumpTable::JTT_AARCH64_U8_X4: {
+        const MCExpr *Shifted = MCBinaryExpr::createLShr(
+            Delta, MCConstantExpr::create(2, Ctx), Ctx);
+        Streamer.emitValue(Shifted, 1);
+        break;
+      }
+      case JumpTable::JTT_AARCH64_I16_X4: {
+        const MCExpr *Shifted = MCBinaryExpr::createAShr(
+            Delta, MCConstantExpr::create(2, Ctx), Ctx);
+        Streamer.emitValue(Shifted, 2);
+        break;
+      }
+      case JumpTable::JTT_AARCH64_U16_X4: {
+        const MCExpr *Shifted = MCBinaryExpr::createLShr(
+            Delta, MCConstantExpr::create(2, Ctx), Ctx);
+        Streamer.emitValue(Shifted, 2);
+        break;
+      }
+      case JumpTable::JTT_AARCH64_U32_X4: {
+        const MCExpr *Shifted = MCBinaryExpr::createLShr(
+            Delta, MCConstantExpr::create(2, Ctx), Ctx);
+        Streamer.emitValue(Shifted, 4);
+        break;
+      }
+      case JumpTable::JTT_AARCH64_I32:
+        Streamer.emitValue(Delta, 4);
+        break;
+      default:
+        llvm_unreachable("unexpected jump table type");
+      }
     }
     Offset += JT.EntrySize;
   }

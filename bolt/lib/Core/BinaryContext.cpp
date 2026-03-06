@@ -446,6 +446,14 @@ std::pair<const MCSymbol *, uint64_t>
 BinaryContext::handleAddressRef(uint64_t Address, BinaryFunction &BF,
                                 bool IsPCRel) {
   if (isAArch64()) {
+    // Jump-table metadata references are not generic escaped code references.
+    if (BF.containsAddress(Address, /*UseMaxSize=*/true) &&
+        Address != BF.getAddress() &&
+        isJumpTableMetadataAddress(Address, BF)) {
+      return std::make_pair(BF.addEntryPointAtOffset(Address - BF.getAddress()),
+                            0);
+    }
+
     // Check if this is an access to a constant island and create bookkeeping
     // to keep track of it and emit it later as part of this function.
     if (MCSymbol *IslandSym = BF.getOrCreateIslandAccess(Address))
@@ -516,7 +524,7 @@ BinaryContext::handleAddressRef(uint64_t Address, BinaryFunction &BF,
     const MemoryContentsType MemType = analyzeMemoryAt(Address, BF);
     if (MemType == MemoryContentsType::POSSIBLE_PIC_JUMP_TABLE && IsPCRel) {
       const MCSymbol *Symbol =
-          getOrCreateJumpTable(BF, Address, JumpTable::JTT_PIC);
+          getOrCreateJumpTable(BF, Address, JumpTable::JTT_X86_64_PIC);
 
       return std::make_pair(Symbol, 0);
     }
@@ -529,6 +537,22 @@ BinaryContext::handleAddressRef(uint64_t Address, BinaryFunction &BF,
   MCSymbol *TargetSymbol = getOrCreateGlobalSymbol(Address, "DATAat");
   LLVM_DEBUG(dbgs() << "Created symbol " << TargetSymbol->getName() << '\n');
   return std::make_pair(TargetSymbol, 0);
+}
+
+bool BinaryContext::isJumpTableMetadataAddress(uint64_t Address,
+                                               const BinaryFunction &BF) const {
+  const uint64_t BeginAddr = BF.getAddress();
+  const uint64_t EndAddr = BF.getAddress() + BF.getMaxSize();
+  auto It = JumpTableInfos.lower_bound(BeginAddr);
+  for (; It != JumpTableInfos.end() && It->first < EndAddr; ++It) {
+    const AArch64JumpTableInfo &JTInfo = It->second;
+    if (Address == JTInfo.BaseAddress || Address == JTInfo.AdrAddress ||
+        Address == JTInfo.LoadAddress || Address == JTInfo.AddAddress ||
+        Address == JTInfo.BranchAddress ||
+        llvm::is_contained(JTInfo.References, Address))
+      return true;
+  }
+  return false;
 }
 
 MCSymbol *BinaryContext::handleExternalBranchTarget(uint64_t Address,
@@ -597,7 +621,7 @@ MemoryContentsType BinaryContext::analyzeMemoryAt(uint64_t Address,
 
   // Start with checking for PIC jump table. We expect non-PIC jump tables
   // to have high 32 bits set to 0.
-  if (analyzeJumpTable(Address, JumpTable::JTT_PIC, BF))
+  if (analyzeJumpTable(Address, JumpTable::JTT_X86_64_PIC, BF))
     return MemoryContentsType::POSSIBLE_PIC_JUMP_TABLE;
 
   if (analyzeJumpTable(Address, JumpTable::JTT_NORMAL, BF))
@@ -667,10 +691,9 @@ bool BinaryContext::analyzeJumpTable(const uint64_t Address,
     UpperBound = std::min(NextJTAddress, UpperBound);
 
   LLVM_DEBUG({
-    using JTT = JumpTable::JumpTableType;
     dbgs() << formatv("BOLT-DEBUG: analyzeJumpTable @{0:x} in {1}, JTT={2}\n",
                       Address, BF.getPrintName(),
-                      Type == JTT::JTT_PIC ? "PIC" : "Normal");
+                      JumpTable::jumpTableTypeName(Type));
   });
   const uint64_t EntrySize = getJumpTableEntrySize(Type);
   for (uint64_t EntryAddress = Address; EntryAddress <= UpperBound - EntrySize;
@@ -679,10 +702,11 @@ bool BinaryContext::analyzeJumpTable(const uint64_t Address,
                       << " -> ");
     // Check if there's a proper relocation against the jump table entry.
     if (HasRelocations) {
-      if (Type == JumpTable::JTT_PIC &&
+      if (Type == JumpTable::JTT_X86_64_PIC &&
           !DataPCRelocations.count(EntryAddress)) {
         LLVM_DEBUG(
-            dbgs() << "FAIL: JTT_PIC table, no relocation for this address\n");
+            dbgs()
+            << "FAIL: JTT_X86_64_PIC table, no relocation for this address\n");
         break;
       }
       if (Type == JumpTable::JTT_NORMAL && !getRelocationAt(EntryAddress)) {
@@ -693,10 +717,25 @@ bool BinaryContext::analyzeJumpTable(const uint64_t Address,
       }
     }
 
-    const uint64_t Value =
-        (Type == JumpTable::JTT_PIC)
-            ? Address + *getSignedValueAtAddress(EntryAddress, EntrySize)
-            : *getPointerAtAddress(EntryAddress);
+    uint64_t Value;
+    switch (Type) {
+    case JumpTable::JTT_NORMAL:
+      Value = *getPointerAtAddress(EntryAddress);
+      break;
+    case JumpTable::JTT_X86_64_PIC:
+      Value = Address + *getSignedValueAtAddress(EntryAddress, EntrySize);
+      break;
+    case JumpTable::JTT_AARCH64_I8_X4:
+    case JumpTable::JTT_AARCH64_U8_X4:
+    case JumpTable::JTT_AARCH64_I16_X4:
+    case JumpTable::JTT_AARCH64_U16_X4:
+    case JumpTable::JTT_AARCH64_U32_X4:
+    case JumpTable::JTT_AARCH64_I32:
+      // AArch64 jump tables are currently decoded from .llvm_jump_table_info in
+      // BinaryFunction::processIndirectBranch().  Avoid heuristic analysis for
+      // those layouts here.
+      return false;
+    }
 
     // __builtin_unreachable() case.
     if (Value == UnreachableAddress) {
@@ -766,19 +805,23 @@ void BinaryContext::populateJumpTables() {
     if (NextJTI != JTE)
       NextJTAddress = NextJTI->second->getAddress();
 
-    const bool Success =
-        analyzeJumpTable(JT->getAddress(), JT->Type, *(JT->Parents[0]),
-                         NextJTAddress, &JT->EntriesAsAddress, &JT->IsSplit);
-    if (!Success) {
-      LLVM_DEBUG({
-        dbgs() << "failed to analyze ";
-        JT->print(dbgs());
-        if (NextJTI != JTE) {
-          dbgs() << "next ";
-          NextJTI->second->print(dbgs());
-        }
-      });
-      llvm_unreachable("jump table heuristic failure");
+    // Skip analysis for jump tables whose entries were pre-populated
+    // (e.g. from .llvm_jump_table_info section for AArch64).
+    if (JT->EntriesAsAddress.empty()) {
+      const bool Success =
+          analyzeJumpTable(JT->getAddress(), JT->Type, *(JT->Parents[0]),
+                           NextJTAddress, &JT->EntriesAsAddress, &JT->IsSplit);
+      if (!Success) {
+        LLVM_DEBUG({
+          dbgs() << "failed to analyze ";
+          JT->print(dbgs());
+          if (NextJTI != JTE) {
+            dbgs() << "next ";
+            NextJTI->second->print(dbgs());
+          }
+        });
+        llvm_unreachable("jump table heuristic failure");
+      }
     }
     for (BinaryFunction *Frag : JT->Parents) {
       if (JT->IsSplit)
@@ -796,11 +839,11 @@ void BinaryContext::populateJumpTables() {
 
     // In strict mode, erase PC-relative relocation record. Later we check that
     // all such records are erased and thus have been accounted for.
-    if (opts::StrictMode && JT->Type == JumpTable::JTT_PIC) {
+    if (opts::StrictMode && JT->Type == JumpTable::JTT_X86_64_PIC) {
       for (uint64_t Address = JT->getAddress();
            Address < JT->getAddress() + JT->getSize();
            Address += JT->EntrySize) {
-        DataPCRelocations.erase(DataPCRelocations.find(Address));
+        DataPCRelocations.erase(Address);
       }
     }
 
@@ -970,6 +1013,7 @@ BinaryContext::duplicateJumpTable(BinaryFunction &Function, JumpTable *JT,
                     *getSectionForAddress(JT->getAddress()));
   NewJT->Parents = JT->Parents;
   NewJT->Entries = JT->Entries;
+  NewJT->AArch64BaseSymbol = JT->AArch64BaseSymbol;
   NewJT->Counts = JT->Counts;
   uint64_t JumpTableID = ++DuplicatedJumpTables;
   // Invert it to differentiate from regular jump tables whose IDs are their

@@ -121,6 +121,9 @@ private:
   /// for exception and stack unwinding information.
   Error readSpecialSections();
 
+  /// Read .llvm_jump_table_info section and populate JumpTableInfoEntries.
+  void readJumpTableInfoSection();
+
   /// Adjust supplied command-line options based on input data.
   void adjustCommandLineOptions();
 

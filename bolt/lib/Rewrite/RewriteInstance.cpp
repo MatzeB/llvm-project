@@ -2300,8 +2300,118 @@ Error RewriteInstance::readSpecialSections() {
 
   processSectionMetadata();
 
+  readJumpTableInfoSection();
+
   // Read .dynamic/PT_DYNAMIC.
   return readELFDynamic();
+}
+
+void RewriteInstance::readJumpTableInfoSection() {
+  for (BinarySection &Section :
+       BC->getSectionsByELFType(LLVMJumpTableInfoSectionType)) {
+    StringRef Contents = Section.getContents();
+    DataExtractor DE(Contents, BC->AsmInfo->isLittleEndian(), 8);
+    DataExtractor::Cursor Cursor(0);
+
+    while (Cursor && Cursor.tell() < Contents.size()) {
+      uint8_t Format = DE.getU8(Cursor);
+      uint64_t EntryContentLength = DE.getULEB128(Cursor);
+      uint64_t EntryContentOffset = Cursor.tell();
+      DE.skip(Cursor, EntryContentLength);
+      if (!Cursor)
+        break;
+
+      DataExtractor EntryDE(Contents.substr(EntryContentOffset, EntryContentLength),
+                            BC->AsmInfo->isLittleEndian(), 8);
+      DataExtractor::Cursor EntryCursor(0);
+      std::optional<JumpTable::JumpTableType> JTType;
+      switch (Format) {
+      case 2:
+        JTType = JumpTable::JTT_AARCH64_U8_X4;
+        break;
+      case 3:
+        JTType = JumpTable::JTT_AARCH64_U16_X4;
+        break;
+      case 4:
+        JTType = JumpTable::JTT_AARCH64_I32;
+        break;
+      case 5:
+        JTType = JumpTable::JTT_AARCH64_I8_X4;
+        break;
+      case 6:
+        JTType = JumpTable::JTT_AARCH64_I16_X4;
+        break;
+      case 7:
+        JTType = JumpTable::JTT_AARCH64_U32_X4;
+        break;
+      default:
+        BC->errs() << "BOLT-WARNING: ignoring unsupported format in "
+                      ".llvm_jump_table_info: "
+                   << static_cast<unsigned>(Format) << '\n';
+        break;
+      }
+
+      uint64_t JTAddress = 0;
+      uint64_t BaseAddress = 0;
+      uint64_t AdrAddress = 0;
+      uint64_t LoadAddress = 0;
+      uint64_t AddAddress = 0;
+      uint64_t BranchAddress = 0;
+      uint64_t NumEntries = 0;
+      SmallVector<uint64_t, 2> References;
+      if (JTType) {
+        JTAddress = EntryDE.getU64(EntryCursor);
+        BaseAddress = EntryDE.getU64(EntryCursor);
+        AdrAddress = EntryDE.getU64(EntryCursor);
+        LoadAddress = EntryDE.getU64(EntryCursor);
+        AddAddress = EntryDE.getU64(EntryCursor);
+        BranchAddress = EntryDE.getU64(EntryCursor);
+        NumEntries = EntryDE.getULEB128(EntryCursor);
+        const uint64_t NumReferences = EntryDE.getULEB128(EntryCursor);
+        References.reserve(NumReferences);
+        for (uint64_t I = 0; I < NumReferences; ++I)
+          References.push_back(EntryDE.getU64(EntryCursor));
+      }
+
+      if (Error EntryErr = EntryCursor.takeError()) {
+        BC->errs() << "BOLT-WARNING: failed to parse .llvm_jump_table_info "
+                      "entry for format "
+                   << static_cast<unsigned>(Format) << ": "
+                   << toString(std::move(EntryErr)) << '\n';
+        continue;
+      }
+
+      if (!JTType)
+        continue;
+
+      if (BranchAddress == 0)
+        continue;
+
+      LLVM_DEBUG(dbgs() << "BOLT-DEBUG: jump table info: format=" << (int)Format
+                        << " JT=0x" << Twine::utohexstr(JTAddress) << " base=0x"
+                        << Twine::utohexstr(BaseAddress) << " adr=0x"
+                        << Twine::utohexstr(AdrAddress) << " load=0x"
+                        << Twine::utohexstr(LoadAddress) << " add=0x"
+                        << Twine::utohexstr(AddAddress) << " branch=0x"
+                        << Twine::utohexstr(BranchAddress) << " refs="
+                        << References.size() << " entries=" << NumEntries
+                        << '\n');
+
+      BC->JumpTableInfos[BranchAddress] = {*JTType,      JTAddress,
+                                           BaseAddress, AdrAddress,
+                                           LoadAddress, AddAddress,
+                                           BranchAddress, NumEntries,
+                                           std::move(References)};
+    }
+
+    if (!Cursor)
+      BC->errs() << "BOLT-WARNING: failed to parse .llvm_jump_table_info: "
+                 << toString(Cursor.takeError()) << '\n';
+  }
+
+  if (!BC->JumpTableInfos.empty())
+    BC->outs() << "BOLT-INFO: parsed " << BC->JumpTableInfos.size()
+               << " entries from .llvm_jump_table_info section\n";
 }
 
 void RewriteInstance::adjustCommandLineOptions() {

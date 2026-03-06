@@ -836,6 +836,59 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
   MCInst *PCRelBaseInstr;
   uint64_t PCRelAddr = 0;
 
+  // If .llvm_jump_table_info metadata exists, use the section data directly.
+  const uint64_t BranchAddr = getAddress() + Offset;
+  auto JTInfoIt = BC.JumpTableInfos.find(BranchAddr);
+  if (JTInfoIt != BC.JumpTableInfos.end()) {
+    const BinaryContext::AArch64JumpTableInfo &JTInfo = JTInfoIt->second;
+    JumpTable::JumpTableType JTType = JTInfo.JTType;
+    unsigned EntrySize = BC.getJumpTableEntrySize(JTType);
+
+    // Create jump table and populate entries from binary data.
+    // Read all entries first to avoid leaving a partially-constructed
+    // JumpTable if any entry read fails.
+    JumpTable::AddressesType Entries;
+    for (uint64_t I = 0; I < JTInfo.NumEntries; ++I) {
+      uint64_t EntryAddr = JTInfo.JTAddress + I * EntrySize;
+      uint64_t Target;
+      if (JTType == JumpTable::JTT_AARCH64_U8_X4) {
+        ErrorOr<uint64_t> Value = BC.getUnsignedValueAtAddress(EntryAddr, 1);
+        if (!Value)
+          return IndirectBranchType::UNKNOWN;
+        Target = JTInfo.BaseAddress + (*Value << 2);
+      } else if (JTType == JumpTable::JTT_AARCH64_U16_X4) {
+        ErrorOr<uint64_t> Value = BC.getUnsignedValueAtAddress(EntryAddr, 2);
+        if (!Value)
+          return IndirectBranchType::UNKNOWN;
+        Target = JTInfo.BaseAddress + (*Value << 2);
+      } else if (JTType == JumpTable::JTT_AARCH64_U32_X4) {
+        ErrorOr<uint64_t> Value = BC.getUnsignedValueAtAddress(EntryAddr, 4);
+        if (!Value)
+          return IndirectBranchType::UNKNOWN;
+        Target = JTInfo.BaseAddress + (*Value << 2);
+      } else {
+        assert(JTType == JumpTable::JTT_AARCH64_I32);
+        ErrorOr<int64_t> Value = BC.getSignedValueAtAddress(EntryAddr, 4);
+        if (!Value)
+          return IndirectBranchType::UNKNOWN;
+        Target = JTInfo.BaseAddress + *Value;
+      }
+      Entries.push_back(Target);
+    }
+
+    BC.getOrCreateJumpTable(*this, JTInfo.JTAddress, JTType);
+    JumpTable *JT = BC.getJumpTableContainingAddress(JTInfo.JTAddress);
+    assert(JT && "jump table expected");
+    JT->EntriesAsAddress = std::move(Entries);
+    JT->AArch64BaseSymbol =
+        BC.getOrCreateGlobalSymbol(JTInfo.BaseAddress, "BOLTJTBASEat");
+
+    BC.MIB->setJumpTable(Instruction, JTInfo.JTAddress,
+                         BC.MIB->getNoRegister());
+    JTSites.emplace_back(Offset, JTInfo.JTAddress);
+    return IndirectBranchType::POSSIBLE_PIC_JUMP_TABLE;
+  }
+
   auto Begin = Instructions.begin();
   if (BC.isAArch64()) {
     // Start at the last label as an approximation of the current basic block.
@@ -889,8 +942,6 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
     // This replaces a symbol reference with an immediate.
     BC.MIB->replaceMemOperandDisp(*PCRelBaseInstr,
                                   MCOperand::createImm(PCRelAddr - InstrAddr));
-    // FIXME: Disable full jump table processing for AArch64 until we have a
-    // proper way of determining the jump table limits.
     return IndirectBranchType::UNKNOWN;
   }
 
@@ -928,7 +979,7 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
            "Invalid memory instruction");
     const MCExpr *FixedEntryDispExpr = FixedEntryDispOperand->getExpr();
     const uint64_t EntryAddress = getExprValue(FixedEntryDispExpr);
-    uint64_t EntrySize = BC.getJumpTableEntrySize(JumpTable::JTT_PIC);
+    uint64_t EntrySize = BC.getJumpTableEntrySize(JumpTable::JTT_X86_64_PIC);
     ErrorOr<int64_t> Value =
         BC.getSignedValueAtAddress(EntryAddress, EntrySize);
     if (!Value)
@@ -1001,9 +1052,16 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
     case JumpTable::JTT_NORMAL:
       MemType = MemoryContentsType::POSSIBLE_JUMP_TABLE;
       break;
-    case JumpTable::JTT_PIC:
+    case JumpTable::JTT_X86_64_PIC:
       MemType = MemoryContentsType::POSSIBLE_PIC_JUMP_TABLE;
       break;
+    case JumpTable::JTT_AARCH64_U8_X4:
+    case JumpTable::JTT_AARCH64_I8_X4:
+    case JumpTable::JTT_AARCH64_U16_X4:
+    case JumpTable::JTT_AARCH64_I16_X4:
+    case JumpTable::JTT_AARCH64_I32:
+    case JumpTable::JTT_AARCH64_U32_X4:
+      llvm_unreachable("AArch64 should be handled earlier in this function");
     }
   } else {
     MemType = BC.analyzeMemoryAt(ArrayStart, *this);
@@ -1014,7 +1072,7 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
   if (BranchType == IndirectBranchType::POSSIBLE_PIC_JUMP_TABLE) {
     if (MemType != MemoryContentsType::POSSIBLE_PIC_JUMP_TABLE)
       return IndirectBranchType::UNKNOWN;
-    JTType = JumpTable::JTT_PIC;
+    JTType = JumpTable::JTT_X86_64_PIC;
   } else {
     if (MemType == MemoryContentsType::POSSIBLE_PIC_JUMP_TABLE)
       return IndirectBranchType::UNKNOWN;
@@ -1987,7 +2045,7 @@ void BinaryFunction::postProcessJumpTables() {
   // Create labels for all entries.
   for (auto &JTI : JumpTables) {
     JumpTable &JT = *JTI.second;
-    if (JT.Type == JumpTable::JTT_PIC && opts::JumpTables == JTS_BASIC) {
+    if (JT.Type == JumpTable::JTT_X86_64_PIC && opts::JumpTables == JTS_BASIC) {
       opts::JumpTables = JTS_MOVE;
       BC.outs() << "BOLT-INFO: forcing -jump-tables=move as PIC jump table was "
                    "detected in function "
@@ -2163,6 +2221,13 @@ bool BinaryFunction::postProcessIndirectBranches(
       // Validate the tail call or jump table assumptions now that we know
       // basic block boundaries.
       if (BC.MIB->isTailCall(Instr) || BC.MIB->getJumpTable(Instr)) {
+        if (uint64_t JTAddr = BC.MIB->getJumpTable(Instr)) {
+          JumpTable *JT = BC.getJumpTableContainingAddress(JTAddr);
+          if (JT && JT->Type != JumpTable::JTT_NORMAL &&
+              JT->Type != JumpTable::JTT_X86_64_PIC)
+            continue;
+        }
+
         const unsigned PtrSize = BC.AsmInfo->getCodePointerSize();
         MCInst *MemLocInstr;
         unsigned BaseRegNum, IndexRegNum;

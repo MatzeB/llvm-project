@@ -79,7 +79,7 @@ jump_table:
   .quad bar
   .quad	.LBB00
 
-# CHECK: Jump table {{.*}} for function foo
+# CHECK: NORMAL jump table {{.*}} for function foo
 # CHECK-NEXT: 0x{{.*}} : bar
 # CHECK-NEXT: 0x{{.*}} :
 # CHECK-NEXT: 0x{{.*}} : bar

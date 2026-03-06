@@ -355,6 +355,23 @@ public:
   /// [start memory address] -> [segment info] mapping.
   std::map<uint64_t, SegmentInfo> SegmentMapInfo;
 
+  /// .llvm_jump_table_info section entry for AArch64 jump table
+  struct AArch64JumpTableInfo {
+    JumpTable::JumpTableType JTType;
+    uint64_t JTAddress;     // Address of jump table data
+    uint64_t BaseAddress;   // PC-relative base for entries
+    uint64_t AdrAddress;    // Address of the ADR materializing the base
+    uint64_t LoadAddress;   // Address of the load instruction
+    uint64_t AddAddress;    // Address of the add after the load instruction
+    uint64_t BranchAddress; // Address of the BR instruction
+    uint64_t NumEntries;    // Number of jump table entries
+    SmallVector<uint64_t, 2> References; // Other jump-table-relative refs
+  };
+
+  /// Decoded llvm_jump_table_info section.
+  /// [address of jump table branch] -> [jump table info]
+  std::map<uint64_t, AArch64JumpTableInfo> JumpTableInfos;
+
   /// Newly created segments.
   std::vector<SegmentInfo> NewSegments;
 
@@ -457,7 +474,21 @@ public:
 
   /// Return size of an entry for the given jump table \p Type.
   uint64_t getJumpTableEntrySize(JumpTable::JumpTableType Type) const {
-    return Type == JumpTable::JTT_PIC ? 4 : AsmInfo->getCodePointerSize();
+    switch (Type) {
+    case JumpTable::JTT_AARCH64_I8_X4:
+    case JumpTable::JTT_AARCH64_U8_X4:
+      return 1;
+    case JumpTable::JTT_AARCH64_I16_X4:
+    case JumpTable::JTT_AARCH64_U16_X4:
+      return 2;
+    case JumpTable::JTT_AARCH64_I32:
+    case JumpTable::JTT_AARCH64_U32_X4:
+    case JumpTable::JTT_X86_64_PIC:
+      return 4;
+    case JumpTable::JTT_NORMAL:
+      return AsmInfo->getCodePointerSize();
+    }
+    llvm_unreachable("Invalid JumpTableType");
   }
 
   /// Return JumpTable containing a given \p Address.
@@ -959,6 +990,11 @@ public:
   std::pair<const MCSymbol *, uint64_t>
   handleAddressRef(uint64_t Address, BinaryFunction &BF, bool IsPCRel);
 
+  /// Return true if \p Address is a metadata-backed jump-table code anchor
+  /// that should not be treated as a generic escaped code reference.
+  bool isJumpTableMetadataAddress(uint64_t Address,
+                                  const BinaryFunction &BF) const;
+
   /// When \p Address inside function \p BF is a target of a control transfer
   /// instruction (branch) from another function, return a corresponding symbol
   /// that should be used by the branch. For example, main or secondary entry
@@ -1317,6 +1353,27 @@ public:
   iterator_range<NameToSectionMapType::const_iterator>
   getSectionByName(const Twine &Name) const {
     return make_range(NameToSection.equal_range(Name.str()));
+  }
+
+  /// Return input sections with the given ELF section type.
+  iterator_range<FilteredSectionIterator>
+  getSectionsByELFType(unsigned ELFType) {
+    auto hasELFType = [ELFType](const SectionIterator &Itr) {
+      return *Itr && Itr->isELF() && Itr->getELFType() == ELFType;
+    };
+    return make_range(
+        FilteredSectionIterator(hasELFType, Sections.begin(), Sections.end()),
+        FilteredSectionIterator(hasELFType, Sections.end(), Sections.end()));
+  }
+  iterator_range<FilteredSectionConstIterator>
+  getSectionsByELFType(unsigned ELFType) const {
+    auto hasELFType = [ELFType](const SectionConstIterator &Itr) {
+      return *Itr && Itr->isELF() && Itr->getELFType() == ELFType;
+    };
+    return make_range(FilteredSectionConstIterator(hasELFType, Sections.begin(),
+                                                   Sections.end()),
+                      FilteredSectionConstIterator(hasELFType, Sections.end(),
+                                                   Sections.end()));
   }
 
   /// Return the unique section associated with given \p Name.

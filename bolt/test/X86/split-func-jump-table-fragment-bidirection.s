@@ -11,7 +11,7 @@
 # RUN: llvm-bolt -print-cfg -v=3 %t.exe -o %t.out 2>&1 | FileCheck %s
 
 # CHECK: BOLT-INFO: multiple fragments access the same jump table: main; main.cold.1
-# CHECK: PIC Jump table JUMP_TABLE1 for function main, main.cold.1 at {{.*}}  with a total count of 0:
+# CHECK: PIC jump table JUMP_TABLE1 for function main, main.cold.1 at {{.*}}  with a total count of 0:
 
   .text
   .globl main

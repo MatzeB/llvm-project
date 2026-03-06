@@ -81,6 +81,10 @@ bool bolt::JumpTable::replaceDestination(uint64_t JTAddress,
 
 void bolt::JumpTable::updateOriginal() {
   BinaryContext &BC = getSection().getBinaryContext();
+  if (Type != JTT_NORMAL && Type != JTT_X86_64_PIC) {
+    llvm_unreachable("updateOriginal() unsupported for this jump table type");
+  }
+
   const uint64_t BaseOffset = getAddress() - getSection().getAddress();
   uint64_t EntryOffset = BaseOffset;
   for (MCSymbol *Entry : Entries) {
@@ -97,13 +101,34 @@ void bolt::JumpTable::updateOriginal() {
   }
 }
 
+const char *JumpTable::jumpTableTypeName(JumpTable::JumpTableType Type) {
+  switch (Type) {
+  case JumpTable::JTT_NORMAL:
+    return "NORMAL";
+  case JumpTable::JTT_X86_64_PIC:
+    return "X86_64_PIC";
+  case JumpTable::JTT_AARCH64_I8_X4:
+    return "AARCH64_I8_X4";
+  case JumpTable::JTT_AARCH64_I16_X4:
+    return "AARCH64_I16_X4";
+  case JumpTable::JTT_AARCH64_I32:
+    return "AARCH64_I32";
+  case JumpTable::JTT_AARCH64_U8_X4:
+    return "AARCH64_U8_X4";
+  case JumpTable::JTT_AARCH64_U16_X4:
+    return "AARCH64_U16_X4";
+  case JumpTable::JTT_AARCH64_U32_X4:
+    return "AARCH64_U32_X4";
+  }
+  llvm_unreachable("invalid JumpTableType");
+}
+
 void bolt::JumpTable::print(raw_ostream &OS) const {
   uint64_t Offset = 0;
-  if (Type == JTT_PIC)
-    OS << "PIC ";
   ListSeparator LS;
 
-  OS << "Jump table " << getName() << " for function ";
+  OS << jumpTableTypeName(Type) << " jump table " << getName()
+     << " for function ";
   for (BinaryFunction *Frag : Parents)
     OS << LS << *Frag;
   OS << " at 0x" << Twine::utohexstr(getAddress()) << " with a total count of "

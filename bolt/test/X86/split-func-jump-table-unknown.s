@@ -13,7 +13,7 @@
 # CHECK: Binary Function "main" after building cfg
 # CHECK: Unknown CF  : true
 # CHECK: jmpq    *%r8 # UNKNOWN CONTROL FLOW
-# CHECK: PIC Jump table JUMP_TABLE for function main
+# CHECK: PIC jump table JUMP_TABLE for function main
 # CHECK-NEXT: 0x0000 : .Ltmp0
 # CHECK-NEXT: 0x0004 : .Ltmp1
 # CHECK-NEXT: 0x0008 : __ENTRY_main.cold.1

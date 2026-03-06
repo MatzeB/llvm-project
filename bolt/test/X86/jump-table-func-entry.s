@@ -64,7 +64,7 @@ foo:
 	.quad	.LBB00
 	.quad	.Ltmp87088
 
-# CHECK: Jump table {{.*}} for function foo
+# CHECK: NORMAL jump table {{.*}} for function foo
 # CHECK-NEXT: 0x{{.*}} :
 # CHECK-NEXT: 0x{{.*}} :
 # CHECK-NEXT: 0x{{.*}} :

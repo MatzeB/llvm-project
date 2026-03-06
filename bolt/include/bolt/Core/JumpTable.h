@@ -24,6 +24,9 @@ class raw_ostream;
 
 namespace bolt {
 
+/// ELF section type used by AArch64 .llvm_jump_table_info metadata sections.
+inline constexpr unsigned LLVMJumpTableInfoSectionType = 0x6fff4c0e;
+
 enum JumpTableSupportLevel : char {
   JTS_NONE = 0,       /// Disable jump tables support.
   JTS_BASIC = 1,      /// Enable basic jump tables support (in-place).
@@ -46,9 +49,20 @@ class JumpTable : public BinaryData {
   JumpTable &operator=(const JumpTable &) = delete;
 
 public:
+  /// Describes the format of jump table entries:
+  /// - Size of an entry
+  /// - Whether it describes an absolute address or a relative one
+  /// - Entries for relative values may be interpreted as signed or unsigned
+  /// - Additional transformations applied
   enum JumpTableType : char {
-    JTT_NORMAL,
-    JTT_PIC,
+    JTT_NORMAL,         ///< absolute, machine word sized
+    JTT_X86_64_PIC,     ///< relative, 32-bit signed
+    JTT_AARCH64_I8_X4,  ///< relative, 8-bit signed, multiplied by 4
+    JTT_AARCH64_I16_X4, ///< relative, 16-bit signed, multiplied by 4
+    JTT_AARCH64_I32,    ///< relative, 32-bit signed
+    JTT_AARCH64_U8_X4,  ///< relative, 8-bit unsigned, multiplied by 4
+    JTT_AARCH64_U16_X4, ///< relative, 16-bit unsigned, multiplied by 4
+    JTT_AARCH64_U32_X4, ///< relative, 32-bit unsigned, multiplied by 4
   };
 
   /// Branch statistics for jump table entries.
@@ -92,6 +106,10 @@ public:
   /// BinaryFunction this jump tables belongs to.
   SmallVector<BinaryFunction *, 1> Parents;
 
+  /// Base symbol used to encode AArch64 jump table entries described by
+  /// .llvm_jump_table_info formats 2-7.
+  MCSymbol *AArch64BaseSymbol{nullptr};
+
 private:
   /// Constructor should only be called by a BinaryContext.
   JumpTable(MCSymbol &Symbol, uint64_t Address, size_t EntrySize,
@@ -124,6 +142,8 @@ public:
 
   /// Print for debugging purposes.
   void print(raw_ostream &OS) const override;
+
+  static const char *jumpTableTypeName(JumpTableType Type);
 };
 
 } // namespace bolt

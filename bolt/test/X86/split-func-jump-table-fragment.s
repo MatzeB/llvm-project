@@ -61,7 +61,7 @@ JUMP_TABLE:
 ## Verify that the entry corresponding to the cold fragment was added to
 ## the jump table.
 
-# CHECK:      PIC Jump table
+# CHECK:      PIC jump table JUMP_TABLE
 # CHECK-NEXT: 0x{{.*}} :
 # CHECK-NEXT: 0x{{.*}} :
 # CHECK-NEXT: 0x{{.*}} : main.cold.1
