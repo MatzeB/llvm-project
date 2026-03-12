@@ -2120,7 +2120,8 @@ bool SampleProfileLoader::rejectHighStalenessProfile(
       continue;
 
     TotalHotFunc++;
-    if (ProbeManager->profileIsHashMismatched(*FuncDesc, FS))
+    if (ProbeManager->profileIsHashMismatched(*FuncDesc, FS) &&
+        !ProbeManager->probeFromWeakSymbol(FS.getGUID()))
       NumMismatchedFunc++;
   }
   // Make sure that the num of selected function is not too small to distinguish
