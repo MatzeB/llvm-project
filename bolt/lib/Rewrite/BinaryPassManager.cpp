@@ -7,7 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "bolt/Rewrite/BinaryPassManager.h"
+#ifdef AARCH64_AVAILABLE
+#include "bolt/Passes/AArch64JumpTablePromotion.h"
 #include "bolt/Passes/AArch64RelaxationPass.h"
+#endif
 #include "bolt/Passes/Aligner.h"
 #include "bolt/Passes/AllocCombiner.h"
 #include "bolt/Passes/AsmDump.h"
@@ -134,6 +137,10 @@ static cl::opt<bool> PrintAArch64Relaxation(
     "print-adr-ldr-relaxation",
     cl::desc("print functions after ADR/LDR Relaxation pass"), cl::Hidden,
     cl::cat(BoltOptCategory));
+static cl::opt<bool> PrintAArch64JumpTablePromotion(
+    "print-aarch64-jt-promotion",
+    cl::desc("print functions after AArch64 jump table promotion pass"),
+    cl::Hidden, cl::cat(BoltOptCategory));
 
 cl::opt<bool> PrintPAuthCFIAnalyzer(
     "print-pointer-auth-cfi-analyzer",
@@ -538,6 +545,7 @@ Error BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
   // Assign each function an output section.
   Manager.registerPass(std::make_unique<AssignSections>());
 
+#ifdef AARCH64_AVAILABLE
   if (BC.isAArch64()) {
     Manager.registerPass(
         std::make_unique<AArch64RelaxationPass>(PrintAArch64Relaxation));
@@ -547,9 +555,17 @@ Error BinaryFunctionPassManager::runAllPasses(BinaryContext &BC) {
     // relocations out of range and crash during linking.
     Manager.registerPass(std::make_unique<LongJmpPass>(PrintLongJmp));
 
+    // Adapt AArch64 jump tables to use the smallest possible format that can
+    // still encode all target distances.
+    // This is put after LongJmp as it is the last pass to change intra-function
+    // branch offsets.
+    Manager.registerPass(std::make_unique<AArch64JumpTablePromotion>(
+        PrintAArch64JumpTablePromotion));
+
     Manager.registerPass(
         std::make_unique<PointerAuthCFIFixup>(PrintPAuthCFIFixup));
   }
+#endif
 
   // This pass should always run last.*
   Manager.registerPass(std::make_unique<FinalizeFunctions>(PrintFinalized));

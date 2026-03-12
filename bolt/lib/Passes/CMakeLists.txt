@@ -1,5 +1,4 @@
-add_llvm_library(LLVMBOLTPasses
-  AArch64RelaxationPass.cpp
+set(LLVM_BOLT_PASSES_SOURCES
   Aligner.cpp
   AllocCombiner.cpp
   AsmDump.cpp
@@ -49,6 +48,18 @@ add_llvm_library(LLVMBOLTPasses
   ValidateMemRefs.cpp
   VeneerElimination.cpp
   RetpolineInsertion.cpp
+  )
+
+if (AArch64 IN_LIST BOLT_TARGETS_TO_BUILD)
+  list(APPEND LLVM_BOLT_PASSES_SOURCES
+    AArch64JumpTablePromotion.cpp
+    AArch64RelaxationPass.cpp
+    )
+endif()
+
+add_llvm_library(LLVMBOLTPasses
+  ${LLVM_BOLT_PASSES_SOURCES}
+  PARTIAL_SOURCES_INTENDED
 
   NO_EXPORT
   DISABLE_LLVM_LINK_LLVM_DYLIB
@@ -69,3 +80,10 @@ target_link_libraries(LLVMBOLTPasses
   LLVMBOLTCore
   LLVMBOLTUtils
   )
+
+if (AArch64 IN_LIST BOLT_TARGETS_TO_BUILD)
+  target_include_directories(LLVMBOLTPasses PRIVATE
+    ${LLVM_MAIN_SRC_DIR}/lib/Target/AArch64
+    ${LLVM_BINARY_DIR}/lib/Target/AArch64
+    )
+endif()

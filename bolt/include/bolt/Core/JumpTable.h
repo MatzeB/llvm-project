@@ -132,6 +132,12 @@ public:
 
   bool isJumpTable() const override { return true; }
 
+  static bool isAArch64Type(JumpTableType Type) {
+    return Type == JTT_AARCH64_I8_X4 || Type == JTT_AARCH64_U8_X4 ||
+           Type == JTT_AARCH64_I16_X4 || Type == JTT_AARCH64_U16_X4 ||
+           Type == JTT_AARCH64_I32 || Type == JTT_AARCH64_U32_X4;
+  }
+
   /// Change all entries of the jump table in \p JTAddress pointing to
   /// \p OldDest to \p NewDest. Return false if unsuccessful.
   bool replaceDestination(uint64_t JTAddress, const MCSymbol *OldDest,

@@ -2350,7 +2350,6 @@ void RewriteInstance::readJumpTableInfoSection() {
                    << static_cast<unsigned>(Format) << '\n';
         break;
       }
-
       uint64_t JTAddress = 0;
       uint64_t BaseAddress = 0;
       uint64_t AdrAddress = 0;

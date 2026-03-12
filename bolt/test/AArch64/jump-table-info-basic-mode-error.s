@@ -6,7 +6,7 @@
 # RUN: %clang %cflags -fuse-ld=lld %s -o %t.exe -Wl,-q
 # RUN: llvm-bolt %t.exe -o %t.bolt --jump-tables=basic 2>&1 | FileCheck %s
 
-# CHECK: BOLT-INFO: forcing -jump-tables=move as PIC jump table was detected in function _start
+# CHECK: BOLT-INFO: forcing -jump-tables=move as non-basic jump table was detected in function _start
 
   .text
   .globl _start

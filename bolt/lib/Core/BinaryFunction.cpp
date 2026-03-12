@@ -851,16 +851,32 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
     for (uint64_t I = 0; I < JTInfo.NumEntries; ++I) {
       uint64_t EntryAddr = JTInfo.JTAddress + I * EntrySize;
       uint64_t Target;
-      if (JTType == JumpTable::JTT_AARCH64_U8_X4) {
-        ErrorOr<uint64_t> Value = BC.getUnsignedValueAtAddress(EntryAddr, 1);
-        if (!Value)
-          return IndirectBranchType::UNKNOWN;
-        Target = JTInfo.BaseAddress + (*Value << 2);
-      } else if (JTType == JumpTable::JTT_AARCH64_U16_X4) {
-        ErrorOr<uint64_t> Value = BC.getUnsignedValueAtAddress(EntryAddr, 2);
-        if (!Value)
-          return IndirectBranchType::UNKNOWN;
-        Target = JTInfo.BaseAddress + (*Value << 2);
+      if (JTType == JumpTable::JTT_AARCH64_I8_X4 ||
+          JTType == JumpTable::JTT_AARCH64_U8_X4) {
+        if (JTType == JumpTable::JTT_AARCH64_I8_X4) {
+          ErrorOr<int64_t> Value = BC.getSignedValueAtAddress(EntryAddr, 1);
+          if (!Value)
+            return IndirectBranchType::UNKNOWN;
+          Target = JTInfo.BaseAddress + ((*Value) << 2);
+        } else {
+          ErrorOr<uint64_t> Value = BC.getUnsignedValueAtAddress(EntryAddr, 1);
+          if (!Value)
+            return IndirectBranchType::UNKNOWN;
+          Target = JTInfo.BaseAddress + (*Value << 2);
+        }
+      } else if (JTType == JumpTable::JTT_AARCH64_I16_X4 ||
+                 JTType == JumpTable::JTT_AARCH64_U16_X4) {
+        if (JTType == JumpTable::JTT_AARCH64_I16_X4) {
+          ErrorOr<int64_t> Value = BC.getSignedValueAtAddress(EntryAddr, 2);
+          if (!Value)
+            return IndirectBranchType::UNKNOWN;
+          Target = JTInfo.BaseAddress + ((*Value) << 2);
+        } else {
+          ErrorOr<uint64_t> Value = BC.getUnsignedValueAtAddress(EntryAddr, 2);
+          if (!Value)
+            return IndirectBranchType::UNKNOWN;
+          Target = JTInfo.BaseAddress + (*Value << 2);
+        }
       } else if (JTType == JumpTable::JTT_AARCH64_U32_X4) {
         ErrorOr<uint64_t> Value = BC.getUnsignedValueAtAddress(EntryAddr, 4);
         if (!Value)
@@ -1592,8 +1608,10 @@ add_instruction:
       }
     }
 
-    // Record offset of the instruction for profile matching.
-    if (BC.keepOffsetForInstruction(Instruction))
+    // Record offsets for profile matching and for AArch64 jump table metadata
+    // that names specific instructions by input address.
+    if (BC.keepOffsetForInstruction(Instruction) ||
+        BC.isJumpTableMetadataAddress(AbsoluteInstrAddr, *this))
       MIB->setOffset(Instruction, static_cast<uint32_t>(Offset));
 
     if (BC.isX86() && BC.MIB->isNoop(Instruction)) {
@@ -2045,10 +2063,12 @@ void BinaryFunction::postProcessJumpTables() {
   // Create labels for all entries.
   for (auto &JTI : JumpTables) {
     JumpTable &JT = *JTI.second;
-    if (JT.Type == JumpTable::JTT_X86_64_PIC && opts::JumpTables == JTS_BASIC) {
+    if ((JT.Type == JumpTable::JTT_X86_64_PIC ||
+         JumpTable::isAArch64Type(JT.Type)) &&
+        opts::JumpTables == JTS_BASIC) {
       opts::JumpTables = JTS_MOVE;
-      BC.outs() << "BOLT-INFO: forcing -jump-tables=move as PIC jump table was "
-                   "detected in function "
+      BC.outs() << "BOLT-INFO: forcing -jump-tables=move as non-basic jump "
+                   "table was detected in function "
                 << *this << '\n';
     }
     const uint64_t BDSize =
@@ -2639,10 +2659,13 @@ void BinaryFunction::postProcessCFG() {
   // The final cleanup of intermediate structures.
   clearList(IgnoredBranches);
 
-  // Remove "Offset" annotations, unless we need an address-translation table
-  // later. This has no cost, since annotations are allocated by a bumpptr
-  // allocator and won't be released anyway until late in the pipeline.
-  if (!requiresAddressTranslation() && !opts::Instrument) {
+  // Remove "Offset" annotations, unless we still need exact input-address
+  // matching later. AArch64 jump table promotion relies on metadata records
+  // that name specific branch-sequence instructions by input address.
+  // This has no cost, since annotations are allocated by a bumpptr allocator
+  // and won't be released anyway until late in the pipeline.
+  if (!requiresAddressTranslation() && !opts::Instrument &&
+      !(BC.isAArch64() && !BC.JumpTableInfos.empty())) {
     for (BinaryBasicBlock &BB : blocks())
       for (MCInst &Inst : BB)
         BC.MIB->clearOffset(Inst);
