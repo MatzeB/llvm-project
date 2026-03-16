@@ -1659,15 +1659,14 @@ struct CounterCoverageMappingBuilder
     if (OutCount != ParentCount) {
       pushRegion(OutCount);
       GapRegionCounter = OutCount;
+      if (BodyHasTerminateStmt)
+        HasTerminateStmt = true;
     }
 
     // Create Branch Region around condition.
     if (!llvm::EnableSingleByteCoverage)
       createBranchRegion(S->getCond(), BodyCount,
                          subtractCounters(CondCount, BodyCount));
-
-    if (BodyHasTerminateStmt)
-      HasTerminateStmt = true;
   }
 
   void VisitForStmt(const ForStmt *S) {
