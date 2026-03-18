@@ -57,6 +57,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/LEB128.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/TargetParser/Triple.h"
@@ -1208,6 +1209,14 @@ void AArch64AsmPrinter::emitJumpTableInfoSection() const {
     OutStreamer->emitInt8(Format);
 
     const MCSymbol *BaseSym = AArch64FI->getJumpTableEntryPCRelSymbol(I);
+
+    uint8_t EncodedNumEntries[10];
+    const unsigned NumEntriesSize =
+        encodeULEB128(JTE.MBBs.size(), EncodedNumEntries);
+    const uint64_t RecordContentLength = 4 * TM.getProgramPointerSize() +
+                                         NumEntriesSize;
+    OutStreamer->AddComment("Record Content Length");
+    OutStreamer->emitULEB128IntValue(RecordContentLength);
 
     MCSymbol *LoadLabel = nullptr;
     MCSymbol *BranchLabel = nullptr;
