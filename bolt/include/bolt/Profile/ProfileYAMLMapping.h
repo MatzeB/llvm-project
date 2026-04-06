@@ -107,8 +107,8 @@ struct PseudoProbeInfo {
   // Deprecated fields
   uint32_t InlineTreeIndex = 0;
   uint64_t BlockMask = 0;            // bitset with probe indices from 1 to 64
-  std::vector<uint64_t> CallProbes;
-  std::vector<uint64_t> IndCallProbes;
+  std::vector<uint64_t> CallProbes{};
+  std::vector<uint64_t> IndCallProbes{};
 
   bool operator==(const PseudoProbeInfo &Other) const {
     return InlineTreeNodes == Other.InlineTreeNodes &&
