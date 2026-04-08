@@ -91,6 +91,7 @@ class AArch64AsmPrinter : public AsmPrinter {
 
   bool EmitJumpTableInfo = false;
   struct JumpTableInfo {
+    MCSymbol *AdrLabel = nullptr;
     MCSymbol *LoadLabel = nullptr;
     MCSymbol *AddLabel = nullptr;
     MCSymbol *BranchLabel = nullptr;
@@ -1193,6 +1194,8 @@ void AArch64AsmPrinter::emitJumpTableInfoSection() const {
   const std::vector<MachineJumpTableEntry> &JT = MJTI->getJumpTables();
   for (unsigned I = 0, E = JT.size(); I != E; ++I) {
     const MachineJumpTableEntry &JTE = JT[I];
+    if (JTE.MBBs.empty())
+      continue;
     unsigned Size = AArch64FI->getJumpTableEntrySize(I);
     const char *Comment;
     unsigned Format;
@@ -1213,17 +1216,14 @@ void AArch64AsmPrinter::emitJumpTableInfoSection() const {
 
     const MCSymbol *BaseSym = AArch64FI->getJumpTableEntryPCRelSymbol(I);
 
-    MCSymbol *LoadLabel = nullptr;
-    MCSymbol *AddLabel = nullptr;
-    MCSymbol *BranchLabel = nullptr;
-    unsigned NumReferences = 0;
-    if (I < JumpTableInfos.size()) {
-      const JumpTableInfo &Info = JumpTableInfos[I];
-      LoadLabel = Info.LoadLabel;
-      AddLabel = Info.AddLabel;
-      BranchLabel = Info.BranchLabel;
-      NumReferences = Info.References.size();
-    }
+    if (I >= JumpTableInfos.size())
+      continue;
+    const JumpTableInfo &Info = JumpTableInfos[I];
+    MCSymbol *AdrLabel = Info.AdrLabel;
+    MCSymbol *LoadLabel = Info.LoadLabel;
+    MCSymbol *AddLabel = Info.AddLabel;
+    MCSymbol *BranchLabel = Info.BranchLabel;
+    unsigned NumReferences = Info.References.size();
 
     unsigned PointerSize = TM.getProgramPointerSize();
 
@@ -1232,7 +1232,7 @@ void AArch64AsmPrinter::emitJumpTableInfoSection() const {
         encodeULEB128(JTE.MBBs.size(), EncodedNumEntries);
     uint8_t EncodedNumRefs[10];
     const unsigned NumRefsSize = encodeULEB128(NumReferences, EncodedNumRefs);
-    const uint64_t RecordContentLength = 5 * PointerSize + NumEntriesSize +
+    const uint64_t RecordContentLength = 6 * PointerSize + NumEntriesSize +
                                          NumRefsSize +
                                          NumReferences * PointerSize;
     OutStreamer->AddComment("Record Content Length");
@@ -1241,18 +1241,15 @@ void AArch64AsmPrinter::emitJumpTableInfoSection() const {
     OutStreamer->emitSymbolValue(GetJTISymbol(I), PointerSize);
     OutStreamer->AddComment("Base");
     OutStreamer->emitSymbolValue(BaseSym, PointerSize);
+    OutStreamer->AddComment("Adr Instruction");
+    assert(AdrLabel && "missing AdrLabel from JumpTableDest lowering");
+    OutStreamer->emitSymbolValue(AdrLabel, PointerSize);
     OutStreamer->AddComment("Load Instruction");
-    if (LoadLabel != nullptr) {
-      OutStreamer->emitSymbolValue(LoadLabel, PointerSize);
-    } else {
-      OutStreamer->emitZeros(PointerSize);
-    }
+    assert(LoadLabel && "missing LoadLabel from JumpTableDest lowering");
+    OutStreamer->emitSymbolValue(LoadLabel, PointerSize);
     OutStreamer->AddComment("Add Instruction");
-    if (AddLabel != nullptr) {
-      OutStreamer->emitSymbolValue(AddLabel, PointerSize);
-    } else {
-      OutStreamer->emitZeros(PointerSize);
-    }
+    assert(AddLabel && "missing AddLabel from JumpTableDest lowering");
+    OutStreamer->emitSymbolValue(AddLabel, PointerSize);
     OutStreamer->AddComment("Branch Instruction");
     if (BranchLabel != nullptr) {
       OutStreamer->emitSymbolValue(BranchLabel, PointerSize);
@@ -1263,11 +1260,9 @@ void AArch64AsmPrinter::emitJumpTableInfoSection() const {
     OutStreamer->emitULEB128IntValue(JTE.MBBs.size());
     OutStreamer->AddComment("Number of References");
     OutStreamer->emitULEB128IntValue(NumReferences);
-    if (I < JumpTableInfos.size()) {
-      for (MCSymbol *Ref : JumpTableInfos[I].References) {
-        OutStreamer->AddComment("Reference");
-        OutStreamer->emitSymbolValue(Ref, PointerSize);
-      }
+    for (MCSymbol *Ref : Info.References) {
+      OutStreamer->AddComment("Reference");
+      OutStreamer->emitSymbolValue(Ref, PointerSize);
     }
   }
 }
@@ -1459,6 +1454,15 @@ void AArch64AsmPrinter::LowerJumpTableDest(llvm::MCStreamer &OutStreamer,
     OutStreamer.emitLabel(Label);
   }
 
+  if (EmitJumpTableInfo) {
+    while (JumpTableInfos.size() <= static_cast<size_t>(JTIdx))
+      JumpTableInfos.push_back(JumpTableInfo());
+    JumpTableInfo &Info = JumpTableInfos[JTIdx];
+    MCSymbol *AdrLabel = MF->getContext().createTempSymbol();
+    Info.AdrLabel = AdrLabel;
+    OutStreamer.emitLabel(AdrLabel);
+  }
+
   auto LabelExpr = MCSymbolRefExpr::create(Label, MF->getContext());
   EmitToStreamer(OutStreamer, MCInstBuilder(AArch64::ADR)
                                   .addReg(DestReg)
@@ -1475,14 +1479,10 @@ void AArch64AsmPrinter::LowerJumpTableDest(llvm::MCStreamer &OutStreamer,
   }
 
   if (EmitJumpTableInfo) {
-    MCSymbol *LoadLabel = MF->getContext().createTempSymbol();
-    while (JumpTableInfos.size() <= static_cast<size_t>(JTIdx)) {
-      JumpTableInfos.push_back(JumpTableInfo());
-    }
     JumpTableInfo &Info = JumpTableInfos[JTIdx];
-    if (Info.LoadLabel != nullptr) {
+    if (Info.LoadLabel != nullptr)
       report_fatal_error("more than one JumpTableDest for jump table");
-    }
+    MCSymbol *LoadLabel = MF->getContext().createTempSymbol();
     Info.LoadLabel = LoadLabel;
     OutStreamer.emitLabel(LoadLabel);
   }

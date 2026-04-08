@@ -29,6 +29,7 @@ lbl4:
 ; CHECK-LABEL: test_jumptable:
 ; CHECK: [[REF1:.Ltmp[0-9]+]]:
 ; CHECK: [[REF2:.Ltmp[0-9]+]]:
+; CHECK: [[ADR:.Ltmp[0-9]+]]:
 ; CHECK: [[LOAD:.Ltmp[0-9]+]]:
 ; CHECK: [[ADD:.Ltmp[0-9]+]]:
 ; CHECK: [[BRANCH:.Ltmp[0-9]+]]:
@@ -36,9 +37,10 @@ lbl4:
 ; CHECK: .byte ([[BASE:.LBB[0-9]+_[0-9]+]]-[[BASE]])>>2
 ; CHECK: .section .llvm_jump_table_info,"o",@0x6fff4c0e,test_jumptable
 ; CHECK-NEXT: .byte{{[[:space:]]+}}2{{.*}}format 2: 1b relative; shr 2
-; CHECK-NEXT: .byte{{[[:space:]]+}}58{{.*}}Record Content Length
+; CHECK-NEXT: .byte{{[[:space:]]+}}66{{.*}}Record Content Length
 ; CHECK-NEXT: .xword{{[[:space:]]+}}[[JT]]
 ; CHECK-NEXT: .xword{{[[:space:]]+}}[[BASE]]{{.*}}Base
+; CHECK-NEXT: .xword{{[[:space:]]+}}[[ADR]]{{.*}}Adr Instruction
 ; CHECK-NEXT: .xword{{[[:space:]]+}}[[LOAD]]{{.*}}Load Instruction
 ; CHECK-NEXT: .xword{{[[:space:]]+}}[[ADD]]{{.*}}Add Instruction
 ; CHECK-NEXT: .xword{{[[:space:]]+}}[[BRANCH]]{{.*}}Branch Instruction
