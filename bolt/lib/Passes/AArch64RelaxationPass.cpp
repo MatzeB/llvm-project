@@ -82,6 +82,11 @@ void AArch64RelaxationPass::runOnFunction(BinaryFunction &BF) {
                   : BC.MIB->createAdrpLdr(Inst, BC.Ctx.get());
       }
 
+      // Preserve the original input offset on the first replacement
+      // instruction so later passes can still find the relaxed site.
+      if (std::optional<uint32_t> Offset = BC.MIB->getOffset(Inst))
+        BC.MIB->setOffset(AdrpMaterialization.front(), *Offset);
+
       if (It != BB.begin() && BC.MIB->isNoop(*std::prev(It))) {
         It = BB.eraseInstruction(std::prev(It));
       } else if (std::next(It) != BB.end() && BC.MIB->isNoop(*std::next(It))) {
