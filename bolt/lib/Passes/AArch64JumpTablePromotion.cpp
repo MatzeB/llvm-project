@@ -11,6 +11,7 @@
 #include "MCTargetDesc/AArch64AddressingModes.h"
 #include "bolt/Utils/CommandLineOpts.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/CommandLine.h"
 
 #define DEBUG_TYPE "bolt"
@@ -31,6 +32,7 @@ struct AArch64JTSiteInfo {
   BinaryFunction &BF;
   BinaryBasicBlock &BranchBB;
   MCInst &AdrInst;
+  MCInst *AdrAddInst;
   MCInst &LoadInst;
   MCInst &AddInst;
   MCInst &BranchInst;
@@ -434,8 +436,14 @@ static bool collectJTSiteInfo(BinaryContext &BC, const JumpTable &JT,
 
     BinaryBasicBlock *AdrBB = nullptr;
     MCInst *AdrInst = findInstructionAtAddress(*BF, Info.AdrAddress, &AdrBB);
-    if (!AdrInst || !AdrBB ||
-        findInstructionIterator(*AdrBB, AdrInst) == AdrBB->end()) {
+    if (!AdrInst || !AdrBB) {
+      warnJTInfoMismatch(BC, JT, Info, "adr instruction was not found", BF,
+                         findInstructionAtAddress(*BF, Info.AdrAddress),
+                         Info.AdrAddress);
+      return false;
+    }
+    auto AdrII = findInstructionIterator(*AdrBB, AdrInst);
+    if (AdrII == AdrBB->end()) {
       warnJTInfoMismatch(BC, JT, Info, "adr instruction was not found", BF,
                          findInstructionAtAddress(*BF, Info.AdrAddress),
                          Info.AdrAddress);
@@ -443,11 +451,45 @@ static bool collectJTSiteInfo(BinaryContext &BC, const JumpTable &JT,
     }
 
     const MCPhysReg BaseReg = AddInst->getOperand(1).getReg();
-    if (!BC.MIB->isADR(*AdrInst) || MCPlus::getNumPrimeOperands(*AdrInst) == 0 ||
-        !AdrInst->getOperand(0).isReg() ||
-        AdrInst->getOperand(0).getReg() != BaseReg) {
+    MCInst *AdrAddInst = nullptr;
+    if (BC.MIB->isADR(*AdrInst)) {
+      if (MCPlus::getNumPrimeOperands(*AdrInst) == 0 ||
+          !AdrInst->getOperand(0).isReg() ||
+          AdrInst->getOperand(0).getReg() != BaseReg) {
+        warnJTInfoMismatch(BC, JT, Info,
+                           "base materialization is not a supported "
+                           "jump-table base",
+                           BF, AdrInst, Info.AdrAddress);
+        return false;
+      }
+    } else if (BC.MIB->isADRP(*AdrInst)) {
+      auto AdrAddII = std::next(AdrII);
+      while (AdrAddII != AdrBB->end() && BC.MIB->isPseudo(*AdrAddII))
+        ++AdrAddII;
+      if (AdrAddII == AdrBB->end()) {
+        warnJTInfoMismatch(BC, JT, Info,
+                           "relaxed ADRP+ADD sequence was not found", BF,
+                           AdrInst, Info.AdrAddress);
+        return false;
+      }
+      AdrAddInst = &*AdrAddII;
+      if (!BC.MIB->isAddXri(*AdrAddInst) ||
+          !BC.MIB->matchAdrpAddPair(*AdrInst, *AdrAddInst) ||
+          MCPlus::getNumPrimeOperands(*AdrAddInst) < 3 ||
+          !AdrAddInst->getOperand(0).isReg() ||
+          !AdrAddInst->getOperand(1).isReg() ||
+          AdrAddInst->getOperand(0).getReg() != BaseReg ||
+          AdrAddInst->getOperand(1).getReg() != BaseReg) {
+        warnJTInfoMismatch(BC, JT, Info,
+                           "relaxed ADRP+ADD sequence is not a supported "
+                           "jump-table base",
+                           BF, AdrAddInst, Info.AdrAddress);
+        return false;
+      }
+    } else {
       warnJTInfoMismatch(BC, JT, Info,
-                         "adr instruction is not a supported jump-table base",
+                         "base materialization is not a supported jump-table "
+                         "base",
                          BF, AdrInst, Info.AdrAddress);
       return false;
     }
@@ -467,7 +509,8 @@ static bool collectJTSiteInfo(BinaryContext &BC, const JumpTable &JT,
     }
 
     Sites.emplace_back(AArch64JTSiteInfo{
-        Info, *BF, *BranchBB, *AdrInst, *LoadInst, *AddInst, *BranchInst,
+        Info, *BF, *BranchBB, *AdrInst, AdrAddInst, *LoadInst, *AddInst,
+        *BranchInst,
         std::move(ReferenceInsts)});
   }
 
@@ -479,7 +522,10 @@ static bool canRewriteSite(const BinaryContext &BC,
                            const AArch64JTSiteInfo &Site,
                            JumpTable::JumpTableType NewType,
                            bool NeedsBaseRewrite) {
-  assert(!NeedsBaseRewrite || BC.MIB->isADR(Site.AdrInst));
+  assert(!NeedsBaseRewrite ||
+         BC.MIB->isADR(Site.AdrInst) ||
+         (BC.MIB->isADRP(Site.AdrInst) && Site.AdrAddInst &&
+          BC.MIB->matchAdrpAddPair(Site.AdrInst, *Site.AdrAddInst)));
 
   if (MCPlus::getNumPrimeOperands(Site.LoadInst) < 5 ||
       MCPlus::getNumPrimeOperands(Site.AddInst) < 4)
@@ -495,6 +541,11 @@ static bool canRewriteSite(const BinaryContext &BC,
   const MCRegisterInfo &MRI = *BC.MRI;
   const bool IndexIs64 = isReg64(MRI, Site.LoadInst.getOperand(2).getReg());
   if (!getAArch64JTLoadOpcode(NewType, IndexIs64))
+    return false;
+
+  if (NeedsBaseRewrite && BC.MIB->isADRP(Site.AdrInst) &&
+      (!Site.AdrAddInst ||
+       !BC.MIB->matchAdrpAddPair(Site.AdrInst, *Site.AdrAddInst)))
     return false;
 
   switch (NewType) {
@@ -592,16 +643,35 @@ static bool rewriteSite(BinaryContext &BC, const JumpTable &JT,
 
   if (NeedsBaseRewrite) {
     assert(NewBaseSymbol && "base symbol required for base rewrite");
-    assert(BC.MIB->isADR(Site.AdrInst) &&
-           "expected jump table metadata ADR site to be an ADR");
-    if (!BC.MIB->replaceMemOperandDisp(Site.AdrInst, NewBaseSymbol,
-                                       BC.Ctx.get())) {
-      warnJTInfoMismatch(
-          BC, JT, Site.JTInfo,
-          Twine("promotion to ") + JumpTable::jumpTableTypeName(NewType) +
-              " failed: could not retarget the ADR base",
-          &Site.BF, &Site.AdrInst, Site.JTInfo.AdrAddress);
-      return false;
+    if (BC.MIB->isADR(Site.AdrInst)) {
+      if (!BC.MIB->replaceMemOperandDisp(Site.AdrInst, NewBaseSymbol,
+                                         BC.Ctx.get())) {
+        warnJTInfoMismatch(
+            BC, JT, Site.JTInfo,
+            Twine("promotion to ") + JumpTable::jumpTableTypeName(NewType) +
+                " failed: could not retarget the ADR base",
+            &Site.BF, &Site.AdrInst, Site.JTInfo.AdrAddress);
+        return false;
+      }
+    } else {
+      assert(BC.MIB->isADRP(Site.AdrInst) && Site.AdrAddInst &&
+             BC.MIB->matchAdrpAddPair(Site.AdrInst, *Site.AdrAddInst) &&
+             "expected jump table metadata base site to be ADR or relaxed "
+             "ADRP+ADD");
+      const int64_t Addend = BC.MIB->getTargetAddend(*Site.AdrAddInst);
+      if (!BC.MIB->setOperandToSymbolRef(Site.AdrInst, /*OpNum=*/1,
+                                         NewBaseSymbol, Addend, BC.Ctx.get(),
+                                         ELF::R_AARCH64_NONE) ||
+          !BC.MIB->setOperandToSymbolRef(*Site.AdrAddInst, /*OpNum=*/2,
+                                         NewBaseSymbol, Addend, BC.Ctx.get(),
+                                         ELF::R_AARCH64_ADD_ABS_LO12_NC)) {
+        warnJTInfoMismatch(
+            BC, JT, Site.JTInfo,
+            Twine("promotion to ") + JumpTable::jumpTableTypeName(NewType) +
+                " failed: could not retarget the relaxed ADRP+ADD base",
+            &Site.BF, &Site.AdrInst, Site.JTInfo.AdrAddress);
+        return false;
+      }
     }
   }
 

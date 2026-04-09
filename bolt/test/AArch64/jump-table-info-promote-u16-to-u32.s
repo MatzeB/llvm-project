@@ -1,5 +1,9 @@
 ## Check that an AArch64 format-3 (U16_X4) jump table is promoted to
 ## format-7 (U32_X4) when block reordering makes U16 entries overflow.
+##
+## Also force the metadata ADR site to relax into ADRP+ADD by making the
+## containing function exceed 1 MB, so promotion exercises the relaxed base
+## materialization path.
 
 # REQUIRES: system-linux
 
@@ -12,6 +16,8 @@
 # LOG: BOLT-INFO: promoted 1 AArch64 jump table(s)
 
 # DIS: <_start>:
+# DIS: adrp	x10,
+# DIS-NEXT: add	x10, x10,
 # DIS: ldr	w11, [x9, w8, uxtw #2]
 # DIS: add	x10, x10, w11, uxtw #2
 # DIS: br	x10
@@ -56,7 +62,7 @@ _start:
   b .Lbig
 
 .Lbig:
-  .rept 70000
+  .rept 300000
   add w12, w12, #1
   .endr
   mov w0, #99
