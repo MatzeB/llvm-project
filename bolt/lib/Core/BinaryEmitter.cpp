@@ -112,6 +112,110 @@ size_t padFunctionAfter(const BinaryFunction &Function) {
 namespace {
 using JumpTable = bolt::JumpTable;
 
+static std::optional<uint64_t>
+translateInputAddressToOutputOffset(const BinaryFunction &BF,
+                                    uint64_t InputAddress) {
+  if (InputAddress < BF.getAddress() ||
+      InputAddress > BF.getAddress() + BF.getSize())
+    return std::nullopt;
+
+  const uint64_t InputOffset = InputAddress - BF.getAddress();
+  const BinaryBasicBlock *BB = BF.getBasicBlockContainingOffset(InputOffset);
+  if (!BB) {
+    if (InputOffset == BF.getSize()) {
+      if (!BF.getLayout().block_empty())
+        return BF.getLayout().block_back()->getOutputEndAddress();
+      return uint64_t(0);
+    }
+    return std::nullopt;
+  }
+
+  return std::min(BB->getOutputStartAddress() + InputOffset - BB->getOffset(),
+                  BB->getOutputEndAddress());
+}
+
+static std::optional<uint64_t>
+resolveSymbolOutputOffset(const BinaryFunction &BF, const MCSymbol &Symbol) {
+  if (const BinaryBasicBlock *BB = BF.getBasicBlockForLabel(&Symbol))
+    return BB->getOutputStartAddress();
+
+  if (&Symbol == BF.getSymbol())
+    return uint64_t(0);
+
+  if (&Symbol == BF.getFunctionEndLabel()) {
+    if (!BF.getLayout().block_empty())
+      return BF.getLayout().block_back()->getOutputEndAddress();
+    return uint64_t(0);
+  }
+
+  for (const BinaryBasicBlock &BB : BF) {
+    if (BF.getSecondaryEntryPointSymbol(BB) == &Symbol)
+      return BB.getOutputStartAddress();
+  }
+
+  const BinaryContext &BC = BF.getBinaryContext();
+  if (ErrorOr<uint64_t> SymbolAddress = BC.getSymbolValue(Symbol))
+    return translateInputAddressToOutputOffset(BF, *SymbolAddress);
+
+  return std::nullopt;
+}
+
+static std::optional<FragmentNum>
+resolveSymbolOutputFragment(const BinaryFunction &BF, const MCSymbol &Symbol) {
+  if (const BinaryBasicBlock *BB = BF.getBasicBlockForLabel(&Symbol))
+    return BB->getFragmentNum();
+
+  if (&Symbol == BF.getSymbol())
+    return FragmentNum::main();
+
+  if (&Symbol == BF.getFunctionEndLabel()) {
+    if (!BF.getLayout().block_empty())
+      return BF.getLayout().block_back()->getFragmentNum();
+    return FragmentNum::main();
+  }
+
+  for (const BinaryBasicBlock &BB : BF) {
+    if (BF.getSecondaryEntryPointSymbol(BB) == &Symbol)
+      return BB.getFragmentNum();
+  }
+
+  const BinaryContext &BC = BF.getBinaryContext();
+  if (ErrorOr<uint64_t> SymbolAddress = BC.getSymbolValue(Symbol)) {
+    if (*SymbolAddress < BF.getAddress() ||
+        *SymbolAddress > BF.getAddress() + BF.getSize())
+      return std::nullopt;
+
+    const uint64_t InputOffset = *SymbolAddress - BF.getAddress();
+    if (const BinaryBasicBlock *BB = BF.getBasicBlockContainingOffset(InputOffset))
+      return BB->getFragmentNum();
+
+    if (InputOffset == BF.getSize() && !BF.getLayout().block_empty())
+      return BF.getLayout().block_back()->getFragmentNum();
+  }
+
+  return std::nullopt;
+}
+
+static std::optional<int64_t>
+resolveAArch64OutputDelta(const BinaryFunction &BF, const MCSymbol &Entry,
+                          const MCSymbol &Base) {
+  const std::optional<FragmentNum> EntryFragment =
+      resolveSymbolOutputFragment(BF, Entry);
+  const std::optional<FragmentNum> BaseFragment =
+      resolveSymbolOutputFragment(BF, Base);
+  if (!EntryFragment || !BaseFragment || *EntryFragment != *BaseFragment)
+    return std::nullopt;
+
+  const std::optional<uint64_t> EntryOffset =
+      resolveSymbolOutputOffset(BF, Entry);
+  const std::optional<uint64_t> BaseOffset =
+      resolveSymbolOutputOffset(BF, Base);
+  if (!EntryOffset || !BaseOffset)
+    return std::nullopt;
+
+  return static_cast<int64_t>(*EntryOffset) - static_cast<int64_t>(*BaseOffset);
+}
+
 class BinaryEmitter {
 private:
   BinaryEmitter(const BinaryEmitter &) = delete;
@@ -148,7 +252,8 @@ private:
   void emitJumpTables(const BinaryFunction &BF);
 
   /// Emit jump table data. Callee supplies sections for the data.
-  void emitJumpTable(const JumpTable &JT, MCSection *HotSection,
+  void emitJumpTable(const BinaryFunction &BF, const JumpTable &JT,
+                     MCSection *HotSection,
                      MCSection *ColdSection);
 
   void emitCFIInstruction(const MCCFIInstruction &Inst) const;
@@ -805,12 +910,13 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
         HotSection = BF.hasProfile() ? ReadOnlySection : ReadOnlyColdSection;
         ColdSection = HotSection;
       }
-      emitJumpTable(JT, HotSection, ColdSection);
+      emitJumpTable(BF, JT, HotSection, ColdSection);
     }
   }
 }
 
-void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
+void BinaryEmitter::emitJumpTable(const BinaryFunction &BF, const JumpTable &JT,
+                                  MCSection *HotSection,
                                   MCSection *ColdSection) {
   // Pre-process entries for aggressive splitting.
   // Each label represents a separate switch table and gets its own count
@@ -888,47 +994,83 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
     } else {
       assert(JT.AArch64BaseSymbol &&
              "AArch64 jump table format requires a valid base symbol");
-      MCContext &Ctx = Streamer.getContext();
-      const MCExpr *EntryExpr = MCSymbolRefExpr::create(Entry, Ctx);
-      const MCExpr *BaseExpr =
-          MCSymbolRefExpr::create(JT.AArch64BaseSymbol, Ctx);
-      const MCExpr *Delta = MCBinaryExpr::createSub(EntryExpr, BaseExpr, Ctx);
-      switch (Type) {
-      case JumpTable::JTT_AARCH64_I8_X4: {
-        const MCExpr *Shifted = MCBinaryExpr::createAShr(
-            Delta, MCConstantExpr::create(2, Ctx), Ctx);
-        Streamer.emitValue(Shifted, 1);
-        break;
-      }
-      case JumpTable::JTT_AARCH64_U8_X4: {
-        const MCExpr *Shifted = MCBinaryExpr::createLShr(
-            Delta, MCConstantExpr::create(2, Ctx), Ctx);
-        Streamer.emitValue(Shifted, 1);
-        break;
-      }
-      case JumpTable::JTT_AARCH64_I16_X4: {
-        const MCExpr *Shifted = MCBinaryExpr::createAShr(
-            Delta, MCConstantExpr::create(2, Ctx), Ctx);
-        Streamer.emitValue(Shifted, 2);
-        break;
-      }
-      case JumpTable::JTT_AARCH64_U16_X4: {
-        const MCExpr *Shifted = MCBinaryExpr::createLShr(
-            Delta, MCConstantExpr::create(2, Ctx), Ctx);
-        Streamer.emitValue(Shifted, 2);
-        break;
-      }
-      case JumpTable::JTT_AARCH64_U32_X4: {
-        const MCExpr *Shifted = MCBinaryExpr::createLShr(
-            Delta, MCConstantExpr::create(2, Ctx), Ctx);
-        Streamer.emitValue(Shifted, 4);
-        break;
-      }
-      case JumpTable::JTT_AARCH64_I32:
-        Streamer.emitValue(Delta, 4);
-        break;
-      default:
-        llvm_unreachable("unexpected jump table type");
+      // Emit a concrete post-layout delta when the base and target stay in the
+      // same output fragment. Shifted symbol differences are not always
+      // representable as relocatable MC expressions.
+      if (const std::optional<int64_t> DeltaValue =
+              resolveAArch64OutputDelta(BF, *Entry, *JT.AArch64BaseSymbol)) {
+        assert((Type == JumpTable::JTT_AARCH64_I32 ||
+                ((*DeltaValue & 0x3) == 0)) &&
+               "scaled AArch64 jump table entry is not 4-byte aligned");
+        switch (Type) {
+        case JumpTable::JTT_AARCH64_I8_X4:
+          Streamer.emitIntValue(static_cast<uint64_t>(*DeltaValue / 4), 1);
+          break;
+        case JumpTable::JTT_AARCH64_U8_X4:
+          assert(*DeltaValue >= 0 && "unsigned AArch64 jump table delta");
+          Streamer.emitIntValue(static_cast<uint64_t>(*DeltaValue) >> 2, 1);
+          break;
+        case JumpTable::JTT_AARCH64_I16_X4:
+          Streamer.emitIntValue(static_cast<uint64_t>(*DeltaValue / 4), 2);
+          break;
+        case JumpTable::JTT_AARCH64_U16_X4:
+          assert(*DeltaValue >= 0 && "unsigned AArch64 jump table delta");
+          Streamer.emitIntValue(static_cast<uint64_t>(*DeltaValue) >> 2, 2);
+          break;
+        case JumpTable::JTT_AARCH64_U32_X4:
+          assert(*DeltaValue >= 0 && "unsigned AArch64 jump table delta");
+          Streamer.emitIntValue(static_cast<uint64_t>(*DeltaValue) >> 2, 4);
+          break;
+        case JumpTable::JTT_AARCH64_I32:
+          Streamer.emitIntValue(static_cast<uint64_t>(*DeltaValue), 4);
+          break;
+        default:
+          llvm_unreachable("unexpected jump table type");
+        }
+      } else {
+        MCContext &Ctx = Streamer.getContext();
+        const MCExpr *EntryExpr = MCSymbolRefExpr::create(Entry, Ctx);
+        const MCExpr *BaseExpr =
+            MCSymbolRefExpr::create(JT.AArch64BaseSymbol, Ctx);
+        const MCExpr *Delta =
+            MCBinaryExpr::createSub(EntryExpr, BaseExpr, Ctx);
+        switch (Type) {
+        case JumpTable::JTT_AARCH64_I8_X4: {
+          const MCExpr *Shifted = MCBinaryExpr::createAShr(
+              Delta, MCConstantExpr::create(2, Ctx), Ctx);
+          Streamer.emitValue(Shifted, 1);
+          break;
+        }
+        case JumpTable::JTT_AARCH64_U8_X4: {
+          const MCExpr *Shifted = MCBinaryExpr::createLShr(
+              Delta, MCConstantExpr::create(2, Ctx), Ctx);
+          Streamer.emitValue(Shifted, 1);
+          break;
+        }
+        case JumpTable::JTT_AARCH64_I16_X4: {
+          const MCExpr *Shifted = MCBinaryExpr::createAShr(
+              Delta, MCConstantExpr::create(2, Ctx), Ctx);
+          Streamer.emitValue(Shifted, 2);
+          break;
+        }
+        case JumpTable::JTT_AARCH64_U16_X4: {
+          const MCExpr *Shifted = MCBinaryExpr::createLShr(
+              Delta, MCConstantExpr::create(2, Ctx), Ctx);
+          Streamer.emitValue(Shifted, 2);
+          break;
+        }
+        case JumpTable::JTT_AARCH64_U32_X4: {
+          const MCExpr *Shifted = MCBinaryExpr::createLShr(
+              Delta, MCConstantExpr::create(2, Ctx), Ctx);
+          Streamer.emitValue(Shifted, 4);
+          break;
+        }
+        case JumpTable::JTT_AARCH64_I32:
+          Streamer.emitValue(Delta, 4);
+          break;
+        default:
+          llvm_unreachable("unexpected jump table type");
+        }
       }
     }
     Offset += JT.EntrySize;
