@@ -91,6 +91,57 @@ resolveSymbolOutputOffset(const BinaryFunction &BF, const MCSymbol &Symbol) {
   return std::nullopt;
 }
 
+static std::optional<FragmentNum>
+resolveSymbolOutputFragment(const BinaryFunction &BF, const MCSymbol &Symbol) {
+  if (const BinaryBasicBlock *BB = BF.getBasicBlockForLabel(&Symbol))
+    return BB->getFragmentNum();
+
+  if (&Symbol == BF.getSymbol())
+    return FragmentNum::main();
+
+  if (&Symbol == BF.getFunctionEndLabel()) {
+    if (!BF.getLayout().block_empty())
+      return BF.getLayout().block_back()->getFragmentNum();
+    return FragmentNum::main();
+  }
+
+  for (const BinaryBasicBlock &BB : BF) {
+    if (BF.getSecondaryEntryPointSymbol(BB) == &Symbol)
+      return BB.getFragmentNum();
+  }
+
+  const BinaryContext &BC = BF.getBinaryContext();
+  if (ErrorOr<uint64_t> SymbolAddress = BC.getSymbolValue(Symbol)) {
+    if (*SymbolAddress < BF.getAddress() ||
+        *SymbolAddress > BF.getAddress() + BF.getSize())
+      return std::nullopt;
+
+    const uint64_t InputOffset = *SymbolAddress - BF.getAddress();
+    if (const BinaryBasicBlock *BB = BF.getBasicBlockContainingOffset(InputOffset))
+      return BB->getFragmentNum();
+
+    if (InputOffset == BF.getSize() && !BF.getLayout().block_empty())
+      return BF.getLayout().block_back()->getFragmentNum();
+  }
+
+  return std::nullopt;
+}
+
+static bool canEncodeAArch64RelativeInOutput(const BinaryFunction &BF,
+                                             const MCSymbol &BaseSymbol,
+                                             ArrayRef<MCSymbol *> Targets) {
+  std::optional<FragmentNum> BaseFragment =
+      resolveSymbolOutputFragment(BF, BaseSymbol);
+  if (!BaseFragment)
+    return false;
+
+  return llvm::all_of(Targets, [&](const MCSymbol *Target) {
+    std::optional<FragmentNum> TargetFragment =
+        resolveSymbolOutputFragment(BF, *Target);
+    return TargetFragment && *TargetFragment == *BaseFragment;
+  });
+}
+
 static bool fitsAArch64JTType(JumpTable::JumpTableType Type,
                               ArrayRef<int64_t> Deltas) {
   unsigned ScaledBits = 0;
@@ -811,7 +862,11 @@ Error AArch64JumpTablePromotion::runOnFunctions(BinaryContext &BC) {
       // If the current encoding still fits after layout, no legalization is
       // required. Only rewrite when the final layout made the original
       // encoding invalid.
-      if (fitsAArch64JTType(JT->Type, CurrentDeltas))
+      const bool CurrentTypeUsable =
+          JT->Type == JumpTable::JTT_NORMAL ||
+          canEncodeAArch64RelativeInOutput(*AnchorBF, *JT->AArch64BaseSymbol,
+                                           JT->Entries);
+      if (fitsAArch64JTType(JT->Type, CurrentDeltas) && CurrentTypeUsable)
         continue;
 
       SmallVector<AArch64JTSiteInfo, 4> Sites;
@@ -869,6 +924,13 @@ Error AArch64JumpTablePromotion::runOnFunctions(BinaryContext &BC) {
 
         const bool Fits = fitsAArch64JTType(CandidateType, Deltas);
         if (!Fits)
+          continue;
+
+        if (CandidateType != JumpTable::JTT_NORMAL &&
+            (!CandidateBaseSymbol ||
+             !canEncodeAArch64RelativeInOutput(*AnchorBF,
+                                               *CandidateBaseSymbol,
+                                               JT->Entries)))
           continue;
 
         if (!llvm::all_of(Sites, [&](const AArch64JTSiteInfo &Site) {
