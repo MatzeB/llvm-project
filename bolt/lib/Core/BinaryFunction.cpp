@@ -1657,6 +1657,15 @@ MCSymbol *BinaryFunction::registerBranch(uint64_t Src, uint64_t Dst) {
   return Target;
 }
 
+std::optional<uint64_t>
+BinaryFunction::getLabelOffset(const MCSymbol *Label) const {
+  auto It = llvm::find_if(
+      Labels, [&](const LabelsMapType::value_type &KV) { return KV.second == Label; });
+  if (It == Labels.end())
+    return std::nullopt;
+  return It->first;
+}
+
 void BinaryFunction::analyzeInstructionForFuncReference(const MCInst &Inst) {
   for (unsigned OpNum = 0; OpNum < MCPlus::getNumPrimeOperands(Inst); ++OpNum) {
     const MCSymbol *Symbol = BC.MIB->getTargetSymbol(Inst, OpNum);

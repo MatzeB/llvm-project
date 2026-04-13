@@ -44,13 +44,11 @@ static bool isReg64(const MCRegisterInfo &MRI, MCPhysReg Reg) {
 }
 
 static std::optional<uint64_t>
-translateInputAddressToOutputOffset(const BinaryFunction &BF,
-                                    uint64_t InputAddress) {
-  if (InputAddress < BF.getAddress() ||
-      InputAddress > BF.getAddress() + BF.getSize())
+translateInputOffsetToOutputOffset(const BinaryFunction &BF,
+                                   uint64_t InputOffset) {
+  if (InputOffset > BF.getSize())
     return std::nullopt;
 
-  const uint64_t InputOffset = InputAddress - BF.getAddress();
   const BinaryBasicBlock *BB = BF.getBasicBlockContainingOffset(InputOffset);
   if (!BB) {
     if (InputOffset == BF.getSize()) {
@@ -66,48 +64,22 @@ translateInputAddressToOutputOffset(const BinaryFunction &BF,
 }
 
 static std::optional<uint64_t>
-resolveSymbolOutputOffset(const BinaryFunction &BF, const MCSymbol &Symbol) {
-  if (const BinaryBasicBlock *BB = BF.getBasicBlockForLabel(&Symbol))
-    return BB->getOutputStartAddress();
-
+resolveSymbolInputOffset(const BinaryFunction &BF, const MCSymbol &Symbol) {
   if (&Symbol == BF.getSymbol())
     return uint64_t(0);
 
-  if (&Symbol == BF.getFunctionEndLabel()) {
-    if (!BF.getLayout().block_empty())
-      return BF.getLayout().block_back()->getOutputEndAddress();
-    return uint64_t(0);
-  }
+  if (&Symbol == BF.getFunctionEndLabel())
+    return BF.getSize();
 
-  for (const BinaryBasicBlock &BB : BF) {
-    if (BF.getSecondaryEntryPointSymbol(BB) == &Symbol)
-      return BB.getOutputStartAddress();
-  }
+  if (const std::optional<uint64_t> LabelOffset = BF.getLabelOffset(&Symbol))
+    return LabelOffset;
 
-  const BinaryContext &BC = BF.getBinaryContext();
-  if (ErrorOr<uint64_t> SymbolAddress = BC.getSymbolValue(Symbol))
-    return translateInputAddressToOutputOffset(BF, *SymbolAddress);
-
-  return std::nullopt;
-}
-
-static std::optional<FragmentNum>
-resolveSymbolOutputFragment(const BinaryFunction &BF, const MCSymbol &Symbol) {
   if (const BinaryBasicBlock *BB = BF.getBasicBlockForLabel(&Symbol))
-    return BB->getFragmentNum();
-
-  if (&Symbol == BF.getSymbol())
-    return FragmentNum::main();
-
-  if (&Symbol == BF.getFunctionEndLabel()) {
-    if (!BF.getLayout().block_empty())
-      return BF.getLayout().block_back()->getFragmentNum();
-    return FragmentNum::main();
-  }
+    return BB->getOffset();
 
   for (const BinaryBasicBlock &BB : BF) {
     if (BF.getSecondaryEntryPointSymbol(BB) == &Symbol)
-      return BB.getFragmentNum();
+      return BB.getOffset();
   }
 
   const BinaryContext &BC = BF.getBinaryContext();
@@ -115,16 +87,42 @@ resolveSymbolOutputFragment(const BinaryFunction &BF, const MCSymbol &Symbol) {
     if (*SymbolAddress < BF.getAddress() ||
         *SymbolAddress > BF.getAddress() + BF.getSize())
       return std::nullopt;
-
-    const uint64_t InputOffset = *SymbolAddress - BF.getAddress();
-    if (const BinaryBasicBlock *BB = BF.getBasicBlockContainingOffset(InputOffset))
-      return BB->getFragmentNum();
-
-    if (InputOffset == BF.getSize() && !BF.getLayout().block_empty())
-      return BF.getLayout().block_back()->getFragmentNum();
+    return *SymbolAddress - BF.getAddress();
   }
 
   return std::nullopt;
+}
+
+static std::optional<FragmentNum>
+resolveInputOffsetFragment(const BinaryFunction &BF, uint64_t InputOffset) {
+  if (InputOffset == BF.getSize()) {
+    if (!BF.getLayout().block_empty())
+      return BF.getLayout().block_back()->getFragmentNum();
+    return FragmentNum::main();
+  }
+
+  if (const BinaryBasicBlock *BB = BF.getBasicBlockContainingOffset(InputOffset))
+    return BB->getFragmentNum();
+
+  return std::nullopt;
+}
+
+static std::optional<uint64_t>
+resolveSymbolOutputOffset(const BinaryFunction &BF, const MCSymbol &Symbol) {
+  const std::optional<uint64_t> InputOffset =
+      resolveSymbolInputOffset(BF, Symbol);
+  if (!InputOffset)
+    return std::nullopt;
+  return translateInputOffsetToOutputOffset(BF, *InputOffset);
+}
+
+static std::optional<FragmentNum>
+resolveSymbolOutputFragment(const BinaryFunction &BF, const MCSymbol &Symbol) {
+  const std::optional<uint64_t> InputOffset =
+      resolveSymbolInputOffset(BF, Symbol);
+  if (!InputOffset)
+    return std::nullopt;
+  return resolveInputOffsetFragment(BF, *InputOffset);
 }
 
 static bool canEncodeAArch64RelativeInOutput(const BinaryFunction &BF,

@@ -997,6 +997,9 @@ public:
     return const_cast<BinaryFunction *>(this)->getBasicBlockAtOffset(Offset);
   }
 
+  /// Return the input offset of an internal function-local label, if known.
+  std::optional<uint64_t> getLabelOffset(const MCSymbol *Label) const;
+
   /// Retrieve the landing pad BB associated with invoke instruction \p Invoke
   /// that is in \p BB. Return nullptr if none exists
   BinaryBasicBlock *getLandingPadBBFor(const BinaryBasicBlock &BB,
