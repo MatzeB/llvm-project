@@ -121,12 +121,20 @@ translateInputOffsetToOutputOffset(const BinaryFunction &BF,
   const BinaryBasicBlock *BB = BF.getBasicBlockContainingOffset(InputOffset);
   if (!BB) {
     if (InputOffset == BF.getSize()) {
-      if (!BF.getLayout().block_empty())
-        return BF.getLayout().block_back()->getOutputEndAddress();
+      if (!BF.getLayout().block_empty()) {
+        const uint64_t OutputEndAddress =
+            BF.getLayout().block_back()->getOutputEndAddress();
+        if (!OutputEndAddress)
+          return std::nullopt;
+        return OutputEndAddress;
+      }
       return uint64_t(0);
     }
     return std::nullopt;
   }
+
+  if (!BB->getOutputEndAddress())
+    return std::nullopt;
 
   return std::min(BB->getOutputStartAddress() + InputOffset - BB->getOffset(),
                   BB->getOutputEndAddress());
@@ -247,10 +255,10 @@ private:
                            BinaryFunction *OnBehalfOf = nullptr);
 
   /// Emit jump tables for the function.
-  void emitJumpTables(const BinaryFunction &BF);
+  void emitJumpTables(BinaryFunction &BF);
 
   /// Emit jump table data. Callee supplies sections for the data.
-  void emitJumpTable(const BinaryFunction &BF, const JumpTable &JT,
+  void emitJumpTable(BinaryFunction &BF, const JumpTable &JT,
                      MCSection *HotSection,
                      MCSection *ColdSection);
 
@@ -879,13 +887,34 @@ void BinaryEmitter::emitLineInfoEnd(const BinaryFunction &BF,
                     Streamer.getCurrentSectionOnly());
 }
 
-void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
+static bool needsOutputLayoutForAArch64JumpTables(const BinaryFunction &BF) {
+  return llvm::any_of(llvm::make_second_range(BF.jumpTables()),
+                      [](const JumpTable *JT) {
+                        return JT && JumpTable::isAArch64Type(JT->Type);
+                      });
+}
+
+static bool hasResolvedOutputLayout(const BinaryFunction &BF) {
+  for (const FunctionFragment &FF : BF.getLayout().fragments()) {
+    if (FF.empty())
+      continue;
+    if (!FF.front()->getOutputEndAddress())
+      return false;
+  }
+  return true;
+}
+
+void BinaryEmitter::emitJumpTables(BinaryFunction &BF) {
   MCSection *ReadOnlySection = BC.MOFI->getReadOnlySection();
   MCSection *ReadOnlyColdSection = BC.MOFI->getContext().getELFSection(
       ".rodata.cold", ELF::SHT_PROGBITS, ELF::SHF_ALLOC);
 
   if (!BF.hasJumpTables())
     return;
+
+  if (BF.isSimple() && needsOutputLayoutForAArch64JumpTables(BF) &&
+      !hasResolvedOutputLayout(BF))
+    BC.calculateEmittedSize(BF, /*FixBranches=*/false);
 
   if (opts::PrintJumpTables)
     BC.outs() << "BOLT-INFO: jump tables for function " << BF << ":\n";
@@ -913,7 +942,7 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
   }
 }
 
-void BinaryEmitter::emitJumpTable(const BinaryFunction &BF, const JumpTable &JT,
+void BinaryEmitter::emitJumpTable(BinaryFunction &BF, const JumpTable &JT,
                                   MCSection *HotSection,
                                   MCSection *ColdSection) {
   // Pre-process entries for aggressive splitting.
