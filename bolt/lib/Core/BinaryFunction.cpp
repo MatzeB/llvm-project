@@ -897,7 +897,7 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
     assert(JT && "jump table expected");
     JT->EntriesAsAddress = std::move(Entries);
     JT->AArch64BaseSymbol =
-        BC.getOrCreateGlobalSymbol(JTInfo.BaseAddress, "BOLTJTBASEat");
+        getOrCreateAddressLabel(JTInfo.BaseAddress, "BOLTJTBASE");
 
     BC.MIB->setJumpTable(Instruction, JTInfo.JTAddress,
                          BC.MIB->getNoRegister());
@@ -1132,6 +1132,27 @@ MCSymbol *BinaryFunction::getOrCreateLocalLabel(uint64_t Address) {
   Labels[Offset] = Label;
 
   return Label;
+}
+
+MCSymbol *BinaryFunction::getOrCreateAddressLabel(uint64_t Address,
+                                                 const Twine &Name) {
+  assert((containsAddress(Address) || Address == getAddress() + getSize()) &&
+         "address should belong to the function");
+
+  if (Address == getAddress())
+    return getSymbol();
+
+  if (Address == getAddress() + getSize())
+    return getFunctionEndLabel();
+
+  const uint64_t Offset = Address - getAddress();
+  if (auto LI = Labels.find(Offset); LI != Labels.end())
+    return LI->second;
+
+  if (MCInst *Inst = getInstructionAtOffset(Offset))
+    return BC.MIB->getOrCreateInstLabel(*Inst, Name, BC.Ctx.get());
+
+  return getOrCreateLocalLabel(Address);
 }
 
 ErrorOr<ArrayRef<uint8_t>> BinaryFunction::getData() const {
@@ -1661,9 +1682,34 @@ std::optional<uint64_t>
 BinaryFunction::getLabelOffset(const MCSymbol *Label) const {
   auto It = llvm::find_if(
       Labels, [&](const LabelsMapType::value_type &KV) { return KV.second == Label; });
-  if (It == Labels.end())
-    return std::nullopt;
-  return It->first;
+  if (It != Labels.end())
+    return It->first;
+
+  auto MatchInstLabel = [&](const MCInst &Inst,
+                            uint64_t FallbackOffset) -> std::optional<uint64_t> {
+    if (BC.MIB->getInstLabel(Inst) != Label)
+      return std::nullopt;
+    if (std::optional<uint32_t> Offset = BC.MIB->getOffset(Inst))
+      return *Offset;
+    return FallbackOffset;
+  };
+
+  if (hasCFG()) {
+    for (const BinaryBasicBlock *BB : BasicBlocks) {
+      for (const MCInst &Inst : *BB) {
+        if (std::optional<uint64_t> Offset =
+                MatchInstLabel(Inst, BB->getOffset()))
+          return Offset;
+      }
+    }
+  } else {
+    for (const auto &[Offset, Inst] : Instructions) {
+      if (std::optional<uint64_t> Match = MatchInstLabel(Inst, Offset))
+        return Match;
+    }
+  }
+
+  return std::nullopt;
 }
 
 void BinaryFunction::analyzeInstructionForFuncReference(const MCInst &Inst) {

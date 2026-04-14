@@ -643,6 +643,10 @@ private:
   ///       a global symbol that corresponds to an entry at this address.
   MCSymbol *getOrCreateLocalLabel(uint64_t Address);
 
+  /// Return a symbol for a precise address in the function, preferring an
+  /// emitted instruction label when the address names a specific instruction.
+  MCSymbol *getOrCreateAddressLabel(uint64_t Address, const Twine &Name = "");
+
   /// Register an data entry at a given \p Offset into the function.
   void markDataAtOffset(uint64_t Offset) {
     if (!Islands)
